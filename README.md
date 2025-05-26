@@ -1,4 +1,4 @@
-______________________________________________________________________
+---
 
 <div align="center">
 
@@ -6,32 +6,33 @@ ______________________________________________________________________
 
 This is an adaptation of the VIFT implementation for the **AriaEveryday dataset**, optimized for training and inference on NVIDIA H100 GPUs.
 
-> **Original Paper**: Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry  
-> Yunus Bilge Kurt, Ahmet Akman, Aydın Alatan  
-> *ECCV 2024 VCAD Workshop*  
+> **Original Paper**: Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry
+> Yunus Bilge Kurt, Ahmet Akman, Aydın Alatan
+> *ECCV 2024 VCAD Workshop*
 > [[Paper](https://arxiv.org/abs/2409.08769)] [[Original Repo](https://github.com/ybkurt/VIFT)]
 
-<a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white"></a>
-<a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-792ee5?logo=pytorchlightning&logoColor=white"></a>
-<a href="https://hydra.cc/"><img alt="Config: Hydra" src="https://img.shields.io/badge/Config-Hydra-89b8cd"></a>
+`<a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white">``</a>`
+`<a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-792ee5?logo=pytorchlightning&logoColor=white">``</a>`
+`<a href="https://hydra.cc/"><img alt="Config: Hydra" src="https://img.shields.io/badge/Config-Hydra-89b8cd">``</a>`
 
 ## AriaEveryday Dataset Integration
 
-This repository adapts VIFT for the **AriaEveryday dataset** - a large-scale egocentric dataset with 143 sequences of real-world indoor activities recorded with Project Aria glasses. 
+This repository adapts VIFT for the **AriaEveryday dataset** - a large-scale egocentric dataset with 143 sequences of real-world indoor activities recorded with Project Aria glasses.
 
 ### Key Features for AriaEveryday:
+
 - **Real-world data**: 143 sequences of everyday activities (cooking, cleaning, social interactions)
-- **Multi-modal sensors**: RGB cameras + IMU + SLAM ground truth trajectories  
+- **Multi-modal sensors**: RGB cameras + IMU + SLAM ground truth trajectories
 - **H100 optimization**: Leverages PyTorch 2.3+ with TF32, torch.compile, and channels_last
 - **Robust processing**: Handles corrupted video files and extracts MPS SLAM poses as ground truth
 - **Scalable training**: Train on 100 sequences, test on 43 held-out sequences
 
 ### Architecture Adaptations:
+
 - **AriaEveryday data loader**: Custom dataset class for Project Aria sensor data
-- **SLAM trajectory ground truth**: Uses MPS closed-loop SLAM poses as training targets  
+- **SLAM trajectory ground truth**: Uses MPS closed-loop SLAM poses as training targets
 - **Video processing pipeline**: Extracts RGB frames from Project Aria recordings
 - **IMU synchronization**: Aligns 1kHz IMU data with 30Hz video frames
-
 
 ## Installation for AriaEveryday
 
@@ -70,6 +71,7 @@ mkdir -p data/aria_everyday
 ```
 
 Expected directory structure:
+
 ```
 data/aria_everyday/
 ├── loc1_script1_seq1_rec1/
@@ -87,20 +89,21 @@ data/aria_everyday/
 ```bash
 # Process first 10 sequences for training
 python scripts/process_aria_to_vift.py \
-  --input-dir data/aria_everyday_subset \
+  --input-dir data/aria_everyday \
   --output-dir data/aria_real_train \
   --start-index 0 \
   --max-sequences 10
 
 # Process remaining 11 sequences for testing/inference
 python scripts/process_aria_to_vift.py \
-  --input-dir data/aria_everyday_subset \
+  --input-dir data/aria_everyday \
   --output-dir data/aria_real_test \
   --start-index 10 \
   --max-sequences 11
 ```
 
 This extracts:
+
 - **SLAM poses**: MPS closed-loop trajectories as ground truth
 - **Visual data**: RGB frames from Project Aria cameras
 - **IMU data**: Synchronized inertial measurements
@@ -154,7 +157,7 @@ python src/test.py \
 This adaptation includes several H100-specific optimizations:
 
 - **TF32 precision**: Enabled by default for faster training
-- **torch.compile**: Reduces overhead with graph optimization  
+- **torch.compile**: Reduces overhead with graph optimization
 - **channels_last memory**: Improves tensor core utilization
 - **Mixed precision (FP16)**: Leverages H100's tensor cores
 - **Larger batch sizes**: Take advantage of 80GB HBM3 memory
@@ -168,17 +171,18 @@ This adaptation includes several H100-specific optimizations:
 
 ## AriaEveryday vs KITTI
 
-| Aspect | KITTI | AriaEveryday |
-|--------|-------|--------------|
-| Environment | Outdoor driving | Indoor activities |
-| Camera setup | Car-mounted stereo | Egocentric AR glasses |
-| Ground truth | GPS/LiDAR | MPS SLAM |
-| Sequences | 22 sequences | 143 sequences |
-| Activities | Driving | Cooking, cleaning, social |
+| Aspect       | KITTI              | AriaEveryday              |
+| ------------ | ------------------ | ------------------------- |
+| Environment  | Outdoor driving    | Indoor activities         |
+| Camera setup | Car-mounted stereo | Egocentric AR glasses     |
+| Ground truth | GPS/LiDAR          | MPS SLAM                  |
+| Sequences    | 22 sequences       | 143 sequences             |
+| Activities   | Driving            | Cooking, cleaning, social |
 
 ## Acknowledgments
 
 This project builds upon:
+
 - **Original VIFT**: [Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry](https://github.com/ybkurt/VIFT)
 - **AriaEveryday Dataset**: [Project Aria](https://www.projectaria.com/datasets/)
 - **Visual-Selective-VIO**: For pretrained encoders
