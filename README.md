@@ -2,131 +2,199 @@ ______________________________________________________________________
 
 <div align="center">
 
-# Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry (ECCV 2024 VCAD Workshop)
+# VIFT: A Video Is Worth a Thousand Images for Visual Inertial Odometry - AriaEveryday Edition
+
+This is an adaptation of the VIFT implementation for the **AriaEveryday dataset**, optimized for training and inference on NVIDIA H100 GPUs.
+
+> **Original Paper**: Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry  
+> Yunus Bilge Kurt, Ahmet Akman, Aydın Alatan  
+> *ECCV 2024 VCAD Workshop*  
+> [[Paper](https://arxiv.org/abs/2409.08769)] [[Original Repo](https://github.com/ybkurt/VIFT)]
 
 <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white"></a>
 <a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-792ee5?logo=pytorchlightning&logoColor=white"></a>
 <a href="https://hydra.cc/"><img alt="Config: Hydra" src="https://img.shields.io/badge/Config-Hydra-89b8cd"></a>
-<a href="https://github.com/ashleve/lightning-hydra-template"><img alt="Template" src="https://img.shields.io/badge/-Lightning--Hydra--Template-017F2F?style=flat&logo=github&labelColor=gray"></a><br>
-[![Paper](http://img.shields.io/badge/paper-arxiv.2409.08769-B31B1B.svg)](https://arxiv.org/abs/2409.08769)
 
-</div>
+## AriaEveryday Dataset Integration
 
-## Description
+This repository adapts VIFT for the **AriaEveryday dataset** - a large-scale egocentric dataset with 143 sequences of real-world indoor activities recorded with Project Aria glasses. 
 
-This reporsitory contains codes for paper Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry.
+### Key Features for AriaEveryday:
+- **Real-world data**: 143 sequences of everyday activities (cooking, cleaning, social interactions)
+- **Multi-modal sensors**: RGB cameras + IMU + SLAM ground truth trajectories  
+- **H100 optimization**: Leverages PyTorch 2.3+ with TF32, torch.compile, and channels_last
+- **Robust processing**: Handles corrupted video files and extracts MPS SLAM poses as ground truth
+- **Scalable training**: Train on 100 sequences, test on 43 held-out sequences
+
+### Architecture Adaptations:
+- **AriaEveryday data loader**: Custom dataset class for Project Aria sensor data
+- **SLAM trajectory ground truth**: Uses MPS closed-loop SLAM poses as training targets  
+- **Video processing pipeline**: Extracts RGB frames from Project Aria recordings
+- **IMU synchronization**: Aligns 1kHz IMU data with 30Hz video frames
 
 
-## Installation
+## Installation for AriaEveryday
 
-Make sure you installed correct PyTorch version for your specific development environment.
-Other requirements can be installed via `pip`.
+Make sure you have NVIDIA H100 GPU access and CUDA 12.1+ installed.
 
-#### Pip
+#### Environment Setup
 
 ```bash
-# clone project
-git clone https://github.com/ybkurt/VIFT
-cd VIFT
+# Clone this AriaEveryday adaptation
+git clone https://github.com/yfzzzyyls/VIFT_AEA
+cd VIFT_AEA
 
-# [OPTIONAL] create conda environment
-conda create -n vift python=3.9
-conda activate vift
+# [RECOMMENDED] Create conda environment
+conda create -n vift_aria python=3.11
+conda activate vift_aria
 
-# install pytorch according to instructions
-# https://pytorch.org/get-started/
+# Install PyTorch for H100 (CUDA 12.1+)
+pip install torch>=2.3.0 torchvision>=0.18.0 --index-url https://download.pytorch.org/whl/cu121
 
-# install requirements
+# Install AriaEveryday-specific requirements
 pip install -r requirements.txt
 ```
 
-## Downloading KITTI Dataset
+## Downloading AriaEveryday Dataset
+
+The AriaEveryday dataset contains 143 sequences of real-world activities recorded with Project Aria glasses.
 
 ```bash
-cd data
-sh prepare_data.sh
+# Download AriaEveryday dataset (adjust path as needed)
+mkdir -p data/aria_everyday
+# Follow Project Aria instructions to download the dataset
+# https://www.projectaria.com/datasets/
 ```
 
-This script will put the KITTI dataset under `data/kitti_data` folder. 
-You need to use `configs/data/kitti_vio.yaml` for dataloading.
+Expected directory structure:
+```
+data/aria_everyday/
+├── loc1_script1_seq1_rec1/
+│   ├── AriaEverydayActivities_1.0.0_loc1_script1_seq1_rec1_preview_rgb.mp4
+│   ├── AriaEverydayActivities_1.0.0_loc1_script1_seq1_rec1_mps_slam_trajectories.zip
+│   └── ...
+├── loc1_script1_seq3_rec1/
+└── ...
+```
 
-You need to use `configs/model/vio.yaml` to train models with KITTI dataset.
-You can change the `net` field in config to target your `nn.Module` object. The requirements are as follows for proper functionality:
+## AriaEveryday Processing Pipeline
 
-- See `src/models/components/vio_simple_dense_net.py` for an example `nn.Module` object consisting of multiple linear layers and ReLU activations.
-
-## Downloading Pretrained Image and IMU Encoders
-
-We use pretrained image and IMU encoders of [Visual-Selective-VIO](https://github.com/mingyuyng/Visual-Selective-VIO) model. Download the model weights from repository and put them under the `pretrained_models` directory.
-
-
-### Caching Latents for KITTI Dataset  
-
-We use pretrained visual and inertial encoders from Visual_Selective_VIO to save the latent vectors for KITTI dataset.
-
+### Step 1: Extract SLAM Trajectories and Process Sensor Data
 
 ```bash
-cd data
-python latent_caching.py
-python latent_val_caching.py
+# Process first 10 sequences for training
+python scripts/process_aria_real.py \
+  --start-index 0 \
+  --max-sequences 10 \
+  --output-dir data/aria_real_train
+
+# Process next 5 sequences for testing  
+python scripts/process_aria_real.py \
+  --start-index 10 \
+  --max-sequences 5 \
+  --output-dir data/aria_real_test
 ```
 
-This script will put the latent training KITTI dataset under `data/kitti_latent_data` folder. 
-You need to use `configs/data/kitti_vio.yaml` for dataloading.
+This extracts:
+- **SLAM poses**: MPS closed-loop trajectories as ground truth
+- **Visual data**: RGB frames from Project Aria cameras
+- **IMU data**: Synchronized inertial measurements
 
-You need to use `configs/model/vio.yaml` to train models with KITTI dataset.
-You can change the `net` field in config to target your `nn.Module` object.
+### Step 2: Cache Latent Features
 
-- See `src/models/components/vio_simple_dense_net.py` for an example `nn.Module` object consisting of multiple linear layers and ReLU activations.
-
-## Replicating Experiments in Paper
-
-After saving latents for KITTI dataset, you can run following command to run the experiments in the paper.
+Generate latent features using pretrained Visual-Selective-VIO encoders:
 
 ```bash
-sh scripts/schedule_paper.sh
+# Download pretrained encoders (same as original VIFT)
+mkdir -p pretrained_models
+# Download from Visual-Selective-VIO repository
+
+# Cache latents for training data
+python data/latent_caching_aria.py \
+  --input-dir data/aria_real_train \
+  --output-dir data/aria_latent_train
+
+# Cache latents for test data  
+python data/latent_caching_aria.py \
+  --input-dir data/aria_real_test \
+  --output-dir data/aria_latent_test
 ```
 
-## How to run
-
-Train model with default configuration
+### Step 3: Train VIFT on AriaEveryday
 
 ```bash
-# train on GPU
-python src/train.py trainer=gpu
+# Train with H100 optimizations
+python src/train.py \
+  data=aria_vio \
+  trainer=gpu \
+  trainer.devices=1 \
+  trainer.max_epochs=50 \
+  trainer.precision=16 \
+  model.optimizer.lr=2e-4 \
+  data.batch_size=32
 ```
 
-Train model with chosen experiment configuration from [configs/experiment/](configs/experiment/)
+### Step 4: Inference and Evaluation
 
 ```bash
-python src/train.py experiment=experiment_name.yaml trainer=gpu
+# Run inference on test sequences
+python src/test.py \
+  data=aria_vio \
+  ckpt=lightning_logs/version_X/checkpoints/best.ckpt \
+  logger=csv
 ```
 
-You can override any parameter from command line like this
+## H100 Optimization Features
 
-```bash
-python src/train.py trainer.max_epochs=20 data.batch_size=64
-```
+This adaptation includes several H100-specific optimizations:
+
+- **TF32 precision**: Enabled by default for faster training
+- **torch.compile**: Reduces overhead with graph optimization  
+- **channels_last memory**: Improves tensor core utilization
+- **Mixed precision (FP16)**: Leverages H100's tensor cores
+- **Larger batch sizes**: Take advantage of 80GB HBM3 memory
+
+## Performance Expectations
+
+- **Dataset size**: 143 sequences (~250k frames total)
+- **Training split**: 100 sequences for training, 43 for testing
+- **Training time**: ~6 hours on H100 for 50 epochs
+- **Memory usage**: ~40-60GB with optimized batch sizes
+
+## AriaEveryday vs KITTI
+
+| Aspect | KITTI | AriaEveryday |
+|--------|-------|--------------|
+| Environment | Outdoor driving | Indoor activities |
+| Camera setup | Car-mounted stereo | Egocentric AR glasses |
+| Ground truth | GPS/LiDAR | MPS SLAM |
+| Sequences | 22 sequences | 143 sequences |
+| Activities | Driving | Cooking, cleaning, social |
 
 ## Acknowledgments
-This project makes use of code from the following open-source projects:
 
-- [RPMG](https://github.com/JYChen18/RPMG): License: [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
-- [Visual Selective VIO](https://github.com/mingyuyng/Visual-Selective-VIO)
+This project builds upon:
+- **Original VIFT**: [Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry](https://github.com/ybkurt/VIFT)
+- **AriaEveryday Dataset**: [Project Aria](https://www.projectaria.com/datasets/)
+- **Visual-Selective-VIO**: For pretrained encoders
+- **Lightning-Hydra-Template**: For project structure
 
+## Citation
 
+If you use this AriaEveryday adaptation, please cite both the original VIFT paper and acknowledge the AriaEveryday dataset:
 
-We are grateful to the authors and contributors of these projects for their valuable work.
-
-## CITATION
-
-If you find our work useful in your research, please consider citing:
-
-```
+```bibtex
 @article{kurt2024vift,
   title={Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry},
   author={Kurt, Yunus Bilge and Akman, Ahmet and Alatan, Ayd{\i}n},
   journal={arXiv preprint arXiv:2409.08769},
   year={2024}
+}
+
+@article{pan2023aria,
+  title={Aria Everyday Activities Dataset},
+  author={Pan, Xiaqing and others},
+  journal={arXiv preprint arXiv:2309.16045},
+  year={2023}
 }
 ```
