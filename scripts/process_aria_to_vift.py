@@ -429,11 +429,11 @@ class AriaToVIFTProcessor:
 
 def main():
     parser = argparse.ArgumentParser(description='Process AriaEveryday dataset for VIFT training')
-    parser.add_argument('--aria-data-dir', type=str, 
-                      default='/vast/fy2243/VIFT_AEA/data/aria_everyday',
+    parser.add_argument('--input-dir', type=str, 
+                      default='data/aria_everyday_subset',
                       help='Path to AriaEveryday dataset')
     parser.add_argument('--output-dir', type=str,
-                      default='/vast/fy2243/VIFT_AEA/data/aria_processed',
+                      default='data/aria_real_train',
                       help='Output directory for processed data')
     parser.add_argument('--start-index', type=int, default=0,
                       help='Starting sequence index')
@@ -446,7 +446,7 @@ def main():
     
     # Initialize processor
     processor = AriaToVIFTProcessor(
-        aria_data_dir=args.aria_data_dir,
+        aria_data_dir=args.input_dir,
         output_dir=args.output_dir,
         max_frames=args.max_frames
     )

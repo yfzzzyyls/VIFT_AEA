@@ -60,9 +60,12 @@ pip install -r requirements.txt
 The AriaEveryday dataset contains 143 sequences of real-world activities recorded with Project Aria glasses.
 
 ```bash
-# Download AriaEveryday dataset (adjust path as needed)
+# Download first 10 sequences to get started quickly
+python download_aria_with_json.py AriaEverydayActivities_download_urls.json --output-dir data/aria_everyday_subset
+
+# Alternative: Download all sequences (adjust path as needed)
 mkdir -p data/aria_everyday
-# Follow Project Aria instructions to download the dataset
+# Follow Project Aria instructions to download the full dataset
 # https://www.projectaria.com/datasets/
 ```
 
@@ -83,16 +86,18 @@ data/aria_everyday/
 
 ```bash
 # Process first 10 sequences for training
-python scripts/process_aria_real.py \
+python scripts/process_aria_to_vift.py \
+  --input-dir data/aria_everyday_subset \
+  --output-dir data/aria_real_train \
   --start-index 0 \
-  --max-sequences 10 \
-  --output-dir data/aria_real_train
+  --max-sequences 10
 
-# Process next 5 sequences for testing  
-python scripts/process_aria_real.py \
+# Process remaining 11 sequences for testing/inference
+python scripts/process_aria_to_vift.py \
+  --input-dir data/aria_everyday_subset \
+  --output-dir data/aria_real_test \
   --start-index 10 \
-  --max-sequences 5 \
-  --output-dir data/aria_real_test
+  --max-sequences 11
 ```
 
 This extracts:
