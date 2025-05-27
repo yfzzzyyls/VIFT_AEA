@@ -118,15 +118,20 @@ python scripts/process_aria_to_vift.py \
 **Trainig dataset**
 
 ```
-cd/Users/fengzeyu/Desktop/research/ar-vr/VIFT_AEA && source~/.venv/bin/activate && pythondata/latent_caching_aria.py\--data_dirdata/aria_real_train\--save_diraria_latent_data/train_13\--modetrain\--devicemps
+python data/latent_caching_aria.py --data_dir data/aria_real_train --save_dir aria_latent_data/train_13 --mode train --device mps
 ```
 
 **Validation dataset**
 
 ```
-cd/Users/fengzeyu/Desktop/research/ar-vr/VIFT_AEA && source~/.venv/bin/activate && pythondata/latent_caching_aria.py\--data_dirdata/aria_real_test\--save_diraria_latent_data/val_3\--modeval\--val_sequences"20,22,24"\--devicemps
+python data/latent_caching_aria.py --data_dir data/aria_real_test --save_dir aria_latent_data/val_3 --mode val --val_sequences"20,22,24" --device mps
 ```
 
+**Test/Inference dataset**
+
+```
+python data/latent_caching_aria.py --data_dir data/aria_real_test --save_dir aria_latent_data/test_3 --mode test
+```
 
 ### 3. Training
 
@@ -140,13 +145,7 @@ Train the model on your dataset:
 
 ```bash
 # Train on AriaEveryday
-python src/train.py --config-name=train_aria
-
-# Or with custom hyperparameters
-python src/train.py --config-name=train_aria \
-  trainer.max_epochs=100 \
-  data.batch_size=8 \
-  model.learning_rate=1e-4
+python src/train.py data=aria_latent model=aria_vio
 ```
 
 ### 4. Evaluation
@@ -154,7 +153,7 @@ python src/train.py --config-name=train_aria \
 Evaluate the trained model:
 
 ```bash
-python src/eval.py ckpt_path=path/to/checkpoint.ckpt
+python scripts/detailed_evaluation.py --checkpoint logs/train/runs/2025-05-27_11-26-57/checkpoints/epoch_000.ckpt --test_data aria_latent_data/test_3 --device mps
 ```
 
 ## Platform-Specific Features

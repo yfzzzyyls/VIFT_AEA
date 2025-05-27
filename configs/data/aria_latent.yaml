@@ -22,4 +22,4 @@ val_loader:
 test_loader:
   _target_: src.data.components.latent_kitti_dataset.LatentVectorDataset
   _partial_: false
-  root_dir: aria_latent_data/val_3
+  root_dir: aria_latent_data/test_3

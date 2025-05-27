@@ -120,10 +120,10 @@ def main():
     parser.add_argument("--data_dir", type=str, default="data/aria_real_train")
     parser.add_argument("--save_dir", type=str, default="aria_latent_data/train")
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--mode", type=str, choices=["train", "val"], default="train",
-                       help="Processing mode: train (all sequences) or val (specific sequences)")
+    parser.add_argument("--mode", type=str, choices=["train", "val", "test"], default="train",
+                       help="Processing mode: train (all sequences), val (specific sequences), or test (test sequences)")
     parser.add_argument("--val_sequences", type=str, default="20,22,24",
-                       help="Comma-separated validation sequence IDs (only used in val mode)")
+                       help="Comma-separated validation/test sequence IDs (only used in val/test mode)")
     
     args = parser.parse_args()
     
@@ -159,8 +159,8 @@ def main():
                 sequence_dirs.append(seq_dir)
                 print(f"✅ Found training sequence: {seq_dir.name}")
         print(f"📁 Found {len(sequence_dirs)} training sequences")
-    else:  # val mode
-        # Process only specified validation sequences
+    else:  # val or test mode
+        # Process only specified validation/test sequences
         val_seq_ids = [x.strip() for x in args.val_sequences.split(',')]
         sequence_dirs = []
         for seq_id in val_seq_ids:
@@ -170,13 +170,13 @@ def main():
             
             if seq_dir_2digit.exists():
                 sequence_dirs.append(seq_dir_2digit)
-                print(f"✅ Found validation sequence: {seq_id}")
+                print(f"✅ Found {args.mode} sequence: {seq_id}")
             elif seq_dir_3digit and seq_dir_3digit.exists():
                 sequence_dirs.append(seq_dir_3digit)
-                print(f"✅ Found validation sequence: {seq_dir_3digit.name}")
+                print(f"✅ Found {args.mode} sequence: {seq_dir_3digit.name}")
             else:
-                print(f"⚠️ Validation sequence {seq_id} not found")
-        print(f"📁 Found {len(sequence_dirs)} validation sequences: {[d.name for d in sequence_dirs]}")
+                print(f"⚠️ {args.mode.capitalize()} sequence {seq_id} not found")
+        print(f"📁 Found {len(sequence_dirs)} {args.mode} sequences: {[d.name for d in sequence_dirs]}")
     
     if not sequence_dirs:
         print(f"❌ No sequences found")
