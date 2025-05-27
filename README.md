@@ -153,7 +153,11 @@ python src/train.py data=aria_latent model=aria_vio
 Evaluate the trained model:
 
 ```bash
-python scripts/detailed_evaluation.py --checkpoint logs/train/runs/2025-05-27_11-26-57/checkpoints/epoch_000.ckpt --test_data aria_latent_data/test_3 --device mps
+python scripts/evaluate_unbiased.py \
+    --checkpoint logs/train/runs/2025-05-27_11-26-57/checkpoints/epoch_000.ckpt \
+    --test_data aria_latent_data/test_3 \
+    --batch_size 32 \
+    --device mps
 ```
 
 ## Platform-Specific Features
