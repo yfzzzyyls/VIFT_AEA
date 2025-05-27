@@ -1,6 +1,9 @@
 # Ignore everything in data/ folder
-data/
-
+data/aria_everyday/
+data/aria_real_train/
+data/aria_real_test/
+data/kitti_data/
+*.DS_Store
 # Python cache files
 __pycache__/
 *.py[cod]
@@ -29,10 +32,6 @@ outputs/
 *.ckpt
 *.pth
 *.pt
-
-# Data directories
-aria_latent_data/
-data/aria_real_*/
 
 # IDE and editor files
 .vscode/

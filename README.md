@@ -83,7 +83,7 @@ This script will:
 
 ### 2. Dataset Preparation
 
-#### KITTI Dataset (for baseline comparison)
+#### KITTI Dataset (Optional: for baseline comparison)
 
 ```bash
 cd data
@@ -95,14 +95,7 @@ chmod +x data_prep.sh
 
 Place your AriaEveryday dataset in the `data/aria_everyday/` directory, then process it:
 
-```bash
-python scripts/process_aria_to_vift.py \
-  --input-dir data/aria_everyday \
-  --output-dir data/aria_real_train \
-  --max-sequences 50
-```
-
-### Or Process it with sub-set of sequences
+### Process it with sub-set of sequences
 
 ```
 python scripts/process_aria_to_vift.py \
@@ -120,9 +113,25 @@ python scripts/process_aria_to_vift.py \
   --max-sequences 5
 ```
 
+### Latent Caching
+
+**Trainig dataset**
+
+```
+cd/Users/fengzeyu/Desktop/research/ar-vr/VIFT_AEA && source~/.venv/bin/activate && pythondata/latent_caching_aria.py\--data_dirdata/aria_real_train\--save_diraria_latent_data/train_13\--modetrain\--devicemps
+```
+
+**Validation dataset**
+
+```
+cd/Users/fengzeyu/Desktop/research/ar-vr/VIFT_AEA && source~/.venv/bin/activate && pythondata/latent_caching_aria.py\--data_dirdata/aria_real_test\--save_diraria_latent_data/val_3\--modeval\--val_sequences"20,22,24"\--devicemps
+```
+
+
 ### 3. Training
 
 Before training, create the project root marker file (required by rootutils):
+
 ```bash
 touch .project-root
 ```
@@ -130,9 +139,6 @@ touch .project-root
 Train the model on your dataset:
 
 ```bash
-# Train on KITTI
-python src/train.py data=kitti_vio
-
 # Train on AriaEveryday
 python src/train.py --config-name=train_aria
 
@@ -227,6 +233,7 @@ VIFT-AEA (VIFT + AriaEveryday) adapts the original VIFT architecture to process 
 ## Setup
 
 ### 1. Environment Setup
+
 ```bash
 # Clone the repository
 git clone <repository-url>
@@ -241,6 +248,7 @@ pip install -r requirements.txt
 ```
 
 ### 2. Download Pretrained Models
+
 ```bash
 # Download the pretrained VSVIO encoder (same as used for KITTI)
 mkdir -p pretrained_models
@@ -248,7 +256,9 @@ mkdir -p pretrained_models
 ```
 
 ### 3. Prepare Aria Data
+
 Ensure your processed Aria data is in the following structure:
+
 ```
 data/aria_real_train/
 ├── 00/
@@ -271,6 +281,7 @@ data/aria_real_test/
 Extract visual-inertial features using a ResNet-based encoder compatible with VIFT:
 
 **Training Data:**
+
 ```bash
 python data/latent_caching_aria.py \
     --data_dir data/aria_real_train \
@@ -280,6 +291,7 @@ python data/latent_caching_aria.py \
 ```
 
 **Validation Data:**
+
 ```bash
 python data/latent_caching_aria.py \
     --data_dir data/aria_real_train \
@@ -290,6 +302,7 @@ python data/latent_caching_aria.py \
 ```
 
 This step:
+
 - Uses ResNet18 for visual feature extraction (512 dims)
 - Processes RGB images (256×512) and IMU data (6-DOF, padded to 256 dims)
 - Outputs 768-dim features: Visual(512) + IMU(256)
@@ -299,16 +312,19 @@ This step:
 ### Step 2: Training
 
 **Option A: Using Cached Latent Features (Recommended)**
+
 ```bash
 python src/train.py data=aria_latent model=aria_vio
 ```
 
 **Option B: Using Raw Data (Slower)**
+
 ```bash
 python src/train.py --config-name=train_aria
 ```
 
 ### Step 3: Evaluation
+
 ```bash
 python src/eval.py --config-name=eval_aria ckpt_path=path/to/checkpoint.ckpt
 ```
@@ -317,33 +333,36 @@ python src/eval.py --config-name=eval_aria ckpt_path=path/to/checkpoint.ckpt
 
 ### Aria → KITTI Pipeline Alignment
 
-| Component | KITTI Format | Aria Format | Processing |
-|-----------|--------------|-------------|------------|
-| **Visual** | RGB stereo images | RGB camera frames | Same transforms (256×512) |
-| **IMU** | 6-DOF IMU | 6-DOF IMU (33 samples/frame) | Average to 6 values/frame |
-| **Poses** | [tx,ty,tz,qx,qy,qz,qw] | [tx,ty,tz,qx,qy,qz,qw] | Same format |
-| **Features** | [seq_len, 768] | [seq_len, 768] | Identical (512+256) |
+| Component          | KITTI Format           | Aria Format                  | Processing                 |
+| ------------------ | ---------------------- | ---------------------------- | -------------------------- |
+| **Visual**   | RGB stereo images      | RGB camera frames            | Same transforms (256×512) |
+| **IMU**      | 6-DOF IMU              | 6-DOF IMU (33 samples/frame) | Average to 6 values/frame  |
+| **Poses**    | [tx,ty,tz,qx,qy,qz,qw] | [tx,ty,tz,qx,qy,qz,qw]       | Same format                |
+| **Features** | [seq_len, 768]         | [seq_len, 768]               | Identical (512+256)        |
 
 ### Key Features
 
-✅ **ResNet-based Encoder**: Uses ResNet18 for reliable visual feature extraction  
-✅ **Same Dimensions**: 768-dim features (Visual: 512, IMU: 256)  
-✅ **Same Transforms**: Image preprocessing (256×512, normalization)  
-✅ **Same Format**: Output `.npy` files compatible with VIFT  
+✅ **ResNet-based Encoder**: Uses ResNet18 for reliable visual feature extraction
+✅ **Same Dimensions**: 768-dim features (Visual: 512, IMU: 256)
+✅ **Same Transforms**: Image preprocessing (256×512, normalization)
+✅ **Same Format**: Output `.npy` files compatible with VIFT
 ✅ **Unified Script**: Single script handles both training and validation data
-✅ **No Dependencies**: Works without VIFT pretrained models  
+✅ **No Dependencies**: Works without VIFT pretrained models
 
 ## Configuration Files
 
 ### Data Configurations
+
 - `configs/data/aria_vio.yaml` - Raw Aria data loading
 - `configs/data/aria_latent.yaml` - Cached latent features
 
-### Model Configurations  
+### Model Configurations
+
 - `configs/model/aria_vio.yaml` - Aria-compatible VIO model
 - `configs/trainer/default.yaml` - Training parameters
 
 ### Training Configurations
+
 - `configs/train_aria.yaml` - Main training config
 
 ## File Structure
@@ -370,10 +389,12 @@ VIFT_AEA/
 ## Performance Notes
 
 ### Training Speed
+
 - **With Latent Caching**: ~5-10x faster training
 - **Without Caching**: Real-time visual encoding (slower)
 
 ### Hardware Requirements
+
 - **GPU**: Recommended for latent caching (MPS/CUDA)
 - **RAM**: 16GB+ for large sequences
 - **Storage**: ~1GB per 1000 cached samples
@@ -383,12 +404,14 @@ VIFT_AEA/
 ### Common Issues
 
 **1. Pretrained Model Missing**
+
 ```bash
 # No longer needed - script uses ResNet18 encoder
 # Works out of the box without external dependencies
 ```
 
 **2. Data Format Issues**
+
 ```bash
 # Check your data format
 python -c "
@@ -400,18 +423,21 @@ print(f'Visual data shape: {data.shape}')
 ```
 
 **3. Memory Issues**
+
 ```bash
 # Reduce batch size in config
 batch_size: 16  # Default: 32
 ```
 
 **4. Device Issues**
+
 ```bash
 # Force CPU if GPU issues
 python data/latent_caching_aria.py --device cpu --mode train
 ```
 
 **5. Validation Sequences**
+
 ```bash
 # Customize validation sequences
 python data/latent_caching_aria.py \
@@ -422,6 +448,7 @@ python data/latent_caching_aria.py \
 ## Citation
 
 If you use this work, please cite:
+
 ```bibtex
 @article{vift_aria_2024,
   title={VIFT Aria Integration: Visual-Inertial Odometry with AriaEveryday Dataset},
