@@ -1,2 +1,42 @@
 # Ignore everything in data/ folder
 data/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyTorch checkpoints and logs
+logs/
+outputs/
+*.ckpt
+*.pth
+*.pt
+
+# Data directories
+aria_latent_data/
+data/aria_real_*/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

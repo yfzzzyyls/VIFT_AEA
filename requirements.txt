@@ -37,3 +37,4 @@ rich
 pytest
 path
 natsort
+lightning

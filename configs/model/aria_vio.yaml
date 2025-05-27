@@ -1,0 +1,42 @@
+# @package model
+
+# Model configuration for Aria VIO training
+_target_: src.models.aria_vio_module.AriaVIOModule
+
+# Optimizer configuration
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 0.0001
+  weight_decay: 1e-4
+
+# Scheduler configuration  
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+  _partial_: true
+  T_0: 25
+  T_mult: 1
+
+# Loss function
+criterion:
+  _target_: torch.nn.MSELoss
+
+# Network architecture - Use original VIFT transformer
+net:
+  _target_: src.models.components.pose_transformer.PoseTransformer
+  input_dim: 768      # VIFT expects 768-dim visual-inertial features
+  embedding_dim: 768
+  num_layers: 4
+  nhead: 6
+  dim_feedforward: 128
+  dropout: 0.1
+
+# Metrics calculator - use generic VIO metrics instead of KITTI-specific
+metrics_calculator:
+  _target_: src.metrics.vio_metrics_calculator.VIOMetricsCalculator
+
+# Tester - set to null for Aria training (no KITTI dependencies)
+tester: null
+
+# Compilation settings
+compile: false
