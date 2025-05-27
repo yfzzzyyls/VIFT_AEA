@@ -28,23 +28,18 @@ class AriaVIOModule(LightningModule):
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
     
-    def forward(self, x, target=None):
-        """Forward pass - handle VIFT input format"""
-        # VIFT expects (batch, target) format for training
-        # x is the visual_inertial_features [batch, seq_len, 768]
-        
-        # Create VIFT-compatible batch format: (visual_inertial_features, None, None)
-        batch = (x, None, None)
-        
-        # Forward through the pose transformer
+    def forward(self, batch, target=None):
+        """Forward pass - use original VIFT interface"""
+        # batch is already in VIFT format: (visual_inertial_features, None, None)
+        # target is the ground truth poses
         return self.net(batch, target)
     
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        # Handle VIFT-compatible format: (visual_inertial_features, poses)
-        visual_inertial_features, target = batch
+        # batch is already in VIFT format: ((visual_inertial_features, None, None), target)
+        vift_batch, target = batch
         
         # Forward pass through the original VIFT transformer
-        preds = self.forward(visual_inertial_features, target)
+        preds = self.forward(vift_batch, target)
         loss = self.criterion(preds, target)
         
         self.train_loss(loss)
@@ -58,9 +53,9 @@ class AriaVIOModule(LightningModule):
         return loss
     
     def validation_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        visual_inertial_features, target = batch
+        vift_batch, target = batch
         
-        preds = self.forward(visual_inertial_features, target)
+        preds = self.forward(vift_batch, target)
         loss = self.criterion(preds, target)
         
         self.val_loss(loss)
