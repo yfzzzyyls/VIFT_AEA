@@ -1,8 +1,21 @@
----
-
 <div align="center">
 
 # VIFT-AEA: Visual-Inertial Feature Transformer for AriaEveryday
+
+<p align="center">
+  <a href="https://pytorch.org/get-started/locally/">
+    <img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white">
+  </a>
+  <a href="https://pytorchlightning.ai/">
+    <img alt="Lightning" src="https://img.shields.io/badge/Lightning-792ee5?logo=pytorchlightning&logoColor=white">
+  </a>
+  <a href="https://hydra.cc/">
+    <img alt="Hydra" src="https://img.shields.io/badge/Config-Hydra-89b8cd">
+  </a>
+</p>
+
+</div>
+
 
 This is an adaptation of the VIFT implementation for the **AriaEveryday dataset**, optimized for training and inference on NVIDIA H100 GPUs and Apple Silicon.
 
@@ -10,10 +23,6 @@ This is an adaptation of the VIFT implementation for the **AriaEveryday dataset*
 > Yunus Bilge Kurt, Ahmet Akman, Aydın Alatan
 > *ECCV 2024 VCAD Workshop*
 > [[Paper](https://arxiv.org/abs/2409.08769)] [[Original Repo](https://github.com/ybkurt/VIFT)]
-
-`<a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white">``</a>`
-`<a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-792ee5?logo=pytorchlightning&logoColor=white">``</a>`
-`<a href="https://hydra.cc/"><img alt="Config: Hydra" src="https://img.shields.io/badge/Config-Hydra-89b8cd">``</a>`
 
 ## Overview
 
