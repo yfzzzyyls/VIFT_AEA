@@ -2,9 +2,9 @@
 
 <div align="center">
 
-# VIFT: A Video Is Worth a Thousand Images for Visual Inertial Odometry - AriaEveryday Edition
+# VIFT-AEA: Visual-Inertial Feature Transformer for AriaEveryday
 
-This is an adaptation of the VIFT implementation for the **AriaEveryday dataset**, optimized for training and inference on NVIDIA H100 GPUs.
+This is an adaptation of the VIFT implementation for the **AriaEveryday dataset**, optimized for training and inference on NVIDIA H100 GPUs and Apple Silicon.
 
 > **Original Paper**: Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry
 > Yunus Bilge Kurt, Ahmet Akman, Aydın Alatan
@@ -15,169 +15,181 @@ This is an adaptation of the VIFT implementation for the **AriaEveryday dataset*
 `<a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-792ee5?logo=pytorchlightning&logoColor=white">``</a>`
 `<a href="https://hydra.cc/"><img alt="Config: Hydra" src="https://img.shields.io/badge/Config-Hydra-89b8cd">``</a>`
 
-## AriaEveryday Dataset Integration
+## Overview
 
-This repository adapts VIFT for the **AriaEveryday dataset** - a large-scale egocentric dataset with 143 sequences of real-world indoor activities recorded with Project Aria glasses.
+VIFT-AEA is a Visual-Inertial Odometry (VIO) system that leverages transformer architectures for robust pose estimation. This implementation extends the original VIFT framework to support the AriaEveryday dataset, enabling training and inference on real-world AR/VR data captured with Meta's Aria glasses.
 
-### Key Features for AriaEveryday:
+## Features
 
-- **Real-world data**: 143 sequences of everyday activities (cooking, cleaning, social interactions)
-- **Multi-modal sensors**: RGB cameras + IMU + SLAM ground truth trajectories
-- **H100 optimization**: Leverages PyTorch 2.3+ with TF32, torch.compile, and channels_last
-- **Robust processing**: Handles corrupted video files and extracts MPS SLAM poses as ground truth
-- **Scalable training**: Train on 100 sequences, test on 43 held-out sequences
+- **Cross-Platform Support**: Seamless operation on both CUDA-enabled Linux systems and Apple Silicon (M1/M2) macOS
+- **AriaEveryday Dataset Integration**: Native support for processing and training on Meta's AriaEveryday dataset
+- **Transformer-Based Architecture**: State-of-the-art visual-inertial fusion using attention mechanisms
+- **Automated Environment Setup**: Intelligent platform detection and dependency installation
 
-### Architecture Adaptations:
+## System Requirements
 
-- **AriaEveryday data loader**: Custom dataset class for Project Aria sensor data
-- **SLAM trajectory ground truth**: Uses MPS closed-loop SLAM poses as training targets
-- **Video processing pipeline**: Extracts RGB frames from Project Aria recordings
-- **IMU synchronization**: Aligns 1kHz IMU data with 30Hz video frames
+### Supported Platforms
+- **Linux**: CUDA 11.8+ compatible GPUs (RTX 20/30/40 series, Tesla, etc.)
+- **macOS**: Apple Silicon (M1/M2/M3) with Metal Performance Shaders (MPS)
+- **Fallback**: CPU-only execution on any platform
 
-## Installation for AriaEveryday
+### Dependencies
+- Python 3.8+
+- PyTorch 2.3.0+
+- OpenCV 4.8.0+
+- NumPy 2.0.0+
 
-Make sure you have NVIDIA H100 GPU access and CUDA 12.1+ installed.
+## Quick Start
 
-#### Environment Setup
+### 1. Environment Setup
 
+Clone the repository and navigate to the project directory:
 ```bash
-# Clone this AriaEveryday adaptation
-git clone https://github.com/yfzzzyyls/VIFT_AEA
+git clone <repository-url>
 cd VIFT_AEA
-
-# [RECOMMENDED] Create conda environment
-conda create -n vift_aria python=3.11
-conda activate vift_aria
-
-# Install PyTorch for H100 (CUDA 12.1+)
-pip install torch>=2.3.0 torchvision>=0.18.0 --index-url https://download.pytorch.org/whl/cu121
-
-# Install AriaEveryday-specific requirements
-pip install -r requirements.txt
 ```
 
-## Downloading AriaEveryday Dataset
-
-The AriaEveryday dataset contains 143 sequences of real-world activities recorded with Project Aria glasses.
-
+Create and activate a Python virtual environment:
 ```bash
-# Download first 10 sequences to get started quickly
-python download_aria_with_json.py AriaEverydayActivities_download_urls.json --output-dir data/aria_everyday_subset
-
-# Alternative: Download all sequences (adjust path as needed)
-mkdir -p data/aria_everyday
-# Follow Project Aria instructions to download the full dataset
-# https://www.projectaria.com/datasets/
+python3 -m venv .venv
+source .venv/bin/activate  # On macOS/Linux
+# .venv\Scripts\activate   # On Windows
 ```
 
-Expected directory structure:
-
-```
-data/aria_everyday/
-├── loc1_script1_seq1_rec1/
-│   ├── AriaEverydayActivities_1.0.0_loc1_script1_seq1_rec1_preview_rgb.mp4
-│   ├── AriaEverydayActivities_1.0.0_loc1_script1_seq1_rec1_mps_slam_trajectories.zip
-│   └── ...
-├── loc1_script1_seq3_rec1/
-└── ...
-```
-
-## AriaEveryday Processing Pipeline
-
-### Step 1: Extract SLAM Trajectories and Process Sensor Data
-
+Run the automated environment setup script:
 ```bash
-# Process first 10 sequences for training
+python scripts/setup_env.py
+```
+
+This script will:
+- Automatically detect your platform (CUDA/Apple Silicon/CPU)
+- Install the appropriate PyTorch version with hardware acceleration
+- Install all required dependencies from `requirements.txt`
+- Verify the installation
+
+### 2. Dataset Preparation
+
+#### KITTI Dataset (for baseline comparison)
+```bash
+cd data
+chmod +x data_prep.sh
+./data_prep.sh
+```
+
+#### AriaEveryday Dataset
+Place your AriaEveryday dataset in the `data/aria_everyday/` directory, then process it:
+```bash
 python scripts/process_aria_to_vift.py \
   --input-dir data/aria_everyday \
   --output-dir data/aria_real_train \
-  --start-index 0 \
-  --max-sequences 10
-
-# Process remaining 11 sequences for testing/inference
-python scripts/process_aria_to_vift.py \
-  --input-dir data/aria_everyday \
-  --output-dir data/aria_real_test \
-  --start-index 10 \
-  --max-sequences 11
+  --max-sequences 50
 ```
 
-This extracts:
+### 3. Training
 
-- **SLAM poses**: MPS closed-loop trajectories as ground truth
-- **Visual data**: RGB frames from Project Aria cameras
-- **IMU data**: Synchronized inertial measurements
-
-### Step 2: Cache Latent Features
-
-Generate latent features using pretrained Visual-Selective-VIO encoders:
-
+Train the model on your dataset:
 ```bash
-# Download pretrained encoders (same as original VIFT)
-mkdir -p pretrained_models
-# Download from Visual-Selective-VIO repository
+# Train on KITTI
+python src/train.py data=kitti_vio
 
-# Cache latents for training data
-python data/latent_caching_aria.py \
-  --input-dir data/aria_real_train \
-  --output-dir data/aria_latent_train
-
-# Cache latents for test data  
-python data/latent_caching_aria.py \
-  --input-dir data/aria_real_test \
-  --output-dir data/aria_latent_test
+# Train on AriaEveryday
+python src/train.py data=aria_vio
 ```
 
-### Step 3: Train VIFT on AriaEveryday
+### 4. Evaluation
 
+Evaluate the trained model:
 ```bash
-# Train with H100 optimizations
-python src/train.py \
-  data=aria_vio \
-  trainer=gpu \
-  trainer.devices=1 \
-  trainer.max_epochs=50 \
-  trainer.precision=16 \
-  model.optimizer.lr=2e-4 \
-  data.batch_size=32
+python src/eval.py ckpt_path=path/to/checkpoint.ckpt
 ```
 
-### Step 4: Inference and Evaluation
+## Platform-Specific Features
 
+### CUDA (Linux)
+- Utilizes CUDA 11.8 for GPU acceleration
+- Automatic mixed precision training
+- Multi-GPU support for large-scale training
+
+### Apple Silicon (macOS)
+- Leverages Metal Performance Shaders (MPS) backend
+- Optimized for M1/M2/M3 processors
+- Native ARM64 binaries for maximum performance
+
+### CPU Fallback
+- Full functionality on any x86_64 or ARM64 system
+- Automatic fallback when GPU acceleration is unavailable
+
+## Project Structure
+
+```
+VIFT_AEA/
+├── src/                    # Source code
+│   ├── models/            # Model architectures
+│   ├── data/              # Dataset loaders
+│   └── train.py           # Training script
+├── scripts/               # Utility scripts
+│   ├── setup_env.py       # Environment setup
+│   └── process_aria_to_vift.py  # AriaEveryday processing
+├── data/                  # Datasets
+├── configs/               # Hydra configurations
+└── requirements.txt       # Dependencies
+```
+
+## Configuration
+
+The project uses Hydra for configuration management. Key configuration files:
+
+- `configs/data/kitti_vio.yaml` - KITTI dataset configuration
+- `configs/data/aria_vio.yaml` - AriaEveryday dataset configuration
+- `configs/model/vift.yaml` - Model architecture configuration
+- `configs/trainer/default.yaml` - Training configuration
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Import errors**: Ensure all dependencies are installed by re-running `python scripts/setup_env.py`
+2. **CUDA out of memory**: Reduce batch size in the configuration files
+3. **Apple Silicon performance**: Ensure you're using the MPS backend by checking `torch.backends.mps.is_available()`
+
+### Platform Detection
+
+The setup script automatically detects your platform. You can verify detection by running:
 ```bash
-# Run inference on test sequences
-python src/test.py \
-  data=aria_vio \
-  ckpt=lightning_logs/version_X/checkpoints/best.ckpt \
-  logger=csv
+python -c "
+import torch
+print(f'PyTorch version: {torch.__version__}')
+print(f'CUDA available: {torch.cuda.is_available()}')
+print(f'MPS available: {torch.backends.mps.is_available() if hasattr(torch.backends, \"mps\") else False}')
+"
 ```
 
-## H100 Optimization Features
+## Contributing
 
-This adaptation includes several H100-specific optimizations:
+We welcome contributions! Please:
 
-- **TF32 precision**: Enabled by default for faster training
-- **torch.compile**: Reduces overhead with graph optimization
-- **channels_last memory**: Improves tensor core utilization
-- **Mixed precision (FP16)**: Leverages H100's tensor cores
-- **Larger batch sizes**: Take advantage of 80GB HBM3 memory
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
 
-## Performance Expectations
+## License
 
-- **Dataset size**: 143 sequences (~250k frames total)
-- **Training split**: 100 sequences for training, 43 for testing
-- **Training time**: ~6 hours on H100 for 50 epochs
-- **Memory usage**: ~40-60GB with optimized batch sizes
+This project is licensed under the MIT License. See `LICENSE` for details.
 
-## AriaEveryday vs KITTI
+## Citation
 
-| Aspect       | KITTI              | AriaEveryday              |
-| ------------ | ------------------ | ------------------------- |
-| Environment  | Outdoor driving    | Indoor activities         |
-| Camera setup | Car-mounted stereo | Egocentric AR glasses     |
-| Ground truth | GPS/LiDAR          | MPS SLAM                  |
-| Sequences    | 22 sequences       | 143 sequences             |
-| Activities   | Driving            | Cooking, cleaning, social |
+If you use this work in your research, please cite:
+
+```bibtex
+@article{vift_aea2024,
+  title={VIFT-AEA: Visual-Inertial Feature Transformer for AriaEveryday},
+  author={Your Name},
+  journal={arXiv preprint},
+  year={2024}
+}
+```
 
 ## Acknowledgments
 
@@ -187,23 +199,5 @@ This project builds upon:
 - **AriaEveryday Dataset**: [Project Aria](https://www.projectaria.com/datasets/)
 - **Visual-Selective-VIO**: For pretrained encoders
 - **Lightning-Hydra-Template**: For project structure
-
-## Citation
-
-If you use this AriaEveryday adaptation, please cite both the original VIFT paper and acknowledge the AriaEveryday dataset:
-
-```bibtex
-@article{kurt2024vift,
-  title={Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry},
-  author={Kurt, Yunus Bilge and Akman, Ahmet and Alatan, Ayd{\i}n},
-  journal={arXiv preprint arXiv:2409.08769},
-  year={2024}
-}
-
-@article{pan2023aria,
-  title={Aria Everyday Activities Dataset},
-  author={Pan, Xiaqing and others},
-  journal={arXiv preprint arXiv:2309.16045},
-  year={2023}
-}
-```
+- **Meta AI**: For the AriaEveryday dataset
+- **PyTorch team**: For cross-platform ML framework
