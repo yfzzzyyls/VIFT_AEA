@@ -99,16 +99,16 @@ def process_aria_sequence_simple(seq_dir: Path, visual_encoder, device='cpu'):
         # Prepare ground truth
         gt_poses = []
         for pose in poses_seq:
-            # Convert to VIFT format: [tx, ty, tz, rx, ry, rz] (6-DOF)
-            # Original Aria format: translation + rotation (quaternion)
-            translation = pose['translation']  # [tx, ty, tz]
-            rotation_quat = pose['rotation']   # [qx, qy, qz, qw]
+            # Use the pre-computed pose_6dof format from processing
+            if 'pose_6dof' in pose:
+                # Format: [rx, ry, rz, tx, ty, tz] from process_aria_to_vift.py
+                gt_pose = pose['pose_6dof']
+            else:
+                # Fallback: construct from translation + rotation_euler
+                translation = pose['translation']  # [tx, ty, tz] 
+                rotation_euler = pose['rotation_euler']  # [rx, ry, rz]
+                gt_pose = rotation_euler + translation  # [rx, ry, rz, tx, ty, tz]
             
-            # Simple conversion: use first 3 quaternion components as rotation
-            # This avoids scipy dependency and maintains 6-DOF format
-            rotation_euler = rotation_quat[:3]  # [qx, qy, qz] as rotation representation
-            
-            gt_pose = translation + rotation_euler  # [tx, ty, tz, qx, qy, qz]
             gt_poses.append(gt_pose)
         
         ground_truths.append(np.array(gt_poses))

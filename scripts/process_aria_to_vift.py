@@ -19,6 +19,39 @@ from tqdm import tqdm
 import ffmpeg
 from typing import List, Dict, Tuple, Optional
 
+# Add quaternion to Euler conversion utilities
+def quaternion_to_euler(qx, qy, qz, qw):
+    """
+    Convert quaternion to Euler angles (roll, pitch, yaw) in radians
+    Args:
+        qx, qy, qz, qw: quaternion components
+    Returns:
+        (rx, ry, rz): Euler angles in radians (roll, pitch, yaw)
+    """
+    # Normalize quaternion
+    norm = np.sqrt(qx*qx + qy*qy + qz*qz + qw*qw)
+    if norm > 0:
+        qx, qy, qz, qw = qx/norm, qy/norm, qz/norm, qw/norm
+    
+    # Roll (x-axis rotation)
+    sinr_cosp = 2 * (qw * qx + qy * qz)
+    cosr_cosp = 1 - 2 * (qx * qx + qy * qy)
+    roll = np.arctan2(sinr_cosp, cosr_cosp)
+    
+    # Pitch (y-axis rotation)
+    sinp = 2 * (qw * qy - qz * qx)
+    if abs(sinp) >= 1:
+        pitch = np.copysign(np.pi / 2, sinp)  # use 90 degrees if out of range
+    else:
+        pitch = np.arcsin(sinp)
+    
+    # Yaw (z-axis rotation)
+    siny_cosp = 2 * (qw * qz + qx * qy)
+    cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
+    yaw = np.arctan2(siny_cosp, cosy_cosp)
+    
+    return roll, pitch, yaw
+
 class AriaToVIFTProcessor:
     """Process AriaEveryday dataset into VIFT-compatible format"""
     
@@ -63,7 +96,13 @@ class AriaToVIFTProcessor:
                                     ts = float(obj['tracking_timestamp_us'])/1e6
                                     tx,ty,tz = obj['tx_world_device'],obj['ty_world_device'],obj['tz_world_device']
                                     qx,qy,qz,qw = obj['qx_world_device'],obj['qy_world_device'],obj['qz_world_device'],obj['qw_world_device']
-                                    poses.append({'timestamp':ts,'translation':[tx,ty,tz],'rotation':[qx,qy,qz,qw]})
+                                    
+                                    # Convert quaternion to Euler angles for VIFT compatibility
+                                    rx, ry, rz = quaternion_to_euler(qx, qy, qz, qw)
+                                    
+                                    # Store in VIFT 6-DoF format: [rx, ry, rz, tx, ty, tz]
+                                    pose_6dof = [rx, ry, rz, tx, ty, tz]
+                                    poses.append({'timestamp':ts, 'pose_6dof': pose_6dof, 'translation':[tx,ty,tz],'rotation_euler':[rx,ry,rz]})
                             except json.JSONDecodeError:
                                 continue
                     shutil.rmtree(temp_sum, ignore_errors=True)
@@ -197,10 +236,17 @@ class AriaToVIFTProcessor:
                             if qw < 0:  # Ensure positive w for consistency
                                 qx, qy, qz, qw = -qx, -qy, -qz, -qw
                         
+                        # Convert quaternion to Euler angles for VIFT compatibility
+                        rx, ry, rz = quaternion_to_euler(qx, qy, qz, qw)
+                        
+                        # Store in VIFT 6-DoF format: [rx, ry, rz, tx, ty, tz]
+                        pose_6dof = [rx, ry, rz, tx, ty, tz]
+                        
                         poses.append({
                             'timestamp': timestamp,
+                            'pose_6dof': pose_6dof,
                             'translation': [tx, ty, tz],
-                            'rotation': [qx, qy, qz, qw]  # quaternion as [x, y, z, w]
+                            'rotation_euler': [rx, ry, rz]
                         })
                 except (ValueError, IndexError):
                     continue
@@ -291,10 +337,10 @@ class AriaToVIFTProcessor:
             acceleration = velocity / dt if dt > 0 else np.zeros(3)
             acceleration[2] += 9.81  # Add gravity in Z direction
             
-            # Simple angular velocity estimation
-            q1 = np.array(current_pose['rotation'])
-            q2 = np.array(next_pose['rotation'])
-            angular_velocity = (q2[:3] - q1[:3]) / dt if dt > 0 else np.zeros(3)
+            # Simple angular velocity estimation using Euler angles
+            euler1 = np.array(current_pose['rotation_euler'])
+            euler2 = np.array(next_pose['rotation_euler'])
+            angular_velocity = (euler2 - euler1) / dt if dt > 0 else np.zeros(3)
             
             # Create IMU sequence for this frame
             frame_imu = []

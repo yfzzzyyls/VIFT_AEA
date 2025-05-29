@@ -11,15 +11,12 @@ pin_memory: True
 # Data loaders - using same structure as KITTI latent
 train_loader:
   _target_: src.data.components.latent_kitti_dataset.LatentVectorDataset
-  _partial_: false
-  root_dir: aria_latent_data/train_13
+  root_dir: aria_latent_data/train_78
 
 val_loader:
   _target_: src.data.components.latent_kitti_dataset.LatentVectorDataset
-  _partial_: false
-  root_dir: aria_latent_data/val_3
+  root_dir: aria_latent_data/test_20
 
 test_loader:
   _target_: src.data.components.latent_kitti_dataset.LatentVectorDataset
-  _partial_: false
-  root_dir: aria_latent_data/test_3
+  root_dir: aria_latent_data/test_20

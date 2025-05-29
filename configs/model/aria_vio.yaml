@@ -1,37 +1,31 @@
 # @package model
 
 # Model configuration for Aria VIO training
-_target_: src.models.vio_module.VIOLitModule  # use original VIFT module
+_target_: src.models.vio_module.VIOLitModule
 
-# Optimizer configuration
+# Optimizer configuration - will be instantiated by Lightning with model parameters
 optimizer:
   _target_: torch.optim.AdamW
   _partial_: true
-  lr: 1e-4
+  lr: 0.0001
   weight_decay: 1e-4
 
 # Scheduler configuration  
-scheduler: null  # no scheduler
+scheduler: null
 
-# Loss function
+# Loss function - Use WeightedMSEPoseLoss for better pose training
 criterion:
-  _target_: torch.nn.MSELoss
+  _target_: src.metrics.weighted_loss.WeightedMSEPoseLoss
+  angle_weight: 100
 
-# Network architecture - Use original VIFT transformer (only basic PoseTransformer)
+# Network architecture - Use PoseTransformer
 net:
   _target_: src.models.components.pose_transformer.PoseTransformer
-  input_dim: 768      # VIFT expects 768-dim visual-inertial features
-  embedding_dim: 128  # Keep original size
-  num_layers: 2       # Keep original size 
-  nhead: 8            # Keep original size
-  dim_feedforward: 512 # Keep original size
+  input_dim: 768
+  embedding_dim: 128
+  num_layers: 2
+  nhead: 8
+  dim_feedforward: 512
   dropout: 0.1
 
-# Metrics calculator - set to null for basic training
-metrics_calculator: null
-
-# Tester - set to null for Aria training (no KITTI dependencies)
-tester: null
-
-# Compilation settings
 compile: false
