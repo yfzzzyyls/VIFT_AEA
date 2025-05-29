@@ -124,7 +124,7 @@ python data/latent_caching_aria.py --data_dir data/aria_real_train --save_dir ar
 **Validation dataset**
 
 ```
-python data/latent_caching_aria.py --data_dir data/aria_real_test --save_dir aria_latent_data/val_3 --mode val --val_sequences"20,22,24" --device mps
+python data/latent_caching_aria.py --data_dir data/aria_real_test --save_dir aria_latent_data/test_20 --device mps
 ```
 
 **Test/Inference dataset**
