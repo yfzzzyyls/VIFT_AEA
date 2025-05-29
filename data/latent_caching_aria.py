@@ -122,8 +122,8 @@ def main():
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--mode", type=str, choices=["train", "val", "test"], default="train",
                        help="Processing mode: train (all sequences), val (specific sequences), or test (test sequences)")
-    parser.add_argument("--val_sequences", type=str, default="20,22,24",
-                       help="Comma-separated validation/test sequence IDs (only used in val/test mode)")
+    parser.add_argument("--val_sequences", type=str, default="auto",
+                       help="Comma-separated validation/test sequence IDs, or 'auto' to detect all sequences (only used in val/test mode)")
     
     args = parser.parse_args()
     
@@ -160,23 +160,33 @@ def main():
                 print(f"✅ Found training sequence: {seq_dir.name}")
         print(f"📁 Found {len(sequence_dirs)} training sequences")
     else:  # val or test mode
-        # Process only specified validation/test sequences
-        val_seq_ids = [x.strip() for x in args.val_sequences.split(',')]
-        sequence_dirs = []
-        for seq_id in val_seq_ids:
-            # Try both 2-digit and 3-digit formats
-            seq_dir_2digit = data_dir / seq_id
-            seq_dir_3digit = data_dir / f"{int(seq_id):03d}" if seq_id.isdigit() else None
-            
-            if seq_dir_2digit.exists():
-                sequence_dirs.append(seq_dir_2digit)
-                print(f"✅ Found {args.mode} sequence: {seq_id}")
-            elif seq_dir_3digit and seq_dir_3digit.exists():
-                sequence_dirs.append(seq_dir_3digit)
-                print(f"✅ Found {args.mode} sequence: {seq_dir_3digit.name}")
-            else:
-                print(f"⚠️ {args.mode.capitalize()} sequence {seq_id} not found")
-        print(f"📁 Found {len(sequence_dirs)} {args.mode} sequences: {[d.name for d in sequence_dirs]}")
+        # Process specified validation/test sequences or auto-detect
+        if args.val_sequences == "auto":
+            # Auto-detect all sequences in the directory
+            sequence_dirs = []
+            for seq_dir in sorted(data_dir.glob("[0-9]*")):
+                if seq_dir.is_dir() and seq_dir.name.isdigit():
+                    sequence_dirs.append(seq_dir)
+                    print(f"✅ Found {args.mode} sequence: {seq_dir.name}")
+            print(f"📁 Found {len(sequence_dirs)} {args.mode} sequences (auto-detected)")
+        else:
+            # Process only specified validation/test sequences
+            val_seq_ids = [x.strip() for x in args.val_sequences.split(',')]
+            sequence_dirs = []
+            for seq_id in val_seq_ids:
+                # Try both 2-digit and 3-digit formats
+                seq_dir_2digit = data_dir / seq_id
+                seq_dir_3digit = data_dir / f"{int(seq_id):03d}" if seq_id.isdigit() else None
+                
+                if seq_dir_2digit.exists():
+                    sequence_dirs.append(seq_dir_2digit)
+                    print(f"✅ Found {args.mode} sequence: {seq_id}")
+                elif seq_dir_3digit and seq_dir_3digit.exists():
+                    sequence_dirs.append(seq_dir_3digit)
+                    print(f"✅ Found {args.mode} sequence: {seq_dir_3digit.name}")
+                else:
+                    print(f"⚠️ {args.mode.capitalize()} sequence {seq_id} not found")
+            print(f"📁 Found {len(sequence_dirs)} {args.mode} sequences: {[d.name for d in sequence_dirs]}")
     
     if not sequence_dirs:
         print(f"❌ No sequences found")

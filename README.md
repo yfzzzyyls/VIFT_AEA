@@ -115,23 +115,39 @@ python scripts/process_aria_to_vift.py \
 
 ### Latent Caching
 
-**Trainig dataset**
+**Training dataset (10 sequences)**
 
-```
-python data/latent_caching_aria.py --data_dir data/aria_real_train --save_dir aria_latent_data/train_13 --mode train --device mps
-```
-
-**Validation dataset**
-
-```
-python data/latent_caching_aria.py --data_dir data/aria_real_test --save_dir aria_latent_data/test_20 --device mps
+```bash
+python data/latent_caching_aria.py \
+    --data_dir data/aria_real_train \
+    --save_dir aria_latent_data/train_10 \
+    --mode train \
+    --device cuda
 ```
 
-**Test/Inference dataset**
+**Validation dataset (last 2 sequences from training set)**
 
+```bash
+# Then use the last 2 sequences for validation (adjust numbers based on your data)
+python data/latent_caching_aria.py \
+    --data_dir data/aria_real_train \
+    --save_dir aria_latent_data/val_2 \
+    --mode val \
+    --val_sequences "08,09" \
+    --device cuda
 ```
-python data/latent_caching_aria.py --data_dir data/aria_real_test --save_dir aria_latent_data/test_3 --mode test
+
+**Test/Inference dataset (auto-detect all sequences in test directory)**
+
+```bash
+python data/latent_caching_aria.py \
+    --data_dir data/aria_real_test \
+    --save_dir aria_latent_data/test_5 \
+    --mode test \
+    --device cuda
 ```
+
+**Note:** Validation set is optional - it uses the last 2 sequences (08,09) from your training data to monitor training progress. You can skip validation if you want to use all 10 training sequences for training.
 
 ### 3. Training
 
