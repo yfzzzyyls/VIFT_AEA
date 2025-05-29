@@ -20,3 +20,7 @@ class DummyTester(BaseTester):
     def compute_trajectory(self, dataloader, net):
         """Return empty trajectory"""
         return np.zeros((1, 6))
+    
+    def save_results(self, results, output_dir):
+        """Dummy save function"""
+        pass
