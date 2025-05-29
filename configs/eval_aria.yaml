@@ -1,0 +1,18 @@
+# @package _global_
+
+defaults:
+  - _self_
+  - data: aria_latent # use our Aria latent data config
+  - model: aria_vio # use our Aria VIO model config
+  - logger: null
+  - paths: default
+  - extras: default
+  - hydra: default
+  - trainer: default
+
+task_name: "eval_aria"
+
+tags: ["eval", "aria"]
+
+# passing checkpoint path is necessary for evaluation
+ckpt_path: ???
