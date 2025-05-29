@@ -55,11 +55,26 @@ def quaternion_to_euler(qx, qy, qz, qw):
 class AriaToVIFTProcessor:
     """Process AriaEveryday dataset into VIFT-compatible format"""
     
-    def __init__(self, aria_data_dir: str, output_dir: str, max_frames: int = 500):
+    def __init__(self, aria_data_dir: str, output_dir: str, max_frames: int = 500, device: str = "auto"):
         self.aria_data_dir = Path(aria_data_dir)
         self.output_dir = Path(output_dir)
         self.max_frames = max_frames
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Set up device for GPU/MPS acceleration
+        if device == "auto":
+            if torch.backends.mps.is_available():
+                self.device = torch.device("mps")
+                print(f"🚀 Using MPS (Apple Silicon GPU) acceleration")
+            elif torch.cuda.is_available():
+                self.device = torch.device("cuda")
+                print(f"🚀 Using CUDA GPU acceleration")
+            else:
+                self.device = torch.device("cpu")
+                print(f"⚡ Using CPU processing")
+        else:
+            self.device = torch.device(device)
+            print(f"🎯 Using specified device: {self.device}")
         
     def extract_slam_trajectory(self, sequence_path: Path) -> Optional[List[Dict]]:
         """Extract SLAM trajectory from MPS results"""
@@ -255,7 +270,7 @@ class AriaToVIFTProcessor:
         return poses
     
     def extract_rgb_frames(self, sequence_path: Path, num_frames: int) -> Optional[torch.Tensor]:
-        """Extract RGB frames from preview video"""
+        """Extract RGB frames from preview video with GPU acceleration"""
         print(f"📹 Extracting RGB frames from {sequence_path.name}")
         
         # Find preview video
@@ -299,8 +314,9 @@ class AriaToVIFTProcessor:
             cap.release()
             
             if frames:
-                visual_data = torch.stack(frames)  # Shape: [T, C, H, W]
-                print(f"✅ Extracted {len(frames)} RGB frames")
+                # Stack frames and move to device for GPU processing
+                visual_data = torch.stack(frames).to(self.device)  # Shape: [T, C, H, W]
+                print(f"✅ Extracted {len(frames)} RGB frames on {self.device}")
                 return visual_data
             
         except Exception as e:
@@ -356,13 +372,13 @@ class AriaToVIFTProcessor:
                     angular_velocity[0] + gyro_noise[0],
                     angular_velocity[1] + gyro_noise[1],
                     angular_velocity[2] + gyro_noise[2]
-                ], dtype=torch.float32)
+                ], dtype=torch.float32, device=self.device)
                 
                 frame_imu.append(imu_sample)
             
             imu_data.append(torch.stack(frame_imu))  # Shape: [samples_per_frame, 6]
         
-        print(f"✅ Generated IMU data for {num_frames} frames")
+        print(f"✅ Generated IMU data for {num_frames} frames on {self.device}")
         return torch.stack(imu_data)  # Shape: [T, samples_per_frame, 6]
     
     def process_sequence(self, sequence_path: Path, sequence_id: str) -> bool:
@@ -402,9 +418,9 @@ class AriaToVIFTProcessor:
         with open(poses_file, 'w') as f:
             json.dump(poses, f, indent=2, default=str)
         
-        # Save visual and IMU data as tensors
-        torch.save(visual_data, seq_output_dir / "visual_data.pt")
-        torch.save(imu_data, seq_output_dir / "imu_data.pt")
+        # Save visual and IMU data as tensors (move to CPU for saving)
+        torch.save(visual_data.cpu(), seq_output_dir / "visual_data.pt")
+        torch.save(imu_data.cpu(), seq_output_dir / "imu_data.pt")
         
         # Save metadata
         metadata = {
@@ -422,20 +438,24 @@ class AriaToVIFTProcessor:
         print(f"✅ Processed {sequence_path.name}: {actual_frames} frames")
         return True
     
-    def process_dataset(self, start_index: int = 0, max_sequences: int = 10) -> Dict:
+    def process_dataset(self, start_index: int = 0, max_sequences: Optional[int] = None) -> Dict:
         """Process multiple AriaEveryday sequences"""
         print(f"🎯 Processing AriaEveryday Dataset")
         print(f"📁 Input: {self.aria_data_dir}")
         print(f"📁 Output: {self.output_dir}")
-        print(f"🔢 Processing sequences {start_index} to {start_index + max_sequences}")
-        print("=" * 60)
         
         # Get all sequence directories
         all_sequences = sorted([d for d in self.aria_data_dir.iterdir() if d.is_dir()])
         
         # Apply start index and max sequences
+        if max_sequences is None:
+            max_sequences = len(all_sequences) - start_index
+            
         end_index = min(start_index + max_sequences, len(all_sequences))
         sequences = all_sequences[start_index:end_index]
+        
+        print(f"🔢 Processing sequences {start_index} to {end_index-1} (total: {len(sequences)})")
+        print("=" * 60)
         
         print(f"📊 Found {len(sequences)} sequences to process")
         
@@ -481,26 +501,53 @@ def main():
     parser.add_argument('--output-dir', type=str,
                       default='data/aria_real_train',
                       help='Output directory for processed data')
-    parser.add_argument('--start-index', type=int, default=0,
-                      help='Starting sequence index')
-    parser.add_argument('--max-sequences', type=int, default=10,
-                      help='Maximum number of sequences to process')
+    parser.add_argument('--start-index', type=int, default=None,
+                      help='Starting sequence index (default: process all sequences)')
+    parser.add_argument('--max-sequences', type=int, default=None,
+                      help='Maximum number of sequences to process (default: process all sequences)')
     parser.add_argument('--max-frames', type=int, default=500,
                       help='Maximum frames per sequence')
+    parser.add_argument('--device', type=str, default='auto',
+                      choices=['auto', 'cpu', 'cuda', 'mps'],
+                      help='Device to use for processing (auto: detect best available)')
     
     args = parser.parse_args()
     
-    # Initialize processor
+    # Auto-detect sequence range if not provided
+    input_path = Path(args.input_dir)
+    if input_path.exists():
+        all_sequences = sorted([d for d in input_path.iterdir() if d.is_dir()])
+        total_sequences = len(all_sequences)
+        
+        if args.start_index is None:
+            start_index = 0
+        else:
+            start_index = args.start_index
+            
+        if args.max_sequences is None:
+            max_sequences = total_sequences - start_index
+        else:
+            max_sequences = args.max_sequences
+            
+        print(f"📊 Dataset Info:")
+        print(f"   Total sequences available: {total_sequences}")
+        print(f"   Processing range: {start_index} to {start_index + max_sequences}")
+    else:
+        print(f"❌ Input directory not found: {args.input_dir}")
+        return 1
+    
+    # Initialize processor with device support
     processor = AriaToVIFTProcessor(
         aria_data_dir=args.input_dir,
         output_dir=args.output_dir,
-        max_frames=args.max_frames
+        max_frames=args.max_frames,
+        device=args.device
     )
     
     # Process dataset
     summary = processor.process_dataset(
-        start_index=args.start_index,
-        max_sequences=args.max_sequences
+        start_index=start_index,
+        max_sequences=max_sequences
     )
     
     print(f"\n🚀 Next steps:")
