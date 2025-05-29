@@ -1,6 +1,6 @@
 # @package model
 
-# Model configuration for Aria VIO training
+# Simple Model configuration for Aria VIO training without KITTI tester
 _target_: src.models.vio_module.VIOLitModule
 
 # Optimizer configuration - will be instantiated by Lightning with model parameters
@@ -28,22 +28,12 @@ net:
   dim_feedforward: 512
   dropout: 0.1
 
-# Metrics calculator for evaluation
+# Metrics calculator - using dummy for training
 metrics_calculator:
-  _target_: src.metrics.kitti_metrics_calculator.KITTIMetricsCalculator
+  _target_: src.metrics.dummy_metrics_calculator.DummyMetricsCalculator
 
-# Tester for evaluation - adapted for Aria data
+# Simple tester that doesn't require KITTI structure
 tester:
-  _target_: src.testers.kitti_latent_tester.KITTILatentTester
-  val_seqs: ['00', '01', '02']  # Placeholder - will use Aria test sequences
-  data_dir: aria_latent_data/test_5
-  seq_len: 11
-  folder: sequences
-  img_w: 512
-  img_h: 256
-  wrapper_weights_path: ${paths.root_dir}/pretrained_models/vf_512_if_256_3e-05.model
-  device: 'mps'  # Change to 'cuda' if using GPU
-  v_f_len: 512
-  i_f_len: 256
+  _target_: src.testers.dummy_tester.DummyTester
 
 compile: false

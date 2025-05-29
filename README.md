@@ -1,5 +1,3 @@
-<div align="center">
-
 # VIFT-AEA: Visual-Inertial Feature Transformer for AriaEveryday
 
 <p align="center">
@@ -14,507 +12,204 @@
   </a>
 </p>
 
-</div>
+An adaptation of VIFT (Visual-Inertial Fused Transformer) for Meta's AriaEveryday dataset, enabling visual-inertial odometry training on real-world egocentric AR/VR data.
 
-This is an adaptation of the VIFT implementation for the **AriaEveryday dataset**, optimized for training and inference on NVIDIA H100 GPUs and Apple Silicon.
-
-> **Original Paper**: Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry
-> Yunus Bilge Kurt, Ahmet Akman, Aydın Alatan
-> *ECCV 2024 VCAD Workshop*
-> [[Paper](https://arxiv.org/abs/2409.08769)] [[Original Repo](https://github.com/ybkurt/VIFT)]
-
-## Overview
-
-VIFT-AEA is a Visual-Inertial Odometry (VIO) system that leverages transformer architectures for robust pose estimation. This implementation extends the original VIFT framework to support the AriaEveryday dataset, enabling training and inference on real-world AR/VR data captured with Meta's Aria glasses.
-
-## Features
-
-- **Cross-Platform Support**: Seamless operation on both CUDA-enabled Linux systems and Apple Silicon (M1/M2) macOS
-- **AriaEveryday Dataset Integration**: Native support for processing and training on Meta's AriaEveryday dataset
-- **Transformer-Based Architecture**: State-of-the-art visual-inertial fusion using attention mechanisms
-- **Automated Environment Setup**: Intelligent platform detection and dependency installation
-
-## System Requirements
-
-### Supported Platforms
-
-- **Linux**: CUDA 11.8+ compatible GPUs (RTX 20/30/40 series, Tesla, etc.)
-- **macOS**: Apple Silicon (M1/M2/M3) with Metal Performance Shaders (MPS)
-- **Fallback**: CPU-only execution on any platform
-
-### Dependencies
-
-- Python 3.8+
-- PyTorch 2.3.0+
-- OpenCV 4.8.0+
-- NumPy 2.0.0+
+> **Original Paper**: Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry  
+> Yunus Bilge Kurt, Ahmet Akman, Aydın Alatan  
+> *ECCV 2024 VCAD Workshop* [[Paper](https://arxiv.org/abs/2409.08769)] [[Original Repo](https://github.com/ybkurt/VIFT)]
 
 ## Quick Start
 
 ### 1. Environment Setup
 
-Clone the repository and navigate to the project directory:
-
 ```bash
-git clone <repository-url>
-cd VIFT_AEA
-```
-
-Create and activate a Python virtual environment:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate  # On macOS/Linux
-# .venv\Scripts\activate   # On Windows
-```
-
-Run the automated environment setup script:
-
-```bash
-python scripts/setup_env.py
-```
-
-This script will:
-
-- Automatically detect your platform (CUDA/Apple Silicon/CPU)
-- Install the appropriate PyTorch version with hardware acceleration
-- Install all required dependencies from `requirements.txt`
-- Verify the installation
-
-### 2. Dataset Preparation
-
-#### KITTI Dataset (Optional: for baseline comparison)
-
-```bash
-cd data
-chmod +x data_prep.sh
-./data_prep.sh
-```
-
-#### AriaEveryday Dataset
-
-Place your AriaEveryday dataset in the `data/aria_everyday/` directory, then process it:
-
-### Process it with sub-set of sequences
-
-```
-python scripts/process_aria_to_vift.py \
-  --input-dir data/aria_everyday \
-  --output-dir data/aria_real_train \
-  --start-index 0 \
-  --max-sequences 10
-```
-
-```
-python scripts/process_aria_to_vift.py \
-  --input-dir data/aria_everyday \
-  --output-dir data/aria_real_test \
-  --start-index 10 \
-  --max-sequences 5
-```
-
-### Latent Caching
-
-The latent caching script now supports processing only a subset of sequences using the `--max_sequences` parameter. This is useful for quick experiments or when working with limited resources.
-
-**Training dataset (first 10 sequences)**
-
-```bash
-python data/latent_caching_aria.py \
-    --data_dir data/aria_real_train \
-    --save_dir aria_latent_data/train_10 \
-    --mode train \
-    --max_sequences 10 \
-    --device cuda
-```
-
-**Validation dataset (last 2 sequences from training set)**
-
-```bash
-# Then use the last 2 sequences for validation (adjust numbers based on your data)
-python data/latent_caching_aria.py \
-    --data_dir data/aria_real_train \
-    --save_dir aria_latent_data/val_2 \
-    --mode val \
-    --val_sequences "08,09" \
-    --device cuda
-```
-
-**Test/Inference dataset (first 5 sequences)**
-
-```bash
-python data/latent_caching_aria.py \
-    --data_dir data/aria_real_test \
-    --save_dir aria_latent_data/test_5 \
-    --mode test \
-    --max_sequences 5 \
-    --device cuda
-```
-
-**Process all sequences (omit --max_sequences)**
-
-```bash
-# To process all available sequences, simply omit the --max_sequences parameter
-python data/latent_caching_aria.py \
-    --data_dir data/aria_real_train \
-    --save_dir aria_latent_data/train_all \
-    --mode train \
-    --device cuda
-```
-
-**Note:** 
-- The `--max_sequences` parameter limits processing to the first N sequences found in the directory (sorted by name)
-- Validation set is optional - it uses the last 2 sequences (08,09) from your training data to monitor training progress
-- You can skip validation if you want to use all 10 training sequences for training
-
-### 3. Training
-
-Before training, create the project root marker file (required by rootutils):
-
-```bash
-touch .project-root
-```
-
-Train the model on your dataset:
-
-```bash
-# Train on AriaEveryday
-python src/train.py data=aria_latent model=aria_vio
-```
-
-### 4. Evaluation
-
-Evaluate the trained model:
-
-```bash
-python scripts/evaluate_unbiased.py \
-    --checkpoint logs/train/runs/2025-05-27_11-26-57/checkpoints/epoch_000.ckpt \
-    --test_data aria_latent_data/test_3 \
-    --batch_size 32 \
-    --device mps
-```
-
-## Platform-Specific Features
-
-### CUDA (Linux)
-
-- Utilizes CUDA 11.8 for GPU acceleration
-- Automatic mixed precision training
-- Multi-GPU support for large-scale training
-
-### Apple Silicon (macOS)
-
-- Leverages Metal Performance Shaders (MPS) backend
-- Optimized for M1/M2/M3 processors
-- Native ARM64 binaries for maximum performance
-
-### CPU Fallback
-
-- Full functionality on any x86_64 or ARM64 system
-- Automatic fallback when GPU acceleration is unavailable
-
-## Project Structure
-
-```
-VIFT_AEA/
-├── src/                    # Source code
-│   ├── models/            # Model architectures
-│   ├── data/              # Dataset loaders
-│   └── train.py           # Training script
-├── scripts/               # Utility scripts
-│   ├── setup_env.py       # Environment setup
-│   └── process_aria_to_vift.py  # AriaEveryday processing
-├── data/                  # Datasets
-├── configs/               # Hydra configurations
-└── requirements.txt       # Dependencies
-```
-
-## Configuration
-
-The project uses Hydra for configuration management. Key configuration files:
-
-- `configs/data/kitti_vio.yaml` - KITTI dataset configuration
-- `configs/data/aria_vio.yaml` - AriaEveryday dataset configuration
-- `configs/model/vift.yaml` - Model architecture configuration
-- `configs/trainer/default.yaml` - Training configuration
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Import errors**: Ensure all dependencies are installed by re-running `python scripts/setup_env.py`
-2. **CUDA out of memory**: Reduce batch size in the configuration files
-3. **Apple Silicon performance**: Ensure you're using the MPS backend by checking `torch.backends.mps.is_available()`
-
-### Platform Detection
-
-The setup script automatically detects your platform. You can verify detection by running:
-
-```bash
-python -c "
-import torch
-print(f'PyTorch version: {torch.__version__}')
-print(f'CUDA available: {torch.cuda.is_available()}')
-print(f'MPS available: {torch.backends.mps.is_available() if hasattr(torch.backends, \"mps\") else False}')
-"
-```
-
-# VIFT Aria Integration
-
-This repository extends the Visual-Inertial Fused Transformer (VIFT) to work with Meta's AriaEveryday dataset, enabling visual-inertial odometry training on real-world egocentric data.
-
-## Overview
-
-VIFT-AEA (VIFT + AriaEveryday) adapts the original VIFT architecture to process Aria's RGB camera streams and IMU data, following the exact same pipeline as KITTI to ensure compatibility with the pretrained models.
-
-## Setup
-
-### 1. Environment Setup
-
-```bash
-# Clone the repository
+# Clone and setup
 git clone <repository-url>
 cd VIFT_AEA
 
 # Create virtual environment
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Auto-install dependencies (detects CUDA/MPS/CPU)
+python scripts/setup_env.py
 ```
 
 ### 2. Download Pretrained Models
 
 ```bash
-# Download the pretrained VSVIO encoder (same as used for KITTI)
 mkdir -p pretrained_models
 # Place vf_512_if_256_3e-05.model in pretrained_models/
 ```
 
-### 3. Prepare Aria Data
+### 3. Dataset Preparation
 
-Ensure your processed Aria data is in the following structure:
-
-```
-data/aria_real_train/
-├── 00/
-│   ├── visual_data.pt      # [T, 3, H, W] RGB frames
-│   ├── imu_data.pt         # [T, 33, 6] IMU measurements  
-│   └── poses.json          # Ground truth poses
-├── 01/
-└── ...
-
-data/aria_real_test/
-├── 08/
-├── 09/
-└── ...
-```
-
-## Training Pipeline
-
-### Step 1: Latent Caching (Required)
-
-Extract visual-inertial features using a ResNet-based encoder compatible with VIFT:
-
-**Training Data (subset of sequences):**
+#### Step 1: Process a Subset of AriaEveryday
 
 ```bash
-# Process first 10 sequences only
+# Process a subset (e.g., 40 sequences) from the full AriaEveryday dataset
+python scripts/process_aria_to_vift.py \
+  --input-dir data/aria_everyday \
+  --output-dir data/aria_processed \
+  --start-index 0 \
+  --max-sequences 40
+```
+
+#### Step 2: Split the Processed Subset
+
+**Option 1: Automatic Split (Recommended)**
+```bash
+# Split the 40 processed sequences into train/val/test (70/15/15)
+# This will create separate folders for each split
+python scripts/create_dataset_splits.py \
+    --data_dir data/aria_processed \
+    --output_dir data/aria_split \
+    --train_ratio 0.7 \
+    --val_ratio 0.15 \
+    --test_ratio 0.15
+
+# This creates:
+# - data/aria_split/train/ (28 sequences)
+# - data/aria_split/val/ (6 sequences)
+# - data/aria_split/test/ (6 sequences)
+```
+
+**Option 2: Manual Split**
+```bash
+# Manually organize sequences into folders
+mkdir -p data/aria_split/{train,val,test}
+# Move sequences 00-27 to train/
+# Move sequences 28-33 to val/
+# Move sequences 34-39 to test/
+```
+
+#### Step 3: Generate Latent Features
+
+```bash
+# Cache ALL sequences in each split folder (no need to specify sequences)
+
+# Training features
 python data/latent_caching_aria.py \
-    --data_dir data/aria_real_train \
-    --save_dir aria_latent_data/train_10 \
+    --data_dir data/aria_split/train \
+    --save_dir aria_latent_data/train \
     --mode train \
-    --max_sequences 10 \
-    --device mps
-```
+    --device cuda  # or mps for Apple Silicon
 
-**Validation Data:**
-
-```bash
+# Validation features  
 python data/latent_caching_aria.py \
-    --data_dir data/aria_real_train \
-    --save_dir aria_latent_data/val_2 \
+    --data_dir data/aria_split/val \
+    --save_dir aria_latent_data/val \
     --mode val \
-    --val_sequences "8,9" \
-    --device mps
-```
+    --device cuda
 
-**Test Data (subset of sequences):**
-
-```bash
-# Process first 5 test sequences only
+# Test features
 python data/latent_caching_aria.py \
-    --data_dir data/aria_real_test \
-    --save_dir aria_latent_data/test_5 \
+    --data_dir data/aria_split/test \
+    --save_dir aria_latent_data/test \
     --mode test \
-    --max_sequences 5 \
-    --device mps
+    --device cuda
 ```
 
-This step:
-
-- Uses ResNet18 for visual feature extraction (512 dims)
-- Processes RGB images (256×512) and IMU data (6-DOF, padded to 256 dims)
-- Outputs 768-dim features: Visual(512) + IMU(256)
-- Saves in KITTI-compatible `.npy` format
-- Single script handles both training and validation data
-- **NEW**: `--max_sequences` parameter allows processing only a subset of sequences
-
-### Step 2: Training
-
-**Option A: Using Cached Latent Features (Recommended)**
+### 4. Training
 
 ```bash
-python src/train.py data=aria_latent model=aria_vio
+# Create project root marker
+touch .project-root
+
+# Train with custom paths
+python src/train.py data=aria_custom model=aria_vio_simple \
+    train_dir=aria_latent_data/train \
+    val_dir=aria_latent_data/val \
+    test_dir=aria_latent_data/test \
+    data.batch_size=32 \
+    trainer.max_epochs=50
+
+# Or use experiment configuration
+python src/train.py experiment=my_aria_experiment
 ```
 
-**Option B: Using Raw Data (Slower)**
+### 5. Evaluation
 
 ```bash
-python src/train.py --config-name=train_aria
+python scripts/evaluate_unbiased.py \
+    --checkpoint logs/train/runs/<timestamp>/checkpoints/epoch_000.ckpt \
+    --test_data aria_latent_data/test \
+    --batch_size 32 \
+    --device cuda
 ```
 
-### Step 3: Evaluation
+## Data Pipeline
 
+### Processing Flow
+
+1. **Raw Data** → `process_aria_to_vift.py` → **Processed Data** (visual_data.pt, imu_data.pt, poses.json)
+2. **Processed Data** → `latent_caching_aria.py` → **Latent Features** (.npy files)
+3. **Latent Features** → `train.py` → **Trained Model**
+
+### Data Format
+
+| Component | Format | Dimensions | Description |
+|-----------|--------|------------|-------------|
+| Visual | RGB frames | [T, 3, 256, 512] | Resized camera images |
+| IMU | 6-DOF | [T, 6] | Averaged from 33 samples/frame |
+| Poses | Translation + Quaternion | [T, 7] | [tx,ty,tz,qx,qy,qz,qw] |
+| Latent Features | Visual + IMU | [T, 768] | 512 (visual) + 256 (IMU) |
+
+## Configuration
+
+### Key Config Files
+
+- **Data Configs**:
+  - `configs/data/aria_custom.yaml` - Flexible paths for custom datasets
+  - `configs/data/aria_latent.yaml` - Default Aria latent data
+  
+- **Model Configs**:
+  - `configs/model/aria_vio_simple.yaml` - Simplified model (recommended)
+  - `configs/model/aria_vio.yaml` - Full model with KITTI tester
+  
+- **Experiment Configs**:
+  - `configs/experiment/my_aria_experiment.yaml` - Example custom setup
+
+### Creating Custom Experiments
+
+```yaml
+# configs/experiment/my_custom_experiment.yaml
+# @package _global_
+defaults:
+  - override /data: aria_custom
+  - override /model: aria_vio_simple
+  - override /trainer: default
+
+# Dataset paths
+train_dir: aria_latent_data/my_train
+val_dir: aria_latent_data/my_val
+test_dir: aria_latent_data/my_test
+
+# Training parameters
+trainer:
+  max_epochs: 100
+  check_val_every_n_epoch: 5
+
+model:
+  optimizer:
+    lr: 0.0001
+```
+
+## Platform Support
+
+- **CUDA (Linux)**: NVIDIA GPUs with CUDA 11.8+
+- **Apple Silicon (macOS)**: M1/M2/M3 with MPS backend
+- **CPU**: Fallback for any platform
+
+Verify installation:
 ```bash
-python src/eval.py --config-name=eval_aria ckpt_path=path/to/checkpoint.ckpt
-```
-
-## Data Format Compatibility
-
-### Aria → KITTI Pipeline Alignment
-
-| Component          | KITTI Format           | Aria Format                  | Processing                 |
-| ------------------ | ---------------------- | ---------------------------- | -------------------------- |
-| **Visual**   | RGB stereo images      | RGB camera frames            | Same transforms (256×512) |
-| **IMU**      | 6-DOF IMU              | 6-DOF IMU (33 samples/frame) | Average to 6 values/frame  |
-| **Poses**    | [tx,ty,tz,qx,qy,qz,qw] | [tx,ty,tz,qx,qy,qz,qw]       | Same format                |
-| **Features** | [seq_len, 768]         | [seq_len, 768]               | Identical (512+256)        |
-
-### Key Features
-
-✅ **ResNet-based Encoder**: Uses ResNet18 for reliable visual feature extraction
-✅ **Same Dimensions**: 768-dim features (Visual: 512, IMU: 256)
-✅ **Same Transforms**: Image preprocessing (256×512, normalization)
-✅ **Same Format**: Output `.npy` files compatible with VIFT
-✅ **Unified Script**: Single script handles both training and validation data
-✅ **No Dependencies**: Works without VIFT pretrained models
-
-## Configuration Files
-
-### Data Configurations
-
-- `configs/data/aria_vio.yaml` - Raw Aria data loading
-- `configs/data/aria_latent.yaml` - Cached latent features
-
-### Model Configurations
-
-- `configs/model/aria_vio.yaml` - Aria-compatible VIO model
-- `configs/trainer/default.yaml` - Training parameters
-
-### Training Configurations
-
-- `configs/train_aria.yaml` - Main training config
-
-## File Structure
-
-```
-VIFT_AEA/
-├── src/
-│   ├── data/
-│   │   └── aria_datamodule.py          # Aria data loading
-│   └── models/
-│       └── aria_vio_module.py          # Aria-compatible Lightning module
-├── data/
-│   └── latent_caching_aria.py          # Unified train/val latent caching
-├── configs/
-│   ├── data/
-│   │   ├── aria_latent.yaml            # Latent data config
-│   │   └── aria_vio.yaml               # Raw data config
-│   ├── model/
-│   │   └── aria_vio.yaml               # Model config
-│   └── train_aria.yaml                 # Training config
-└── README.md
-```
-
-## Performance Notes
-
-### Training Speed
-
-- **With Latent Caching**: ~5-10x faster training
-- **Without Caching**: Real-time visual encoding (slower)
-
-### Hardware Requirements
-
-- **GPU**: Recommended for latent caching (MPS/CUDA)
-- **RAM**: 16GB+ for large sequences
-- **Storage**: ~1GB per 1000 cached samples
-
-## Troubleshooting
-
-### Common Issues
-
-**1. Pretrained Model Missing**
-
-```bash
-# No longer needed - script uses ResNet18 encoder
-# Works out of the box without external dependencies
-```
-
-**2. Data Format Issues**
-
-```bash
-# Check your data format
 python -c "
 import torch
-from pathlib import Path
-data = torch.load('data/aria_real_train/00/visual_data.pt')
-print(f'Visual data shape: {data.shape}')
+print(f'PyTorch: {torch.__version__}')
+print(f'CUDA: {torch.cuda.is_available()}')
+print(f'MPS: {torch.backends.mps.is_available() if hasattr(torch.backends, \"mps\") else False}')
 "
 ```
-
-**3. Memory Issues**
-
-```bash
-# Reduce batch size in config
-batch_size: 16  # Default: 32
-```
-
-**4. Device Issues**
-
-```bash
-# Force CPU if GPU issues
-python data/latent_caching_aria.py --device cpu --mode train
-```
-
-**5. Validation Sequences**
-
-```bash
-# Customize validation sequences
-python data/latent_caching_aria.py \
-    --mode val --val_sequences "7,8,9" \
-    --save_dir aria_latent_data/val_10
-```
-
-## Citation
-
-If you use this work, please cite:
-
-```bibtex
-@article{vift_aria_2024,
-  title={VIFT Aria Integration: Visual-Inertial Odometry with AriaEveryday Dataset},
-  author={Your Name},
-  journal={arXiv preprint},
-  year={2024}
-}
-```
-
-## Acknowledgments
-
-- Original VIFT paper and implementation
-- Meta's AriaEveryday dataset
-- KITTI dataset for reference implementation
 
 ## License
 
