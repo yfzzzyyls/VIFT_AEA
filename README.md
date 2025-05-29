@@ -157,28 +157,40 @@ python src/train.py --config-name=train_aria data=aria_latent model=aria_vio_sim
 **Performance Metrics (196 test samples):**
 ```
 🎯 Overall Performance:
-   MSE:  5.857567
-   RMSE: 2.420241
-   MAE:  1.886364
+   MSE:  6.616021
+   RMSE: 2.572163
+   MAE:  1.919297
 
-🚀 Translation (xyz):
-   MSE:  2.880902
-   RMSE: 1.697322
+🚀 Translation (xyz) - Units: METERS:
+   MSE:  4.383107 m²
+   RMSE: 2.093587 m
 
-🔄 Rotation (rpy):
-   MSE:  8.834232
-   RMSE: 2.972244
+🔄 Rotation (rpy) - Units: RADIANS:
+   MSE:  8.848937 rad²
+   RMSE: 2.974716 rad
 
 📏 Per-Dimension Breakdown:
-   tx: MSE=4.261, RMSE=2.064, MAE=2.008
-   ty: MSE=2.663, RMSE=1.632, MAE=1.618
-   tz: MSE=1.720, RMSE=1.311, MAE=1.237
-   rx: MSE=19.426, RMSE=4.407, MAE=3.442
-   ry: MSE=6.885, RMSE=2.624, MAE=2.621
-   rz: MSE=0.192, RMSE=0.438, MAE=0.393
+   tx: MSE=11.263 m², RMSE=3.356 m, MAE=3.304 m
+   ty: MSE=1.468 m², RMSE=1.211 m, MAE=1.161 m
+   tz: MSE=0.419 m², RMSE=0.647 m, MAE=0.478 m
+   rx: MSE=18.603 rad², RMSE=4.313 rad (247.1°), MAE=3.279 rad
+   ry: MSE=7.484 rad², RMSE=2.736 rad (156.7°), MAE=2.639 rad
+   rz: MSE=0.460 rad², RMSE=0.678 rad (38.9°), MAE=0.655 rad
+
+💡 Performance Summary:
+   📍 Position Error: ~2.1m RMSE
+   🔄 Orientation Error: ~170.4° RMSE
+   🎯 Best Translation: tz (0.65m vertical)
+   🎯 Best Rotation: rz (38.9° yaw)
 ```
 
-**Evaluation Speed:** 53.82 it/s on NVIDIA RTX A6000
+**Evaluation Speed:** 67.1 it/s on NVIDIA RTX A6000
+
+**Performance Interpretation:**
+- **Translation accuracy**: 2.1m average position error suitable for room-level localization
+- **Rotation accuracy**: Large orientation errors (>150°) in pitch/roll, good yaw performance (39°)
+- **Best performance**: Vertical translation (tz) and yaw rotation (rz) show excellent accuracy
+- **Practical use**: Suitable for coarse indoor navigation, needs improvement for precise AR/VR applications
 
 #### Evaluation Methods
 

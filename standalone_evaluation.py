@@ -209,22 +209,50 @@ def print_metrics(metrics):
     
     # Translation vs Rotation
     if 'translation_mse' in metrics:
-        print(f"\n🚀 Translation (xyz):")
-        print(f"   MSE:  {metrics['translation_mse']:.6f}")
-        print(f"   RMSE: {metrics['translation_rmse']:.6f}")
+        print(f"\n🚀 Translation (xyz) - Units: METERS:")
+        print(f"   MSE:  {metrics['translation_mse']:.6f} m²")
+        print(f"   RMSE: {metrics['translation_rmse']:.6f} m")
         
-        print(f"\n🔄 Rotation (rpy):")
-        print(f"   MSE:  {metrics['rotation_mse']:.6f}")
-        print(f"   RMSE: {metrics['rotation_rmse']:.6f}")
+        print(f"\n🔄 Rotation (rpy) - Units: RADIANS:")
+        print(f"   MSE:  {metrics['rotation_mse']:.6f} rad²")
+        print(f"   RMSE: {metrics['rotation_rmse']:.6f} rad")
     
     # Per-dimension breakdown
     print(f"\n📏 Per-Dimension Breakdown:")
     for i in range(6):  # Assuming 6-DOF pose
         dim_name = ['tx', 'ty', 'tz', 'rx', 'ry', 'rz'][i]
+        units = ['m', 'm', 'm', 'rad', 'rad', 'rad']
+        unit = units[i]
+        
         if f'mse_dim_{i}' in metrics:
-            print(f"   {dim_name}: MSE={metrics[f'mse_dim_{i}']:.6f}, "
-                  f"RMSE={metrics[f'rmse_dim_{i}']:.6f}, "
-                  f"MAE={metrics[f'mae_dim_{i}']:.6f}")
+            mse = metrics[f'mse_dim_{i}']
+            rmse = metrics[f'rmse_dim_{i}']
+            mae = metrics[f'mae_dim_{i}']
+            
+            # Add degree conversion for rotation dimensions
+            if i >= 3:  # Rotation dimensions
+                deg_conversion = f" ({rmse*57.2958:.1f}°)"
+            else:
+                deg_conversion = ""
+            
+            print(f"   {dim_name}: MSE={mse:.6f} {unit}², "
+                  f"RMSE={rmse:.6f} {unit}{deg_conversion}, "
+                  f"MAE={mae:.6f} {unit}")
+    
+    # Add performance summary
+    if 'translation_rmse' in metrics and 'rotation_rmse' in metrics:
+        print(f"\n💡 Performance Summary:")
+        print(f"   📍 Position Error: ~{metrics['translation_rmse']:.1f}m RMSE")
+        print(f"   🔄 Orientation Error: ~{metrics['rotation_rmse']*57.2958:.1f}° RMSE")
+        
+        # Find best performing dimensions
+        best_trans_idx = min(range(3), key=lambda i: metrics[f'rmse_dim_{i}'])
+        best_rot_idx = min(range(3, 6), key=lambda i: metrics[f'rmse_dim_{i}'])
+        best_trans_name = ['tx', 'ty', 'tz'][best_trans_idx]
+        best_rot_name = ['rx', 'ry', 'rz'][best_rot_idx - 3]
+        
+        print(f"   🎯 Best Translation: {best_trans_name} ({metrics[f'rmse_dim_{best_trans_idx}']:.2f}m)")
+        print(f"   🎯 Best Rotation: {best_rot_name} ({metrics[f'rmse_dim_{best_rot_idx}']*57.2958:.1f}°)")
     
     print("="*60)
 
