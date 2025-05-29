@@ -39,14 +39,6 @@ class VIOLitModule(LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, target = batch
-        
-        # Debug: Check device on first batch
-        if batch_idx == 0 and self.current_epoch == 0:
-            print(f"\n[DEBUG] Training step devices:")
-            print(f"  Input x device: {x.device}")
-            print(f"  Target device: {target.device}")
-            print(f"  Model device: {next(self.net.parameters()).device}")
-        
         out = self.forward(x, target)
         loss = self.criterion(out, target)
 
@@ -76,8 +68,7 @@ class VIOLitModule(LightningModule):
     def on_test_epoch_end(self):
         # Only run custom testing if tester is available
         if self.tester is not None:
-            # DummyTester expects dataloader and net arguments
-            results = self.tester.test(None, self.net)
+            results = self.tester.test(self.net)
             
             if self.metrics_calculator is not None:
                 metrics = self.metrics_calculator.calculate_metrics(results)
