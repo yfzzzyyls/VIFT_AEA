@@ -115,13 +115,16 @@ python scripts/process_aria_to_vift.py \
 
 ### Latent Caching
 
-**Training dataset (10 sequences)**
+The latent caching script now supports processing only a subset of sequences using the `--max_sequences` parameter. This is useful for quick experiments or when working with limited resources.
+
+**Training dataset (first 10 sequences)**
 
 ```bash
 python data/latent_caching_aria.py \
     --data_dir data/aria_real_train \
     --save_dir aria_latent_data/train_10 \
     --mode train \
+    --max_sequences 10 \
     --device cuda
 ```
 
@@ -137,17 +140,32 @@ python data/latent_caching_aria.py \
     --device cuda
 ```
 
-**Test/Inference dataset (auto-detect all sequences in test directory)**
+**Test/Inference dataset (first 5 sequences)**
 
 ```bash
 python data/latent_caching_aria.py \
     --data_dir data/aria_real_test \
     --save_dir aria_latent_data/test_5 \
     --mode test \
+    --max_sequences 5 \
     --device cuda
 ```
 
-**Note:** Validation set is optional - it uses the last 2 sequences (08,09) from your training data to monitor training progress. You can skip validation if you want to use all 10 training sequences for training.
+**Process all sequences (omit --max_sequences)**
+
+```bash
+# To process all available sequences, simply omit the --max_sequences parameter
+python data/latent_caching_aria.py \
+    --data_dir data/aria_real_train \
+    --save_dir aria_latent_data/train_all \
+    --mode train \
+    --device cuda
+```
+
+**Note:** 
+- The `--max_sequences` parameter limits processing to the first N sequences found in the directory (sorted by name)
+- Validation set is optional - it uses the last 2 sequences (08,09) from your training data to monitor training progress
+- You can skip validation if you want to use all 10 training sequences for training
 
 ### 3. Training
 
@@ -299,13 +317,15 @@ data/aria_real_test/
 
 Extract visual-inertial features using a ResNet-based encoder compatible with VIFT:
 
-**Training Data:**
+**Training Data (subset of sequences):**
 
 ```bash
+# Process first 10 sequences only
 python data/latent_caching_aria.py \
     --data_dir data/aria_real_train \
     --save_dir aria_latent_data/train_10 \
     --mode train \
+    --max_sequences 10 \
     --device mps
 ```
 
@@ -314,9 +334,21 @@ python data/latent_caching_aria.py \
 ```bash
 python data/latent_caching_aria.py \
     --data_dir data/aria_real_train \
-    --save_dir aria_latent_data/val_10 \
+    --save_dir aria_latent_data/val_2 \
     --mode val \
     --val_sequences "8,9" \
+    --device mps
+```
+
+**Test Data (subset of sequences):**
+
+```bash
+# Process first 5 test sequences only
+python data/latent_caching_aria.py \
+    --data_dir data/aria_real_test \
+    --save_dir aria_latent_data/test_5 \
+    --mode test \
+    --max_sequences 5 \
     --device mps
 ```
 
@@ -327,6 +359,7 @@ This step:
 - Outputs 768-dim features: Visual(512) + IMU(256)
 - Saves in KITTI-compatible `.npy` format
 - Single script handles both training and validation data
+- **NEW**: `--max_sequences` parameter allows processing only a subset of sequences
 
 ### Step 2: Training
 

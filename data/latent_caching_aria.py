@@ -124,6 +124,8 @@ def main():
                        help="Processing mode: train (all sequences), val (specific sequences), or test (test sequences)")
     parser.add_argument("--val_sequences", type=str, default="auto",
                        help="Comma-separated validation/test sequence IDs, or 'auto' to detect all sequences (only used in val/test mode)")
+    parser.add_argument("--max_sequences", type=int, default=None,
+                       help="Maximum number of sequences to process (e.g., 10 for train, 5 for test)")
     
     args = parser.parse_args()
     
@@ -192,6 +194,11 @@ def main():
         print(f"❌ No sequences found")
         return
     
+    # Limit number of sequences if specified
+    if args.max_sequences is not None and len(sequence_dirs) > args.max_sequences:
+        sequence_dirs = sequence_dirs[:args.max_sequences]
+        print(f"🔄 Limited to first {args.max_sequences} sequences")
+    
     # Process sequences
     sample_idx = 0
     
@@ -225,6 +232,10 @@ def main():
         print(f"   python data/latent_caching_aria.py \\")
         print(f"     --mode val --save_dir aria_latent_data/val \\")
         print(f"     --val_sequences '100,101,102,103,104' --device {args.device}")
+        print(f"   Or to limit sequences:")
+        print(f"   python data/latent_caching_aria.py \\")
+        print(f"     --mode val --save_dir aria_latent_data/val \\")
+        print(f"     --max_sequences 5 --device {args.device}")
         print(f"2. Run training: python src/train.py data=aria_latent model=aria_vio")
     else:
         print(f"\n📝 Ready for training!")
