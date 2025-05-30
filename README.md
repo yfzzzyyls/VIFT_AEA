@@ -138,7 +138,7 @@ python src/train.py \
     data.val_loader.root_dir=aria_latent_data/val \
     data.test_loader.root_dir=aria_latent_data/test \
     data.batch_size=32 \
-    trainer.max_epochs=50 \
+    trainer.max_epochs=150 \
     trainer.accelerator=gpu  # or mps for Apple Silicon
 ```
 
