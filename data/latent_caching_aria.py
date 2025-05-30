@@ -22,8 +22,7 @@ class SimpleVisualEncoder(nn.Module):
         
         self.transform = transforms.Compose([
             transforms.Resize((256, 512)),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                               std=[0.229, 0.224, 0.225])
+            transforms.Lambda(lambda x: x - 0.5)  # VIFT normalization
         ])
     
     def forward(self, x):
@@ -96,20 +95,33 @@ def process_aria_sequence_simple(seq_dir: Path, visual_encoder, device='cpu'):
         latent_vector = torch.cat([visual_features.cpu(), imu_padded], dim=1)  # [11, 768]
         latent_vectors.append(latent_vector.numpy())
         
-        # Prepare ground truth
+        # Prepare ground truth - compute RELATIVE poses
         gt_poses = []
-        for pose in poses_seq:
-            # Use the pre-computed pose_6dof format from processing
-            if 'pose_6dof' in pose:
-                # Format: [rx, ry, rz, tx, ty, tz] from process_aria_to_vift.py
-                gt_pose = pose['pose_6dof']
+        for i in range(len(poses_seq)):
+            if i == 0:
+                # First frame: no motion (identity transformation)
+                gt_poses.append([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
             else:
-                # Fallback: construct from translation + rotation_euler
-                translation = pose['translation']  # [tx, ty, tz] 
-                rotation_euler = pose['rotation_euler']  # [rx, ry, rz]
-                gt_pose = rotation_euler + translation  # [rx, ry, rz, tx, ty, tz]
-            
-            gt_poses.append(gt_pose)
+                # Compute relative transformation from pose[i-1] to pose[i]
+                prev_pose = poses_seq[i-1]
+                curr_pose = poses_seq[i]
+                
+                # Get 6DOF poses
+                if 'pose_6dof' in prev_pose:
+                    prev_6dof = prev_pose['pose_6dof']
+                    curr_6dof = curr_pose['pose_6dof']
+                else:
+                    # Fallback: construct from translation + rotation_euler
+                    prev_6dof = prev_pose['rotation_euler'] + prev_pose['translation']
+                    curr_6dof = curr_pose['rotation_euler'] + curr_pose['translation']
+                
+                # Compute relative pose (simple difference for now)
+                # For proper SE3 relative transform, we'd use matrix operations
+                rel_rotation = [curr_6dof[j] - prev_6dof[j] for j in range(3)]
+                rel_translation = [curr_6dof[j+3] - prev_6dof[j+3] for j in range(3)]
+                
+                rel_pose = rel_rotation + rel_translation
+                gt_poses.append(rel_pose)
         
         ground_truths.append(np.array(gt_poses))
     
