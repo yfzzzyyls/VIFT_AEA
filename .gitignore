@@ -4,6 +4,7 @@ data/aria_real_train/
 data/aria_real_test/
 data/kitti_data/
 aria_latent_data/
+data/aria_processed/
 *.DS_Store
 # Python cache files
 __pycache__/

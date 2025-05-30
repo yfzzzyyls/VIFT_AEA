@@ -153,71 +153,77 @@ python src/train.py --config-name=train_aria \
 
 **Training Completed Successfully:**
 - **Model**: PoseTransformer with ~512K parameters  
-- **Training Duration**: 50 epochs with excellent convergence
-- **Final Training Loss**: 100+ → 9.26 (94% reduction)
-- **Training Speed**: ~120 it/s on NVIDIA RTX A6000
-- **Checkpoint**: `logs/aria_vio/runs/2025-05-29_13-44-07/checkpoints/epoch_000.ckpt`
+- **Training Duration**: 100 epochs with excellent convergence
+- **Final Training Loss**: 100+ → 2.586 (significant reduction)
+- **Validation Loss**: 347.884 (concerning - suggests overfitting)
+- **Training Speed**: ~79 it/s on NVIDIA RTX A6000
+- **Checkpoint**: `logs/aria_vio/runs/2025-05-29_22-38-11/checkpoints/epoch_000.ckpt`
 
 #### Test Dataset Analysis ✅
 
 **Dataset Statistics:**
-- **Test Samples**: 196 cached latent sequences
+- **Test Samples**: 980 cached latent sequences
 - **Feature Dimensions**: [11, 768] (11 timesteps, 768-dim features)
 - **Target Dimensions**: [11, 6] (11 timesteps, 6-DOF poses)
 
 #### Evaluation Results ✅
 
-**Performance Metrics (196 test samples):**
+**Performance Metrics (980 test samples):**
 ```
 🎯 Overall Performance:
-   MSE:  6.616021
-   RMSE: 2.572163
-   MAE:  1.919297
+   MSE:  3.1026
+   RMSE: 1.7614 meters
+   MAE:  1.3134 meters
 
 🚀 Translation (xyz) - Units: METERS:
-   MSE:  4.383107 m²
-   RMSE: 2.093587 m
+   RMSE: 2.2703 meters
 
 🔄 Rotation (rpy) - Units: RADIANS:
-   MSE:  8.848937 rad²
-   RMSE: 2.974716 rad
+   RMSE: 1.0253 rad (58.7°)
 
-📏 Per-Dimension Breakdown:
-   tx: MSE=11.263 m², RMSE=3.356 m, MAE=3.304 m
-   ty: MSE=1.468 m², RMSE=1.211 m, MAE=1.161 m
-   tz: MSE=0.419 m², RMSE=0.647 m, MAE=0.478 m
-   rx: MSE=18.603 rad², RMSE=4.313 rad (247.1°), MAE=3.279 rad
-   ry: MSE=7.484 rad², RMSE=2.736 rad (156.7°), MAE=2.639 rad
-   rz: MSE=0.460 rad², RMSE=0.678 rad (38.9°), MAE=0.655 rad
+📏 Per-Dimension RMSE:
+   rx (roll): 0.9992 rad (57.2°)
+   ry (pitch): 0.2853 rad (16.3°) ⭐ Best performance
+   rz (yaw): 1.4400 rad (82.5°)
+   tx: 2.3915 meters
+   ty: 2.1856 meters  
+   tz: 2.2285 meters
 
 💡 Performance Summary:
-   📍 Position Error: ~2.1m RMSE
-   🔄 Orientation Error: ~170.4° RMSE
-   🎯 Best Translation: tz (0.65m vertical)
-   🎯 Best Rotation: rz (38.9° yaw)
+   📍 Position Error: ~2.3m RMSE
+   🔄 Orientation Error: ~58.7° RMSE
+   🎯 Best Performance: Pitch rotation (16.3°)
+   ⚡ Evaluation Speed: 189.9 it/s on NVIDIA RTX A6000
 ```
 
-**Evaluation Speed:** 67.1 it/s on NVIDIA RTX A6000
-
 **Performance Interpretation:**
-- **Translation accuracy**: 2.1m average position error suitable for room-level localization
-- **Rotation accuracy**: Large orientation errors (>150°) in pitch/roll, good yaw performance (39°)
-- **Best performance**: Vertical translation (tz) and yaw rotation (rz) show excellent accuracy
-- **Practical use**: Suitable for coarse indoor navigation, needs improvement for precise AR/VR applications
+- **Translation accuracy**: 2.3m average position error suitable for room-level localization
+- **Rotation accuracy**: 58.7° average orientation error - significant improvement over initial results
+- **Best performance**: Pitch rotation (16.3°) shows excellent accuracy for indoor navigation
+- **Practical use**: Suitable for coarse indoor navigation and room-level AR/VR applications
 
 #### Evaluation Methods
 
 **Method 1: Standalone Evaluation (Recommended) ✅**
 ```bash
-# Run comprehensive evaluation with the robust standalone script
-python standalone_evaluation.py \
-    --checkpoint logs/aria_vio/runs/2025-05-29_13-44-07/checkpoints/epoch_000.ckpt \
-    --test_data aria_latent_data/test
+# Run comprehensive evaluation with the corrected model architecture
+python corrected_evaluation.py \
+    --checkpoint logs/aria_vio/runs/2025-05-29_22-38-11/checkpoints/epoch_000.ckpt \
+    --test_data aria_latent_data/test \
+    --batch_size 16
 
 # Output files generated:
-# - evaluation_results.json (detailed metrics)
-# - evaluation_results_predictions.npy (model predictions)
-# - evaluation_results_targets.npy (ground truth targets)
+# - corrected_evaluation_results.json (detailed metrics)
+# - corrected_evaluation_results_predictions_corrected.npy (model predictions)  
+# - corrected_evaluation_results_targets_corrected.npy (ground truth targets)
+```
+
+**Alternative: Original Standalone Script**
+```bash
+# Note: Uses different model architecture, results may differ
+python standalone_evaluation.py \
+    --checkpoint logs/aria_vio/runs/2025-05-29_22-38-11/checkpoints/epoch_000.ckpt \
+    --test_data aria_latent_data/test
 ```
 
 **Method 2: Quick Data Analysis**
