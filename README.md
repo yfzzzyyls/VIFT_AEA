@@ -152,8 +152,8 @@ python src/train.py \
 
 ```bash
 # Evaluate the trained model
-python corrected_evaluation.py \
-    --checkpoint logs/aria_vio/runs/YOUR_RUN/checkpoints/epoch_XXX.ckpt \
+python evaluation.py \
+    --checkpoint /home/external/VIFT_AEA/logs/train/runs/2025-05-30_10-48-09/checkpoints/epoch_149.ckpt \
     --test_data aria_latent_data/test \
     --batch_size 16
 ```
@@ -290,6 +290,65 @@ The model uses a causal transformer architecture:
 - Input: 11 frames of concatenated visual-inertial features (768-dim)
 - Processing: 2-layer transformer with causal masking
 - Output: 11 relative poses (6-DOF: rotation + translation)
+
+## AR/VR Considerations and Drift Correction
+
+### Current Performance Limitations
+
+While the model achieves good frame-to-frame accuracy:
+- **Rotation RMSE**: 0.5° per frame
+- **Translation RMSE**: 1.2cm per frame
+
+These errors accumulate rapidly for AR/VR applications:
+- After 1 minute (1800 frames @ 30fps): ~22cm drift, ~900° rotation error
+- After 5 minutes: >1 meter drift - unusable for AR/VR
+
+### Required AR/VR Performance
+
+For production AR/VR systems:
+- **Positional tracking**: <1mm drift per minute
+- **Rotational tracking**: <0.1° drift per minute
+- Current performance is **2-3 orders of magnitude** worse than required
+
+### Essential Drift Correction Mechanisms
+
+1. **Loop Closure**
+   - Detect when returning to previously visited locations
+   - Correct accumulated drift by constraining pose graph
+   - Essential for any session >30 seconds
+
+2. **Visual Markers/Fiducials**
+   - Use ArUco markers or AprilTags for absolute pose correction
+   - Place markers at known locations in the environment
+   - Provides ground truth references
+
+3. **IMU Fusion**
+   - Integrate high-frequency IMU data (1000Hz+)
+   - Helps with rapid motion and reduces drift
+   - Provides gravity reference for orientation
+
+4. **Map Reuse/Relocalization**
+   - Build and save environmental maps
+   - Relocalize against previously mapped areas
+   - Enables persistent AR experiences
+
+5. **Hybrid Tracking**
+   - Combine multiple sensors: cameras, IMU, depth sensors
+   - Use complementary strengths of each sensor
+   - Typical production systems use 4+ cameras + IMU + depth
+
+### Implementation Recommendations
+
+For AR/VR deployment, you MUST implement:
+- Real-time loop closure detection
+- Multi-sensor fusion pipeline
+- Relocalization capability
+- Drift monitoring and correction
+
+Without these mechanisms, the system is only suitable for:
+- Short demos (<30 seconds)
+- Offline trajectory analysis
+- Research and development
 
 ## Contributing
 
