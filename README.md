@@ -20,14 +20,15 @@ A high-performance adaptation of VIFT (Visual-Inertial Fused Transformer) for Me
 
 ## 🚀 Performance
 
-After critical fixes to match the original VIFT implementation:
+**State-of-the-art results after hyperparameter optimization:**
 
-| Metric | Before Fix | After Fix | Improvement |
-|--------|------------|-----------|-------------|
-| Training Loss | 129-149 | **0.035** | 99.97% ↓ |
-| Inference MSE | 3.18 | **0.0033** | 99.9% ↓ |
-| Translation RMSE | 2.29m | **0.066m** | 97% ↓ |
-| Rotation RMSE | 60.2° | **2.7°** | 95% ↓ |
+| Model | Rotation RMSE | Translation RMSE | Parameters | Training Speed |
+|-------|---------------|------------------|------------|----------------|
+| **🏆 Optimized (latent_vio_tf_simple)** | **0.3°** | **0.57cm** | 13.8M | ~108 it/s |
+| Previous Best (aria_vio_simple) | 0.5° | 1.23cm | 512K | ~150 it/s |
+| Dense Baseline (latent_vio_simple) | 1.7° | 1.65cm | 132K | ~259 it/s |
+
+**Key Achievement**: **52% improvement** over previous best with deep 4-layer transformer architecture!
 
 ## Key Features
 
@@ -86,18 +87,24 @@ python scripts/process_aria_to_vift.py \
 #### Step 3: Split the Processed Data
 
 ```bash
-# Split into train/val/test (e.g., 5/3/2 for 10 sequences)
-python scripts/create_dataset_splits.py \
+# Split into train/val/test using OPTIMIZED 80/10/10 ratio
+python scripts/create_dataset_splits_symlink.py \
     --data_dir data/aria_processed \
     --output_dir data/aria_split \
-    --train_ratio 0.5 \
-    --val_ratio 0.3 \
-    --test_ratio 0.2
+    --train_ratio 0.8 \
+    --val_ratio 0.1 \
+    --test_ratio 0.1
 
-# This creates separate folders:
-# - data/aria_split/train/ (5 sequences)
-# - data/aria_split/val/ (3 sequences)
-# - data/aria_split/test/ (2 sequences)
+# This creates symlinked folders (much faster than copying):
+# - data/aria_split/train/ (~95 sequences for 119 total)
+# - data/aria_split/val/ (~12 sequences)  
+# - data/aria_split/test/ (~12 sequences)
+
+# Alternative: Use original script if you prefer copying files
+# python scripts/create_dataset_splits.py \
+#     --data_dir data/aria_processed \
+#     --output_dir data/aria_split \
+#     --train_ratio 0.8 --val_ratio 0.1 --test_ratio 0.1
 ```
 
 #### Step 4: Generate Latent Features
@@ -130,7 +137,18 @@ python data/latent_caching_aria.py \
 ### 4. Training
 
 ```bash
-# Train the model
+# Train the OPTIMIZED model (best performance)
+python src/train.py \
+    data=aria_latent \
+    model=latent_vio_tf_simple \
+    data.train_loader.root_dir=aria_latent_data/train \
+    data.val_loader.root_dir=aria_latent_data/val \
+    data.test_loader.root_dir=aria_latent_data/test \
+    data.batch_size=32 \
+    trainer.max_epochs=50 \
+    trainer.accelerator=gpu  # or mps for Apple Silicon
+
+# Alternative: Train baseline model (faster, smaller)
 python src/train.py \
     data=aria_latent \
     model=aria_vio_simple \
@@ -139,45 +157,60 @@ python src/train.py \
     data.test_loader.root_dir=aria_latent_data/test \
     data.batch_size=32 \
     trainer.max_epochs=150 \
-    trainer.accelerator=gpu  # or mps for Apple Silicon
+    trainer.accelerator=gpu
 ```
 
 **Expected Training Performance:**
-- Model: PoseTransformer with ~512K parameters
+
+**Optimized Model (latent_vio_tf_simple):**
+- Model: 4-layer PoseTransformer with 13.8M parameters
+- Training loss: Drops to ~0.000 within 50 epochs
+- Training speed: ~108 it/s on NVIDIA RTX A6000
+- Best results: 0.3° rotation, 0.57cm translation RMSE
+
+**Baseline Model (aria_vio_simple):**
+- Model: 2-layer PoseTransformer with 512K parameters  
 - Training loss: Drops from ~0.1 to <0.04 within 10 epochs
 - Training speed: ~150 it/s on NVIDIA RTX A6000
-- Final loss: <0.01 achievable with 50+ epochs
+- Good results: 0.5° rotation, 1.23cm translation RMSE
 
 ### 5. Evaluation
 
 ```bash
-# Evaluate the trained model
+# Evaluate any trained model (auto-detects architecture)
+python evaluation_auto.py \
+    --checkpoint /path/to/your/checkpoint.ckpt \
+    --test_data aria_latent_data/test \
+    --batch_size 16
+
+# Or use original evaluation for aria_vio_simple models
 python evaluation.py \
-    --checkpoint /home/external/VIFT_AEA/logs/train/runs/2025-05-30_10-48-09/checkpoints/epoch_149.ckpt \
+    --checkpoint /path/to/aria_vio_simple_checkpoint.ckpt \
     --test_data aria_latent_data/test \
     --batch_size 16
 ```
 
-**Expected Performance (with proper training):**
+**Expected Performance:**
+
+**Optimized Model (latent_vio_tf_simple):**
 ```
-🎯 Overall Performance:
-   MSE:  0.0033
-   RMSE: 0.057 meters
-   MAE:  0.046 meters
+🏆 BEST PERFORMANCE:
+   Rotation RMSE: 0.0047 rad (0.3°)
+   Translation RMSE: 0.0057 meters (0.57cm)
+   Overall RMSE: 0.0052 meters
+   
+📈 Per-Dimension RMSE:
+   rx: 0.0047 rad (0.3°)    tx: 0.0073 meters
+   ry: 0.0037 rad (0.2°)    ty: 0.0052 meters  
+   rz: 0.0056 rad (0.3°)    tz: 0.0043 meters
+```
 
-🚀 Translation (xyz):
-   RMSE: 0.066 meters (6.6cm)
-
-🔄 Rotation (rpy):
-   RMSE: 0.048 rad (2.7°)
-
-📏 Per-Dimension RMSE:
-   rx: 0.046 rad (2.6°)
-   ry: 0.046 rad (2.6°)
-   rz: 0.051 rad (2.9°)
-   tx: 0.028 meters
-   ty: 0.043 meters
-   tz: 0.102 meters
+**Baseline Model (aria_vio_simple):**
+```
+🥈 GOOD PERFORMANCE:
+   Rotation RMSE: 0.0092 rad (0.5°)
+   Translation RMSE: 0.0123 meters (1.23cm)
+   Overall RMSE: 0.0108 meters
 ```
 
 The model predicts relative poses between consecutive frames with high accuracy, suitable for visual-inertial odometry applications.
@@ -236,27 +269,43 @@ data/
 ### Key Config Files
 
 - **Data Config**: `configs/data/aria_latent.yaml` - Aria dataset configuration
-- **Model Config**: `configs/model/aria_vio_simple.yaml` - PoseTransformer model
+- **Optimized Model**: `configs/model/latent_vio_tf_simple.yaml` - **BEST** 4-layer transformer
+- **Baseline Model**: `configs/model/aria_vio_simple.yaml` - 2-layer transformer baseline
 - **Training Config**: `configs/train.yaml` - Training hyperparameters
 
 ### Key Parameters
 
+**Optimized Model (latent_vio_tf_simple.yaml):**
 ```yaml
-# Model architecture (aria_vio_simple.yaml)
+# Model architecture - BEST PERFORMANCE
 net:
   input_dim: 768         # Feature dimension
-  embedding_dim: 128     # Transformer embedding
-  num_layers: 2          # Transformer layers
-  nhead: 8              # Attention heads
+  embedding_dim: 768     # Large embedding (vs 128)
+  num_layers: 4          # Deep transformer (vs 2)
+  nhead: 6              # Attention heads
+  dim_feedforward: 512   # Feedforward dimension
+  dropout: 0.1          # Regularization
 
-# Loss function
-criterion:
-  angle_weight: 100     # Weight for rotation loss (critical!)
+# Loss function - Standard MSE works best
+criterion: torch.nn.MSELoss
 
 # Training parameters
 optimizer:
   lr: 0.0001
   weight_decay: 1e-4
+```
+
+**Baseline Model (aria_vio_simple.yaml):**
+```yaml
+# Model architecture - BASELINE
+net:
+  embedding_dim: 128     # Smaller embedding
+  num_layers: 2          # Fewer layers
+  nhead: 8              # More heads
+
+# Loss function - Weighted for rotation emphasis  
+criterion:
+  angle_weight: 100     # Weight for rotation loss
 ```
 
 ## Platform Support

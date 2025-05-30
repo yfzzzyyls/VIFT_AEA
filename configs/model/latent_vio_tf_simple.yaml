@@ -1,0 +1,41 @@
+# @package model
+
+# Deep Transformer Model (4 layers) with simple evaluation
+_target_: src.models.vio_module.VIOLitModule
+
+# Optimizer configuration - more aggressive learning
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 0.0001
+  weight_decay: 1e-4
+
+# Scheduler configuration  
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+  _partial_: true
+  T_0: 25
+  T_mult: 1
+
+# Loss function - Use standard MSE (no weighting)
+criterion:
+  _target_: torch.nn.MSELoss
+
+# Network architecture - Deep PoseTransformer (4 layers vs 2)
+net:
+  _target_: src.models.components.pose_transformer.PoseTransformer
+  input_dim: 768
+  embedding_dim: 768  # Larger embedding dimension
+  num_layers: 4       # More layers for better capacity
+  nhead: 6           # Fewer heads with larger embeddings
+  dim_feedforward: 512  # Larger feedforward for more capacity
+  dropout: 0.1       # Add some dropout for regularization
+
+# Simple evaluation
+metrics_calculator:
+  _target_: src.metrics.dummy_metrics_calculator.DummyMetricsCalculator
+
+tester:
+  _target_: src.testers.dummy_tester.DummyTester
+
+compile: false
