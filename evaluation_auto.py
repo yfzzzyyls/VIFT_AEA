@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-Auto-detecting evaluation script for any model architecture
+LEGACY: Auto-detecting evaluation script for any model architecture
+WARNING: This provides frame-based metrics that don't reflect real-world trajectory performance.
+Use evaluate_trajectory_based.py for industry-standard trajectory evaluation.
 """
 import argparse
 import json
@@ -203,7 +205,9 @@ class AutoEvaluator:
         print(f"📈 Prediction ranges: min={predictions_flat.min(axis=0)}, max={predictions_flat.max(axis=0)}")
         print(f"📈 Target ranges: min={targets_flat.min(axis=0)}, max={targets_flat.max(axis=0)}")
         
-        # Calculate metrics
+        # Calculate metrics (frame-based only - not trajectory performance)
+        print("⚠️ Computing FRAME-BASED metrics (not trajectory performance)")
+        print("⚠️ For real-world assessment, use: python evaluate_trajectory_based.py")
         metrics = self.calculate_metrics(predictions_flat, targets_flat)
         self.print_results(metrics)
         self.save_results(metrics, predictions_flat, targets_flat)
@@ -250,25 +254,31 @@ class AutoEvaluator:
     def print_results(self, metrics):
         """Print formatted results"""
         print("\n" + "="*60)
-        print("📊 AUTO EVALUATION RESULTS")
+        print("📊 LEGACY FRAME-BASED EVALUATION RESULTS")
         print("="*60)
-        print(f"🔢 Overall Metrics:")
+        print("⚠️ WARNING: These are per-frame metrics, NOT trajectory performance!")
+        print("⚠️ For real-world AR/VR assessment, use: python evaluate_trajectory_based.py")
+        print("="*60)
+        print(f"🔢 Overall Metrics (Per Frame):")
         print(f"   MSE: {metrics['mse']:.4f}")
-        print(f"   RMSE: {metrics['rmse']:.4f} meters")
-        print(f"   MAE: {metrics['mae']:.4f} meters")
+        print(f"   RMSE: {metrics['rmse']:.4f} meters per frame")
+        print(f"   MAE: {metrics['mae']:.4f} meters per frame")
         
-        print(f"\n🔄 Rotation vs Translation:")
-        print(f"   Rotation RMSE: {metrics['rotation_rmse']:.4f} rad ({np.degrees(metrics['rotation_rmse']):.1f}°)")
-        print(f"   Translation RMSE: {metrics['translation_rmse']:.4f} meters")
+        print(f"\n🔄 Rotation vs Translation (Per Frame):")
+        print(f"   Rotation RMSE: {metrics['rotation_rmse']:.4f} rad ({np.degrees(metrics['rotation_rmse']):.1f}°) per frame")
+        print(f"   Translation RMSE: {metrics['translation_rmse']:.4f} meters per frame")
         
-        print(f"\n📈 Per-Dimension RMSE:")
+        print(f"\n📈 Per-Dimension RMSE (Per Frame):")
         dims = ['rx (rotation)', 'ry (rotation)', 'rz (rotation)', 'tx (translation)', 'ty (translation)', 'tz (translation)']
         for i, dim_name in enumerate(dims):
             rmse_val = metrics[f'rmse_dim_{i}']
             if i < 3:  # Rotation
-                print(f"   {dim_name}: {rmse_val:.4f} rad ({np.degrees(rmse_val):.1f}°)")
+                print(f"   {dim_name}: {rmse_val:.4f} rad ({np.degrees(rmse_val):.1f}°) per frame")
             else:  # Translation
-                print(f"   {dim_name}: {rmse_val:.4f} meters")
+                print(f"   {dim_name}: {rmse_val:.4f} meters per frame")
+        print("="*60)
+        print("🚀 For trajectory-based metrics that reflect real AR/VR performance:")
+        print("   python evaluate_trajectory_based.py --checkpoint <your_checkpoint>")
         print("="*60)
     
     def save_results(self, metrics, predictions, targets):
@@ -296,11 +306,16 @@ class AutoEvaluator:
         print(f"💾 Targets saved to: auto_evaluation_targets.npy")
 
 def main():
-    parser = argparse.ArgumentParser(description="Auto-detecting evaluation script")
+    parser = argparse.ArgumentParser(description="LEGACY: Auto-detecting frame-based evaluation")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to model checkpoint")
     parser.add_argument("--test_data", type=str, required=True, help="Path to test data directory")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for evaluation")
     parser.add_argument("--device", type=str, default="cuda", help="Device to use (cuda/cpu)")
+    
+    print("⚠️ WARNING: This script provides frame-based metrics only!")
+    print("⚠️ For industry-standard trajectory evaluation, use:")
+    print("   python evaluate_trajectory_based.py")
+    print()
     
     args = parser.parse_args()
     

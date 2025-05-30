@@ -1,0 +1,69 @@
+# @package _global_
+
+# AR/VR Multi-Scale Experiment Configuration
+# Combines multi-scale temporal modeling, specialized heads, AR/VR loss, and data augmentations
+
+defaults:
+  - override /data: simple_aria
+  - override /model: arvr_vio_optimized
+  - override /trainer: default
+  - override /logger: tensorboard
+  - override /callbacks: default
+
+# Experiment name
+name: "arvr_multiscale_vio"
+
+# Model configuration
+model:
+  _target_: src.models.multiscale_vio.MultiScaleTemporalVIO
+  sequence_lengths: [7, 11, 15]  # Multi-scale temporal modeling
+  feature_dim: 768
+  hidden_dim: 256
+  num_transformer_layers: 4
+  num_attention_heads: 8
+  dropout: 0.1
+  use_scale_weights: true
+  lr: 1e-4
+  weight_decay: 1e-5
+
+# Data configuration with AR/VR augmentations
+data:
+  batch_size: 16
+  num_workers: 4
+  max_train_samples: 1000  # Limit for faster training
+  max_val_samples: 100     # Limit for faster validation
+
+# Training configuration
+trainer:
+  max_epochs: 20
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 2
+  precision: "16-mixed"
+  
+  # Early stopping
+  callbacks:
+    early_stopping:
+      monitor: "val/total_loss"
+      patience: 20
+      mode: "min"
+    
+    model_checkpoint:
+      monitor: "val/total_loss"
+      mode: "min"
+      save_top_k: 3
+      filename: "arvr_multiscale_{epoch:02d}_{val_total_loss:.4f}"
+
+# Logging
+logger:
+  tensorboard:
+    save_dir: "logs/"
+    name: "arvr_multiscale_vio"
+    version: null
+
+# Hydra configuration
+hydra:
+  run:
+    dir: outputs/${name}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: multirun/${name}/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${hydra:job.num}
