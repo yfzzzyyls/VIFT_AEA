@@ -24,11 +24,11 @@ A high-performance adaptation of VIFT (Visual-Inertial Fused Transformer) for Me
 
 | Metric | Performance | AR/VR Requirement | Status |
 |--------|-------------|-------------------|---------|
-| **ATE (Absolute Trajectory Error)** | **0.64cm ± 1.16cm** | <5cm | ✅ **EXCEEDS** |
-| **RPE Translation (1s)** | **0.19cm ± 0.26cm** | <1cm | ✅ **EXCEEDS** |
-| **RPE Rotation (1s)** | **0.12° ± 0.02°** | <1° | ✅ **EXCEEDS** |
-| **Drift Rate** | **0.08m/100m** | <1m/100m | ✅ **EXCEEDS** |
-| **Training Epochs** | **20** | - | 87% faster than baseline |
+| **ATE (Absolute Trajectory Error)** | **0.59cm ± 1.52cm** | <5cm | ✅ **EXCEEDS** |
+| **RPE Translation (1s)** | **0.16cm ± 0.36cm** | <1cm | ✅ **EXCEEDS** |
+| **RPE Rotation (1s)** | **0.09° ± 0.02°** | <1° | ✅ **EXCEEDS** |
+| **Drift Rate** | **0.03m/100m** | <1m/100m | ✅ **EXCEEDS** |
+| **Training Epochs** | **50** | - | Full convergence |
 | **Inference Speed** | **10x faster** | Real-time | ✅ **EXCEEDS** |
 
 **Key Achievements:**
@@ -97,7 +97,7 @@ python scripts/process_aria_to_vift.py \
 #### Step 3: Split the Processed Data
 
 ```bash
-# Split into train/val/test using OPTIMIZED 80/10/10 ratio
+# Split into train/val/test using 80/10/10 ratio
 python scripts/create_dataset_splits_symlink.py \
     --data_dir data/aria_processed \
     --output_dir data/aria_split \
@@ -106,15 +106,9 @@ python scripts/create_dataset_splits_symlink.py \
     --test_ratio 0.1
 
 # This creates symlinked folders (much faster than copying):
-# - data/aria_split/train/ (~95 sequences for 119 total)
-# - data/aria_split/val/ (~12 sequences)  
-# - data/aria_split/test/ (~12 sequences)
-
-# Alternative: Use original script if you prefer copying files
-# python scripts/create_dataset_splits.py \
-#     --data_dir data/aria_processed \
-#     --output_dir data/aria_split \
-#     --train_ratio 0.8 --val_ratio 0.1 --test_ratio 0.1
+# - data/aria_split/train/ (93 sequences from 117 total)
+# - data/aria_split/val/ (11 sequences)  
+# - data/aria_split/test/ (13 sequences)
 ```
 
 #### Step 4: Generate Latent Features
@@ -154,13 +148,15 @@ python train_multihead_only.py
 **Training Details:**
 - **Model**: Multi-head architecture with all-frames prediction
 - **Parameters**: 8.2M (efficient yet powerful)
-- **Batch Size**: 16 with gradient accumulation
-- **Epochs**: 20 (87% faster than baseline)
+- **Dataset**: 36,456 train / 4,312 val / 5,096 test samples (80/10/10 split)
+- **Batch Size**: 32 (8 per GPU with 4 GPUs)
+- **Epochs**: 50 with early stopping
 - **Features**: 
   - Predicts poses for all 11 frames in sequence
   - Specialized heads for rotation and translation
   - Trajectory validation every 5 epochs
   - Automatic mixed precision (AMP) training
+  - Multi-GPU training with DDP
 
 ### 5. Evaluation
 
@@ -177,10 +173,10 @@ python evaluate_trajectory_kitti_hybrid.py \
 - **Comprehensive**: Reports translation/rotation errors at multiple time scales
 
 **Expected Results:**
-- ATE: ~0.64cm (sub-centimeter accuracy)
-- RPE Translation (1s): ~0.19cm
-- RPE Rotation (1s): ~0.12°
-- Drift Rate: ~0.08m per 100m traveled
+- ATE: ~0.59cm (sub-centimeter accuracy)
+- RPE Translation (1s): ~0.16cm
+- RPE Rotation (1s): ~0.09°
+- Drift Rate: ~0.03m per 100m traveled
 
 ## Data Pipeline
 

@@ -44,15 +44,17 @@ def train_multihead_model():
     
     print(f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
     
-    # Create data module
+    # Create data module - using ALL available data
+    # NOTE: Current data has 50/25/25 split instead of 80/10/10
+    # Train: 3920 samples, Val: 1960 samples, Test: 1960 samples
     datamodule = SimpleAriaDataModule(
         train_data_dir="aria_latent_data/train",
         val_data_dir="aria_latent_data/val",
         test_data_dir="aria_latent_data/test",
-        batch_size=16,
-        num_workers=4,
-        max_train_samples=1000,
-        max_val_samples=100
+        batch_size=32,  # Increased batch size for 4 GPUs (8 per GPU)
+        num_workers=8,   # More workers for faster data loading
+        max_train_samples=None,  # Use all 3920 training samples
+        max_val_samples=None     # Use all 1960 validation samples
     )
     
     # Setup logger
@@ -69,27 +71,36 @@ def train_multihead_model():
         ),
         EarlyStopping(
             monitor="val/total_loss",
-            patience=10,
+            patience=25,  # Increased patience for 50-epoch training
             mode="min",
-            verbose=True
+            verbose=True,
+            min_delta=1e-6  # Add minimum delta to avoid stopping on tiny improvements
         ),
         TrajectoryValidationCallback(
             log_every_n_epochs=5  # Compute trajectory metrics every 5 epochs
         )
     ]
     
-    # Create trainer (single GPU)
+    # Create trainer (auto-detect GPUs)
     trainer = L.Trainer(
-        max_epochs=20,
+        max_epochs=50,
         accelerator="gpu",
-        devices=1,
+        devices="auto",  # Automatically detect and use all available GPUs
+        strategy="ddp_find_unused_parameters_true" if torch.cuda.device_count() > 1 else "auto",  # DDP with unused params
         precision="16-mixed",
         gradient_clip_val=1.0,
         accumulate_grad_batches=2,
         logger=logger,
         callbacks=callbacks,
-        deterministic=True
+        deterministic=True,
+        sync_batchnorm=True if torch.cuda.device_count() > 1 else False  # Sync BN across GPUs
     )
+    
+    # Print GPU information
+    num_gpus = torch.cuda.device_count()
+    print(f"🖥️ Detected {num_gpus} GPU(s)")
+    if num_gpus > 1:
+        print(f"📊 Using DDP strategy across {num_gpus} GPUs")
     
     print("🏋️ Starting training with trajectory-aware validation...")
     trainer.fit(model, datamodule)
