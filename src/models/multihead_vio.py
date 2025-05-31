@@ -23,9 +23,9 @@ class RotationSpecializedHead(nn.Module):
     def __init__(
         self,
         input_dim: int,
-        hidden_dim: int = 256,
-        num_layers: int = 3,
-        num_heads: int = 8,
+        hidden_dim: int = 128,  # Reduced from 256
+        num_layers: int = 2,    # Reduced from 3
+        num_heads: int = 4,     # Reduced from 8
         dropout: float = 0.1
     ):
         super().__init__()
@@ -112,9 +112,9 @@ class TranslationSpecializedHead(nn.Module):
     def __init__(
         self,
         input_dim: int,
-        hidden_dim: int = 256,
-        num_layers: int = 3,
-        num_heads: int = 8,
+        hidden_dim: int = 128,  # Reduced from 256
+        num_layers: int = 2,    # Reduced from 3
+        num_heads: int = 4,     # Reduced from 8
         dropout: float = 0.1
     ):
         super().__init__()
@@ -214,10 +214,10 @@ class MultiHeadVIOModel(L.LightningModule):
     def __init__(
         self,
         feature_dim: int = 768,
-        hidden_dim: int = 256,
-        num_shared_layers: int = 4,
-        num_specialized_layers: int = 3,
-        num_heads: int = 8,
+        hidden_dim: int = 128,  # Reduced from 256 for lite model
+        num_shared_layers: int = 2,  # Reduced from 4 for lite model
+        num_specialized_layers: int = 2,  # Reduced from 3 for lite model
+        num_heads: int = 4,  # Reduced from 8 for lite model
         dropout: float = 0.1,
         learning_rate: float = 1e-4,
         weight_decay: float = 1e-5,

@@ -203,13 +203,13 @@ def train_with_relative_poses(
     # Set seed
     L.seed_everything(42, workers=True)
     
-    # Create model
+    # Create model (Lite configuration - reduced from 7.4M to ~1.1M params)
     model = MultiHeadVIOModel(
         feature_dim=768,
-        hidden_dim=256,
-        num_shared_layers=4,
-        num_specialized_layers=3,
-        num_heads=8,
+        hidden_dim=128,         # Reduced from 256
+        num_shared_layers=2,    # Reduced from 4
+        num_specialized_layers=2, # Reduced from 3
+        num_heads=4,            # Reduced from 8
         dropout=0.1,
         learning_rate=learning_rate,
         weight_decay=1e-5,
@@ -292,14 +292,14 @@ def train_with_relative_poses(
             monitor="val/total_loss",
             mode="min",
             save_top_k=3,
-            dirpath=f"logs/checkpoints_relative_scale_{pose_scale}",
+            dirpath=f"logs/checkpoints_lite_scale_{pose_scale}",
             filename="epoch_{epoch:03d}_{val_total_loss:.4f}",
             save_last=True,
             verbose=True
         ),
         EarlyStopping(
             monitor="val/total_loss",
-            patience=10,
+            patience=5,  # Reduced from 10 since model converges quickly
             mode="min",
             verbose=True
         ),
@@ -342,6 +342,11 @@ def train_with_relative_poses(
             
             console.print(f"\n[bold]Best checkpoint:[/bold] {best_path}")
             console.print(f"[bold]Best validation loss:[/bold] {best_loss:.6f}")
+            
+            # Show model size
+            total_params = sum(p.numel() for p in model.parameters())
+            console.print(f"\n[bold]Model size:[/bold] {total_params/1e6:.1f}M parameters")
+            console.print(f"[bold]Reduction:[/bold] ~85% fewer params than full model")
             
             console.print("\n[bold cyan]Next step - Evaluate:[/bold cyan]")
             console.print(f"python evaluate_with_metrics.py \\")
