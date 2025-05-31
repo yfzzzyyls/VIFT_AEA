@@ -229,13 +229,8 @@ class MultiHeadVIOModel(L.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         
-        # Simple feature projection (the features are already encoded!)
-        self.feature_projection = nn.Sequential(
-            nn.Linear(feature_dim, feature_dim),
-            nn.LayerNorm(feature_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout)
-        )
+        # Simple feature projection (matches VIFT)
+        self.feature_projection = nn.Linear(feature_dim, feature_dim)
         
         # Shared transformer for initial processing
         self.shared_processor = PoseTransformer(
