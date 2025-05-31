@@ -408,6 +408,12 @@ class MultiHeadVIOModel(L.LightningModule):
         self.log('train/rotation_mae', self.train_rot_mae, on_step=True, on_epoch=True)
         self.log('train/translation_mae', self.train_trans_mae, on_step=True, on_epoch=True)
         
+        # Log current learning rate (handled by LearningRateMonitor callback now)
+        # But we can still log it here for consistency with original VIFT
+        if self.trainer.optimizers:
+            lr = self.trainer.optimizers[0].param_groups[0]['lr']
+            self.log('train/lr', lr, on_step=True, on_epoch=False, prog_bar=False)
+        
         return losses['total_loss']
     
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int):
