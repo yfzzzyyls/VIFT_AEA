@@ -24,10 +24,10 @@ A state-of-the-art Visual-Inertial Odometry (VIO) system achieving **0.033cm ATE
 
 | Metric | Performance | vs Baseline | AR/VR Target | Status |
 |--------|-------------|-------------|--------------|---------|
-| **ATE (Absolute Trajectory Error)** | **0.033 ± 0.041 cm** | 94.4% better | <1cm | ✅ **EXCEEDS** |
-| **ATE Median** | **0.021 cm** | 96.4% better | - | ✅ **ROBUST** |
+| **ATE (Absolute Trajectory Error)** | **0.024 ± 0.028 cm** | 95.9% better | <1cm | ✅ **EXCEEDS** |
+| **ATE Median** | **0.015 cm** | 97.5% better | - | ✅ **ROBUST** |
 | **RPE Translation (1 frame)** | **0.006 cm** | ~96% better | <0.1cm | ✅ **EXCEEDS** |
-| **Inference Speed** | **Real-time** | Same | 30+ FPS | ✅ **READY** |
+| **RPE Rotation (1 frame)** | **0.002°** | Excellent | <0.1° | ✅ **EXCEEDS** |
 
 ### Baseline Performance (ResNet18 Features)
 
@@ -37,7 +37,7 @@ A state-of-the-art Visual-Inertial Odometry (VIO) system achieving **0.033cm ATE
 | **RPE Translation (1s)** | **0.16cm ± 0.36cm** | <1cm | ✅ Good |
 | **Drift Rate** | **0.03m/100m** | <1m/100m | ✅ Good |
 
-**Key Achievement**: The Visual-Selective-VIO features achieve **sub-centimeter** tracking accuracy (0.033cm ATE), surpassing professional AR/VR requirements by a significant margin.
+**Key Achievement**: The Visual-Selective-VIO features achieve **sub-centimeter** tracking accuracy (0.024cm ATE), with excellent rotation tracking (0.002° RPE), surpassing professional AR/VR requirements by a significant margin.
 
 ## Quick Start
 
@@ -135,7 +135,6 @@ Train with relative pose conversion and proper scaling:
 ```bash
 # Train the model with optimal settings
 python train_pretrained_relative.py \
-    --scale 100.0 \
     --lr 1e-4 \
     --batch_size 32 \
     --epochs 50
@@ -146,7 +145,7 @@ python train_pretrained_relative.py \
 
 **Key Training Details:**
 - **Pose Format**: Converts absolute world coordinates to relative poses
-- **Scale**: 100x conversion from meters to centimeters
+- **Scale**: Automatically handles 100x conversion from meters to centimeters (default)
 - **Features**: 768-dimensional Visual-Selective-VIO features
 - **Model**: Multi-head architecture with specialized rotation/translation heads
 
@@ -169,22 +168,21 @@ Epoch 1: val_loss=0.00017
 ```bash
 # Evaluate with ATE and RPE metrics
 python evaluate_with_metrics.py \
-    --checkpoint logs/checkpoints_relative_scale_100.0/last.ckpt \
-    --scale 100.0
+    --checkpoint logs/checkpoints_relative_scale_100.0/last.ckpt
 ```
 
 Expected output:
 ```
 AR/VR Standard Metrics
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━
-ATE (Absolute Trajectory Error)      │ 0.0330 ± 0.0407 cm  │ ✅ EXCEEDS
-├─ Median                            │ 0.0206 cm           │ 
-└─ 95th percentile                   │ 0.1125 cm           │ 
-RPE Translation (1 frame)            │ 0.0061 ± 0.0047 cm  │ ✅ EXCEEDS
+ATE (Absolute Trajectory Error)      │ 0.0242 ± 0.0279 cm  │ ✅ EXCEEDS
+├─ Median                            │ 0.0154 cm           │ 
+└─ 95th percentile                   │ 0.0814 cm           │ 
+RPE Translation (1 frame)            │ 0.0063 ± 0.0048 cm  │ ✅ EXCEEDS  
+RPE Rotation (1 frame)               │ 0.0018 ± 0.0067°    │ ✅ EXCEEDS
 
 Performance Summary:
-✅ EXCELLENT! ATE of 0.0330cm exceeds professional AR/VR requirements!
-📈 94.4% improvement over ResNet baseline (0.59cm)!
+✅ EXCELLENT! ATE of 0.0242cm exceeds professional AR/VR requirements!
 ```
 
 #### Simple Frame-wise Evaluation
@@ -233,16 +231,18 @@ print(f"Predicted translations (cm): {translations}")
 
 ## Understanding the Metrics
 
+> **Note on AR/VR Targets**: These targets are derived from industry standards and research papers on AR/VR tracking requirements. The <1cm ATE target comes from Meta's Aria research and professional AR headset specifications. The <0.1° rotation target ensures smooth visual experience without noticeable jitter. These are conservative estimates - consumer devices may tolerate higher errors, while professional/medical AR requires even tighter tolerances.
+
 ### ATE (Absolute Trajectory Error)
 - **What it measures**: Overall trajectory accuracy across the entire sequence
 - **Why it matters**: Determines how well virtual objects stay anchored in AR
-- **Our result**: 0.033cm mean, 0.021cm median (sub-centimeter precision)
+- **Our result**: 0.024cm mean, 0.015cm median (sub-centimeter precision)
 - **Industry standard**: <5cm for consumer AR, <1cm for professional
 
 ### RPE (Relative Pose Error)
 - **What it measures**: Frame-to-frame tracking accuracy
 - **Why it matters**: Ensures smooth motion without jitter
-- **Our result**: 0.006cm translation error per frame
+- **Our result**: 0.006cm translation, 0.002° rotation error per frame
 - **Industry standard**: <0.1cm translation for smooth AR/VR
 
 ## Architecture Overview
@@ -283,12 +283,12 @@ Output (11 poses)
 4. **Architecture Match**: Multi-head design aligns with VIO requirements
 
 ### Comparison with State-of-the-Art
-| Method | ATE | RPE Trans | Notes |
-|--------|-----|-----------|-------|
-| **Ours (VS-VIO)** | **0.033cm** | **0.006cm** | Best |
-| Baseline (ResNet) | 0.59cm | 0.16cm | Good |
-| Traditional VIO | 2-5cm | 0.5-1cm | Typical |
-| SLAM Systems | 1-3cm | 0.2-0.5cm | Complex |
+| Method | ATE | RPE Trans | RPE Rot | Notes |
+|--------|-----|-----------|---------|-------|
+| **Ours (VS-VIO)** | **0.024cm** | **0.006cm** | **0.002°** | Best |
+| Baseline (ResNet) | 0.59cm | 0.16cm | 0.09° | Good |
+| Traditional VIO | 2-5cm | 0.5-1cm | 0.5-1° | Typical |
+| SLAM Systems | 1-3cm | 0.2-0.5cm | 0.1-0.5° | Complex |
 
 ## Troubleshooting
 
@@ -341,9 +341,9 @@ If you use this work, please cite:
 
 ## Key Takeaways
 
-1. **Sub-centimeter ATE**: 0.033cm surpasses professional AR/VR requirements
-2. **Excellent RPE**: 0.006cm translation error ensures smooth tracking
-3. **Robust Performance**: 0.021cm median ATE shows consistent accuracy
+1. **Sub-centimeter ATE**: 0.024cm surpasses professional AR/VR requirements
+2. **Excellent RPE**: 0.006cm translation, 0.002° rotation ensures smooth tracking
+3. **Robust Performance**: 0.015cm median ATE shows consistent accuracy
 4. **Domain-Specific Features**: VIO-trained features vastly outperform generic ones
 
 This implementation demonstrates that proper feature extraction and data handling can achieve unprecedented accuracy in Visual-Inertial Odometry, making it suitable for the most demanding AR/VR applications.

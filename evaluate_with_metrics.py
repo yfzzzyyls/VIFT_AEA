@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Evaluation script with proper ATE and RPE metrics for AR/VR.
+Fixed evaluation script with proper quaternion handling for ATE and RPE metrics.
 """
 
 import os
@@ -22,14 +22,47 @@ console = Console()
 
 
 def quaternion_to_matrix(q):
-    """Convert quaternion to rotation matrix."""
-    q = q / np.linalg.norm(q)
-    w, x, y, z = q
+    """Convert quaternion to rotation matrix (XYZW convention)."""
+    # Normalize
+    q = q / (np.linalg.norm(q) + 1e-8)
+    x, y, z, w = q  # XYZW convention
+    
     return np.array([
         [1-2*y*y-2*z*z, 2*x*y-2*z*w, 2*x*z+2*y*w],
         [2*x*y+2*z*w, 1-2*x*x-2*z*z, 2*y*z-2*x*w],
         [2*x*z-2*y*w, 2*y*z+2*x*w, 1-2*x*x-2*y*y]
     ])
+
+
+def quaternion_multiply_xyzw(q1, q2):
+    """Multiply two quaternions in XYZW convention."""
+    x1, y1, z1, w1 = q1
+    x2, y2, z2, w2 = q2
+    
+    return np.array([
+        w1*x2 + x1*w2 + y1*z2 - z1*y2,
+        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+        w1*z2 + x1*y2 - y1*x2 + z1*w2,
+        w1*w2 - x1*x2 - y1*y2 - z1*z2
+    ])
+
+
+def quaternion_angle_xyzw(q1, q2):
+    """Calculate angle between two quaternions (XYZW convention)."""
+    # Normalize
+    q1 = q1 / (np.linalg.norm(q1) + 1e-8)
+    q2 = q2 / (np.linalg.norm(q2) + 1e-8)
+    
+    # Dot product
+    dot = np.clip(np.dot(q1, q2), -1.0, 1.0)
+    
+    # Handle double cover
+    if dot < 0:
+        dot = -dot
+    
+    # Angle
+    angle = 2 * np.arccos(dot)
+    return angle
 
 
 def build_trajectory(relative_poses):
@@ -41,10 +74,13 @@ def build_trajectory(relative_poses):
     current_rot = np.eye(3)
     trajectory.append((current_pos.copy(), current_rot.copy()))
     
-    for pose in relative_poses:
+    for i in range(len(relative_poses)):
+        if i == 0:
+            continue  # Skip first frame (already at origin)
+            
         # Extract translation and rotation
-        trans = pose[:3]
-        quat = pose[3:]
+        trans = relative_poses[i, :3]
+        quat = relative_poses[i, 3:]
         
         # Convert quaternion to rotation matrix
         rot_matrix = quaternion_to_matrix(quat)
@@ -93,10 +129,33 @@ def calculate_rpe(pred_trajectory, gt_trajectory, delta=1):
         trans_error = np.linalg.norm(pred_rel_trans - gt_rel_trans)
         trans_errors.append(trans_error)
         
-        # Rotation error (angle)
+        # Rotation error (angle between rotation matrices)
         rel_rot_diff = pred_rel_rot @ gt_rel_rot.T
-        angle = np.arccos(np.clip((np.trace(rel_rot_diff) - 1) / 2, -1, 1))
+        # Ensure trace is in valid range
+        trace = np.clip(np.trace(rel_rot_diff), -1.0, 3.0)
+        angle = np.arccos(np.clip((trace - 1) / 2, -1.0, 1.0))
         rot_errors.append(np.degrees(angle))
+    
+    return np.array(trans_errors), np.array(rot_errors)
+
+
+def calculate_rpe_quaternion(pred_quats, gt_quats, delta=1):
+    """Calculate RPE directly from quaternions."""
+    trans_errors = []
+    rot_errors = []
+    
+    for i in range(len(pred_quats) - delta):
+        # For relative poses, we can directly compare quaternions
+        pred_q = pred_quats[i + delta, 3:]
+        gt_q = gt_quats[i + delta, 3:]
+        
+        # Rotation error
+        angle = quaternion_angle_xyzw(pred_q, gt_q)
+        rot_errors.append(np.degrees(angle))
+        
+        # Translation error
+        trans_error = np.linalg.norm(pred_quats[i + delta, :3] - gt_quats[i + delta, :3])
+        trans_errors.append(trans_error)
     
     return np.array(trans_errors), np.array(rot_errors)
 
@@ -104,7 +163,7 @@ def calculate_rpe(pred_trajectory, gt_trajectory, delta=1):
 def evaluate_with_metrics(checkpoint_path: str, pose_scale: float = 100.0):
     """Evaluate with proper ATE and RPE metrics."""
     
-    console.rule("[bold cyan]🚀 AR/VR Metrics Evaluation[/bold cyan]")
+    console.rule("[bold cyan]🚀 AR/VR Metrics Evaluation (Fixed)[/bold cyan]")
     
     # Load model
     model = MultiHeadVIOModel.load_from_checkpoint(checkpoint_path)
@@ -138,12 +197,15 @@ def evaluate_with_metrics(checkpoint_path: str, pose_scale: float = 100.0):
     
     console.print(f"\nTest samples: {len(test_dataset):,}")
     
-    # Collect all trajectories
+    # Collect all metrics
     all_ate_errors = []
     all_rpe_trans_1 = []
     all_rpe_rot_1 = []
     all_rpe_trans_5 = []
     all_rpe_rot_5 = []
+    
+    # Direct quaternion errors
+    direct_rot_errors = []
     
     with torch.no_grad():
         for batch_idx, batch in enumerate(test_loader):
@@ -173,7 +235,7 @@ def evaluate_with_metrics(checkpoint_path: str, pose_scale: float = 100.0):
                 ate_errors = calculate_ate(pred_traj, gt_traj)
                 all_ate_errors.extend(ate_errors)
                 
-                # Calculate RPE at different intervals
+                # Calculate RPE from trajectories
                 if len(pred_traj) > 1:
                     rpe_trans_1, rpe_rot_1 = calculate_rpe(pred_traj, gt_traj, delta=1)
                     all_rpe_trans_1.extend(rpe_trans_1)
@@ -183,6 +245,13 @@ def evaluate_with_metrics(checkpoint_path: str, pose_scale: float = 100.0):
                     rpe_trans_5, rpe_rot_5 = calculate_rpe(pred_traj, gt_traj, delta=5)
                     all_rpe_trans_5.extend(rpe_trans_5)
                     all_rpe_rot_5.extend(rpe_rot_5)
+                
+                # Also calculate direct quaternion errors for comparison
+                for j in range(1, len(pred_poses)):
+                    pred_q = pred_poses[j, 3:]
+                    gt_q = gt_poses[j, 3:]
+                    angle = quaternion_angle_xyzw(pred_q, gt_q)
+                    direct_rot_errors.append(np.degrees(angle))
             
             if batch_idx % 50 == 0:
                 console.print(f"  Processed {batch_idx}/{len(test_loader)} batches...")
@@ -193,9 +262,10 @@ def evaluate_with_metrics(checkpoint_path: str, pose_scale: float = 100.0):
     rpe_rot_1 = np.array(all_rpe_rot_1)
     rpe_trans_5 = np.array(all_rpe_trans_5) if all_rpe_trans_5 else np.array([0])
     rpe_rot_5 = np.array(all_rpe_rot_5) if all_rpe_rot_5 else np.array([0])
+    direct_rot_errors = np.array(direct_rot_errors)
     
     # Create results table
-    table = Table(title="AR/VR Standard Metrics")
+    table = Table(title="AR/VR Standard Metrics (Fixed)")
     table.add_column("Metric", style="cyan", width=40)
     table.add_column("Value", style="green", width=25)
     table.add_column("AR/VR Target", style="yellow", width=15)
@@ -240,6 +310,14 @@ def evaluate_with_metrics(checkpoint_path: str, pose_scale: float = 100.0):
         "✅ EXCEEDS" if rpe_rot_1.mean() < 0.1 else "⚠️  CLOSE"
     )
     
+    # Direct quaternion comparison
+    table.add_row(
+        "Direct Quaternion Error (mean)",
+        f"{direct_rot_errors.mean():.4f} ± {direct_rot_errors.std():.4f}°",
+        "<0.1°",
+        "✅ EXCEEDS" if direct_rot_errors.mean() < 0.1 else "❌ FAILS"
+    )
+    
     # RPE metrics (5 frames)
     if len(all_rpe_trans_5) > 0:
         table.add_row(
@@ -270,41 +348,29 @@ def evaluate_with_metrics(checkpoint_path: str, pose_scale: float = 100.0):
     else:
         console.print(f"[bold red]❌ NEEDS IMPROVEMENT. ATE of {ate_mean:.4f}cm exceeds 1cm threshold.[/bold red]")
     
-    if ate_mean < 0.59:
-        improvement = (0.59 - ate_mean) / 0.59 * 100
-        console.print(f"[bold green]📈 {improvement:.1f}% improvement over ResNet baseline (0.59cm)![/bold green]")
     
     # Additional insights
     console.print("\n[bold]Technical Details:[/bold]")
     console.print(f"  • Total evaluated poses: {len(ate_errors):,}")
-    console.print(f"  • Trajectory sequences: {len(test_dataset)}")
-    console.print(f"  • Frames per sequence: 11")
-    console.print(f"  • Evaluation performed on: Test set")
+    console.print(f"  • Direct quaternion error: {direct_rot_errors.mean():.4f}°")
     
-    # Save detailed results
-    results = {
+    return {
         'ate_mean': ate_mean,
-        'ate_median': ate_median,
-        'ate_std': ate_std,
-        'ate_95': ate_95,
-        'rpe_trans_1_mean': rpe_trans_1.mean(),
-        'rpe_rot_1_mean': rpe_rot_1.mean(),
-        'rpe_trans_5_mean': rpe_trans_5.mean() if len(all_rpe_trans_5) > 0 else 0,
-        'rpe_rot_5_mean': rpe_rot_5.mean() if len(all_rpe_rot_5) > 0 else 0,
+        'rpe_trans_1': rpe_trans_1.mean(),
+        'rpe_rot_1': rpe_rot_1.mean(),
+        'direct_rot_error': direct_rot_errors.mean()
     }
-    
-    return results
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Evaluate with AR/VR metrics (ATE & RPE)')
+    parser = argparse.ArgumentParser(description='Fixed evaluation with proper quaternion handling')
     parser.add_argument('--checkpoint', type=str, required=True,
                        help='Path to model checkpoint')
     parser.add_argument('--scale', type=float, default=100.0,
-                       help='Pose scale factor')
+                       help='Pose scale factor (default: 100.0 for meter to cm conversion)')
     
     args = parser.parse_args()
     
-    console.print("[bold magenta]Visual-Selective-VIO Evaluation with AR/VR Metrics[/bold magenta]\n")
+    console.print("[bold magenta]Visual-Selective-VIO Evaluation with Fixed Quaternion Handling[/bold magenta]\n")
     
     results = evaluate_with_metrics(args.checkpoint, args.scale)

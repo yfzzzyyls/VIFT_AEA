@@ -344,7 +344,7 @@ def train_with_relative_poses(
             console.print(f"[bold]Best validation loss:[/bold] {best_loss:.6f}")
             
             console.print("\n[bold cyan]Next step - Evaluate:[/bold cyan]")
-            console.print(f"python evaluate_trajectory_kitti_hybrid.py \\")
+            console.print(f"python evaluate_with_metrics.py \\")
             console.print(f"    --checkpoint {best_path}")
             
     except Exception as e:
@@ -357,7 +357,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Train with relative poses')
     parser.add_argument('--scale', type=float, default=100.0,
-                       help='Pose scale factor')
+                       help='Pose scale factor (default: 100.0 for meter to cm conversion)')
     parser.add_argument('--lr', type=float, default=1e-4,
                        help='Learning rate')
     parser.add_argument('--batch_size', type=int, default=32,
