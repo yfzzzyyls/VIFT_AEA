@@ -397,12 +397,12 @@ class MultiHeadVIOModel(L.LightningModule):
             self.log(f'train/{name}', loss, on_step=True, on_epoch=True, prog_bar=True)
         
         # Update metrics (using mean across all frames)
-        pred_rot = predictions['rotation'][:, 1:, :].reshape(-1, 4)
-        target_rot = batch['poses'][:, 1:, 3:7].reshape(-1, 4)
+        pred_rot = predictions['rotation'][:, 1:, :].reshape(-1, 4).contiguous()
+        target_rot = batch['poses'][:, 1:, 3:7].reshape(-1, 4).contiguous()
         self.train_rot_mae(pred_rot, target_rot)
         
-        pred_trans = predictions['translation'][:, 1:, :].reshape(-1, 3)
-        target_trans = batch['poses'][:, 1:, :3].reshape(-1, 3)
+        pred_trans = predictions['translation'][:, 1:, :].reshape(-1, 3).contiguous()
+        target_trans = batch['poses'][:, 1:, :3].reshape(-1, 3).contiguous()
         self.train_trans_mae(pred_trans, target_trans)
         
         self.log('train/rotation_mae', self.train_rot_mae, on_step=True, on_epoch=True)
@@ -426,12 +426,12 @@ class MultiHeadVIOModel(L.LightningModule):
             self.log(f'val/{name}', loss, on_epoch=True)
         
         # Update metrics (using mean across all frames)
-        pred_rot = predictions['rotation'][:, 1:, :].reshape(-1, 4)
-        target_rot = batch['poses'][:, 1:, 3:7].reshape(-1, 4)
+        pred_rot = predictions['rotation'][:, 1:, :].reshape(-1, 4).contiguous()
+        target_rot = batch['poses'][:, 1:, 3:7].reshape(-1, 4).contiguous()
         self.val_rot_mae(pred_rot, target_rot)
         
-        pred_trans = predictions['translation'][:, 1:, :].reshape(-1, 3)
-        target_trans = batch['poses'][:, 1:, :3].reshape(-1, 3)
+        pred_trans = predictions['translation'][:, 1:, :].reshape(-1, 3).contiguous()
+        target_trans = batch['poses'][:, 1:, :3].reshape(-1, 3).contiguous()
         self.val_trans_mae(pred_trans, target_trans)
         
         self.log('val/rotation_mae', self.val_rot_mae, on_epoch=True)
