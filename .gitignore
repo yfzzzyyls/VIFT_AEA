@@ -41,3 +41,7 @@ outputs/
 *.swp
 *.swo
 *~
+# Pretrained models (download separately)
+pretrained_models/*.model
+# Generated features (too large for git)
+aria_latent_data_pretrained/
