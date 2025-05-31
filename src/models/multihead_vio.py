@@ -11,7 +11,7 @@ import lightning as L
 from torchmetrics import MeanAbsoluteError
 
 from .components.pose_transformer_new import PoseTransformer
-from ..metrics.arvr_loss import ARVRAdaptiveLoss
+from ..metrics.arvr_loss_wrapper import ARVRLossWrapper
 
 
 class RotationSpecializedHead(nn.Module):
@@ -273,7 +273,7 @@ class MultiHeadVIOModel(L.LightningModule):
         )
         
         # Loss function
-        self.arvr_loss = ARVRAdaptiveLoss()
+        self.arvr_loss = ARVRLossWrapper()
         
         # Metrics
         self.train_rot_mae = MeanAbsoluteError()
@@ -364,15 +364,9 @@ class MultiHeadVIOModel(L.LightningModule):
         )
         
         # Add velocity losses if available
-        if 'angular_velocity' in predictions:
-            # Compute angular velocity targets from consecutive rotations
-            # This is a simplified version - ideally should use proper SO(3) derivatives
-            angular_vel_target = target_rotation[:, 1:, :] - target_rotation[:, :-1, :]
-            angular_vel_pred = predictions['angular_velocity'][:, 1:-1, :]
-            
-            if angular_vel_target.shape[1] > 0:
-                vel_loss = nn.functional.mse_loss(angular_vel_pred, angular_vel_target)
-                loss_dict['angular_velocity_loss'] = vel_loss * self.hparams.velocity_weight
+        if 'angular_velocity' in predictions and False:  # Disabled for now
+            # TODO: Compute proper angular velocity from quaternions
+            pass
         
         if 'linear_velocity' in predictions:
             # Compute linear velocity targets
@@ -394,12 +388,13 @@ class MultiHeadVIOModel(L.LightningModule):
         loss_dict = self.compute_loss(predictions, batch)
         
         # Total loss
-        total_loss = sum(loss_dict.values())
+        total_loss = loss_dict.get('total_loss', sum(v for k, v in loss_dict.items() if k != 'total_loss'))
         
         # Log losses
         self.log('train/total_loss', total_loss, prog_bar=True)
         for key, value in loss_dict.items():
-            self.log(f'train/{key}', value)
+            if key != 'total_loss':  # Skip to avoid duplicate logging
+                self.log(f'train/{key}', value)
         
         # Update metrics
         with torch.no_grad():
@@ -422,12 +417,13 @@ class MultiHeadVIOModel(L.LightningModule):
         loss_dict = self.compute_loss(predictions, batch)
         
         # Total loss
-        total_loss = sum(loss_dict.values())
+        total_loss = loss_dict.get('total_loss', sum(v for k, v in loss_dict.items() if k != 'total_loss'))
         
         # Log losses
         self.log('val/total_loss', total_loss, prog_bar=True)
         for key, value in loss_dict.items():
-            self.log(f'val/{key}', value)
+            if key != 'total_loss':  # Skip to avoid duplicate logging
+                self.log(f'val/{key}', value)
         
         # Update metrics
         with torch.no_grad():
