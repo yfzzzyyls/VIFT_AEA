@@ -16,7 +16,6 @@ from typing import List, Tuple, Dict
 sys.path.append('src')
 
 from src.data.simple_aria_datamodule import SimpleAriaDataModule
-from src.models.multiscale_vio import MultiScaleTemporalVIO
 from src.models.multihead_vio import MultiHeadVIOModel
 from src.utils.kitti_utils import path_accu, pose_6DoF_to_matrix
 from src.utils.kitti_eval import kitti_err_cal, trajectoryDistances, rmse_err_cal
@@ -229,9 +228,6 @@ def evaluate_sequence_hybrid(model, dataloader, device) -> Dict:
 
 def main():
     parser = argparse.ArgumentParser(description='Hybrid trajectory evaluation (KITTI + ATE/RPE)')
-    parser.add_argument('--multiscale_checkpoint', type=str,
-                       default='logs/arvr_multiscale_vio/version_2/checkpoints/multiscale_epoch=11_val_total_loss=0.0000.ckpt',
-                       help='Path to multi-scale model checkpoint')
     parser.add_argument('--multihead_checkpoint', type=str,
                        default='logs/arvr_multihead_vio/version_1/checkpoints/multihead_epoch=18_val_total_loss=0.0000.ckpt',
                        help='Path to multi-head model checkpoint')
@@ -265,12 +261,9 @@ def main():
         model = MultiHeadVIOModel.load_from_checkpoint(args.multihead_checkpoint)
         model = model.to(device)
         results['multihead'] = evaluate_sequence_hybrid(model, test_loader, device)
-    
-    if Path(args.multiscale_checkpoint).exists():
-        print("\n🥈 Evaluating Multi-Scale Model (Hybrid Metrics)...")
-        model = MultiScaleTemporalVIO.load_from_checkpoint(args.multiscale_checkpoint)
-        model = model.to(device)
-        results['multiscale'] = evaluate_sequence_hybrid(model, test_loader, device)
+    else:
+        print(f"\n❌ Multi-Head checkpoint not found: {args.multihead_checkpoint}")
+        return
     
     # Print comprehensive results
     print("\n" + "="*80)

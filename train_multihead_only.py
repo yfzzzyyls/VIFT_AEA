@@ -46,6 +46,9 @@ def train_multihead_model():
     
     # Create data module
     datamodule = SimpleAriaDataModule(
+        train_data_dir="aria_latent_data/train",
+        val_data_dir="aria_latent_data/val",
+        test_data_dir="aria_latent_data/test",
         batch_size=16,
         num_workers=4,
         max_train_samples=1000,
