@@ -138,9 +138,6 @@ python train_pretrained_relative.py \
     --lr 1e-4 \
     --batch_size 32 \
     --epochs 50
-
-# Or use the convenience script
-./train_best_model.sh
 ```
 
 **Key Training Details:**
