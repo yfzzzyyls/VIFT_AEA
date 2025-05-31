@@ -113,67 +113,6 @@ class ImageFeatureEncoder(nn.Module):
         return normalized_features
 
 
-class ResNetFeatureEncoder(ImageFeatureEncoder):
-    """
-    Feature encoder using ResNet backbone for more advanced feature extraction.
-    """
-    
-    def __init__(self, output_dim: int = 768, pretrained: bool = True, freeze_backbone: bool = False):
-        # Initialize with dummy values since we'll override the CNN
-        super().__init__(input_dim=2048, output_dim=output_dim, input_type="images")
-        
-        # Import torchvision here to avoid dependency issues if not available
-        try:
-            import torchvision.models as models
-            
-            # Use ResNet-50 backbone
-            resnet = models.resnet50(pretrained=pretrained)
-            
-            # Remove final classification layer
-            self.backbone = nn.Sequential(*list(resnet.children())[:-1])
-            
-            # Freeze backbone if requested
-            if freeze_backbone:
-                for param in self.backbone.parameters():
-                    param.requires_grad = False
-            
-            # Update feature processor for ResNet output (2048 features)
-            self.feature_processor = nn.Sequential(
-                nn.Linear(2048, 1024),
-                nn.ReLU(),
-                nn.Dropout(0.1),
-                nn.Linear(1024, output_dim)
-            )
-            
-        except ImportError:
-            print("Warning: torchvision not available, using simple CNN")
-            # Fall back to simple CNN
-            pass
-    
-    def forward(self, images: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass using ResNet backbone.
-        
-        Args:
-            images: [B*seq_len, 3, H, W]
-        
-        Returns:
-            features: [B*seq_len, output_dim]
-        """
-        if hasattr(self, 'backbone'):
-            # Use ResNet backbone
-            with torch.set_grad_enabled(self.training):
-                backbone_features = self.backbone(images)  # [B*seq_len, 2048, 1, 1]
-                backbone_features = backbone_features.squeeze(-1).squeeze(-1)  # [B*seq_len, 2048]
-            
-            # Process through final layers
-            features = self.feature_processor(backbone_features)
-            features = self.output_norm(features)
-            
-            return features
-        else:
-            # Fall back to parent implementation
-            return super().forward(images)
 
 
 # Factory function for easy instantiation
@@ -187,13 +126,4 @@ def create_feature_encoder(config: dict) -> ImageFeatureEncoder:
     Returns:
         Configured feature encoder instance
     """
-    encoder_type = config.get('type', 'basic')
-    
-    if encoder_type == 'resnet':
-        return ResNetFeatureEncoder(
-            output_dim=config.get('output_dim', 768),
-            pretrained=config.get('pretrained', True),
-            freeze_backbone=config.get('freeze_backbone', False)
-        )
-    else:
-        return ImageFeatureEncoder(**config)
+    return ImageFeatureEncoder(**config)

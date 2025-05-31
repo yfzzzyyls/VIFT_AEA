@@ -1,8 +1,7 @@
 """
-Multi-Head VIO Architecture - All Frames Prediction Version
-Modified to predict poses for all frames in the sequence, similar to original VIFT.
-Specialized processing heads for rotation and translation with different
-attention patterns optimized for AR/VR motion characteristics.
+Multi-Head VIO Architecture - Fixed Version for Pretrained Features
+This version correctly handles 768-dim pretrained features (512 visual + 256 IMU)
+without redundant encoding.
 """
 
 import torch
@@ -12,8 +11,6 @@ import lightning as L
 from torchmetrics import MeanAbsoluteError
 
 from .components.pose_transformer_new import PoseTransformer
-from .components.imu_encoder import IMUEncoder
-from .components.feature_encoder import ImageFeatureEncoder
 from ..metrics.arvr_loss import ARVRAdaptiveLoss
 
 
@@ -100,15 +97,15 @@ class RotationSpecializedHead(nn.Module):
         rotation_pred = rotation_pred / (torch.norm(rotation_pred, dim=-1, keepdim=True) + 1e-8)
         
         return {
-            'rotation': rotation_pred,  # [B, seq_len, 4]
-            'angular_velocity': angular_velocity_pred,  # [B, seq_len, 3]
-            'rotation_features': attended_features  # [B, seq_len, hidden_dim]
+            'rotation': rotation_pred,
+            'angular_velocity': angular_velocity_pred,
+            'rotation_features': attended_features
         }
 
 
 class TranslationSpecializedHead(nn.Module):
     """
-    Specialized head for translation prediction with linear velocity focus.
+    Specialized head for translation prediction with spatial attention.
     Modified to predict translations for all frames in the sequence.
     """
     
@@ -132,8 +129,16 @@ class TranslationSpecializedHead(nn.Module):
             nn.Dropout(dropout)
         )
         
-        # Linear velocity specific transformer
-        self.velocity_transformer = nn.TransformerEncoder(
+        # Spatial cross-attention (current frame attends to all frames)
+        self.spatial_cross_attention = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+        
+        # Translation transformer
+        self.translation_transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
                 d_model=hidden_dim,
                 nhead=num_heads,
@@ -149,11 +154,11 @@ class TranslationSpecializedHead(nn.Module):
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, 3)  # XYZ output
+            nn.Linear(hidden_dim // 2, 3)  # XYZ translation
         )
         
         # Linear velocity prediction (auxiliary task) - for each timestep
-        self.linear_velocity_output = nn.Linear(hidden_dim, 3)
+        self.velocity_output = nn.Linear(hidden_dim, 3)
         
     def forward(self, features: torch.Tensor) -> Dict[str, torch.Tensor]:
         """
@@ -163,39 +168,47 @@ class TranslationSpecializedHead(nn.Module):
             features: [B, seq_len, input_dim]
         
         Returns:
-            Dictionary with translation and linear velocity predictions for all frames
+            Dictionary with translation and velocity predictions for all frames
         """
         # Process features for translation
         trans_features = self.translation_processor(features)  # [B, seq_len, hidden_dim]
         
-        # Apply translation-specific attention with causal mask
-        attended_features = self.velocity_transformer(trans_features)  # [B, seq_len, hidden_dim]
+        # Apply spatial cross-attention
+        attended_features, _ = self.spatial_cross_attention(
+            trans_features, trans_features, trans_features
+        )  # [B, seq_len, hidden_dim]
+        
+        # Add residual connection
+        attended_features = attended_features + trans_features
+        
+        # Apply translation transformer
+        refined_features = self.translation_transformer(attended_features)  # [B, seq_len, hidden_dim]
         
         # Predict for all frames
-        B, seq_len, hidden_dim = attended_features.shape
+        B, seq_len, hidden_dim = refined_features.shape
         
         # Reshape for batch processing
-        all_features = attended_features.reshape(B * seq_len, hidden_dim)
+        all_features = refined_features.reshape(B * seq_len, hidden_dim)
         
-        # Predict translation and linear velocity for all frames
+        # Predict translation and velocity for all frames
         translation_pred = self.translation_output(all_features)  # [B*seq_len, 3]
-        linear_velocity_pred = self.linear_velocity_output(all_features)  # [B*seq_len, 3]
+        velocity_pred = self.velocity_output(all_features)  # [B*seq_len, 3]
         
         # Reshape back to sequence format
         translation_pred = translation_pred.reshape(B, seq_len, 3)
-        linear_velocity_pred = linear_velocity_pred.reshape(B, seq_len, 3)
+        velocity_pred = velocity_pred.reshape(B, seq_len, 3)
         
         return {
-            'translation': translation_pred,  # [B, seq_len, 3]
-            'linear_velocity': linear_velocity_pred,  # [B, seq_len, 3]
-            'translation_features': attended_features  # [B, seq_len, hidden_dim]
+            'translation': translation_pred,
+            'linear_velocity': velocity_pred,
+            'translation_features': refined_features
         }
 
 
 class MultiHeadVIOModel(L.LightningModule):
     """
-    Multi-Head VIO model with specialized processing for rotation and translation.
-    Modified to predict poses for all frames in the sequence.
+    Fixed Multi-head VIO model that correctly processes 768-dim pretrained features.
+    The input features already contain both visual (512) and IMU (256) information.
     """
     
     def __init__(
@@ -216,28 +229,17 @@ class MultiHeadVIOModel(L.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         
-        # Feature encoders
-        self.feature_encoder = ImageFeatureEncoder(
-            input_dim=feature_dim,
-            output_dim=feature_dim,
-            hidden_dim=512,
-            num_layers=3,
-            dropout=dropout
+        # Simple feature projection (the features are already encoded!)
+        self.feature_projection = nn.Sequential(
+            nn.Linear(feature_dim, feature_dim),
+            nn.LayerNorm(feature_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout)
         )
-        
-        self.imu_encoder = IMUEncoder(
-            input_dim=6,
-            output_dim=feature_dim // 2,
-            hidden_dim=128,
-            dropout=dropout
-        )
-        
-        # Combined feature dimension
-        combined_dim = feature_dim + feature_dim // 2
         
         # Shared transformer for initial processing
         self.shared_processor = PoseTransformer(
-            input_dim=combined_dim,
+            input_dim=feature_dim,  # Process 768-dim features directly
             hidden_dim=hidden_dim,
             num_layers=num_shared_layers,
             num_heads=num_heads,
@@ -284,26 +286,19 @@ class MultiHeadVIOModel(L.LightningModule):
         Forward pass predicting poses for all frames.
         
         Args:
-            batch: Dictionary with 'images', 'imus', 'poses'
+            batch: Dictionary with 'images' (actually 768-dim features), 'imus' (ignored), 'poses'
         
         Returns:
             Dictionary with rotation and translation predictions for all frames
         """
-        # Encode visual features
-        B, seq_len, feature_dim = batch['images'].shape
-        # Flatten for feature encoder that expects [B*seq_len, feature_dim]
-        images_flat = batch['images'].reshape(B * seq_len, feature_dim)
-        visual_features_flat = self.feature_encoder(images_flat)  # [B*seq_len, feature_dim]
-        visual_features = visual_features_flat.reshape(B, seq_len, -1)  # [B, seq_len, feature_dim]
+        # The 'images' field contains our 768-dim pretrained features
+        features = batch['images']  # [B, seq_len, 768]
         
-        # Encode IMU features
-        imu_features = self.imu_encoder(batch['imus'])  # [B, seq_len, feature_dim//2]
-        
-        # Combine features
-        combined_features = torch.cat([visual_features, imu_features], dim=-1)
+        # Simple projection (features are already encoded!)
+        projected_features = self.feature_projection(features)  # [B, seq_len, 768]
         
         # Shared transformer processing
-        shared_features = self.shared_processor(combined_features)  # [B, seq_len, hidden_dim]
+        shared_features = self.shared_processor(projected_features)  # [B, seq_len, hidden_dim]
         
         # Get predictions from specialized heads
         rotation_outputs = self.rotation_head(shared_features)
@@ -348,123 +343,131 @@ class MultiHeadVIOModel(L.LightningModule):
         target_rotation = batch['poses'][:, 1:, 3:7]  # [B, seq_len-1, 4]
         target_translation = batch['poses'][:, 1:, :3]  # [B, seq_len-1, 3]
         
-        # Predictions (excluding first frame to match targets)
+        # Predicted poses (excluding first frame)
         pred_rotation = predictions['rotation'][:, 1:, :]  # [B, seq_len-1, 4]
         pred_translation = predictions['translation'][:, 1:, :]  # [B, seq_len-1, 3]
         
-        # Compute losses using MSE (AR/VR loss expects 3D tensors, we have 4D quaternions)
-        rotation_loss = nn.functional.mse_loss(pred_rotation.reshape(-1, 4), 
-                                               target_rotation.reshape(-1, 4))
-        translation_loss = nn.functional.mse_loss(pred_translation.reshape(-1, 3), 
-                                                 target_translation.reshape(-1, 3))
+        # Flatten for metric computation
+        B, seq_len_minus_1, _ = pred_rotation.shape
         
-        # Velocity losses (computed from consecutive frame differences)
-        if predictions['angular_velocity'].shape[1] > 1:
-            # Compute target velocities from ground truth
-            target_angular_vel = target_rotation[:, 1:] - target_rotation[:, :-1]  # [B, seq_len-2, 4]
-            pred_angular_vel = predictions['angular_velocity'][:, 2:, :]  # [B, seq_len-2, 3]
-            
-            target_linear_vel = target_translation[:, 1:] - target_translation[:, :-1]  # [B, seq_len-2, 3]
-            pred_linear_vel = predictions['linear_velocity'][:, 2:, :]  # [B, seq_len-2, 3]
-            
-            # Only use first 3 components of angular velocity (ignore w component)
-            angular_vel_loss = nn.functional.mse_loss(pred_angular_vel, target_angular_vel[:, :, :3])
-            linear_vel_loss = nn.functional.mse_loss(pred_linear_vel, target_linear_vel)
-        else:
-            angular_vel_loss = torch.tensor(0.0, device=rotation_loss.device)
-            linear_vel_loss = torch.tensor(0.0, device=rotation_loss.device)
+        pred_rot = pred_rotation.reshape(-1, 4).contiguous()
+        target_rot = target_rotation.reshape(-1, 4).contiguous()
+        pred_trans = pred_translation.reshape(-1, 3).contiguous()
+        target_trans = target_translation.reshape(-1, 3).contiguous()
         
-        # Total loss
-        total_loss = (self.hparams.rotation_weight * rotation_loss + 
-                     self.hparams.translation_weight * translation_loss +
-                     self.hparams.velocity_weight * (angular_vel_loss + linear_vel_loss))
-        
-        return {
-            'total_loss': total_loss,
-            'rotation_loss': rotation_loss,
-            'translation_loss': translation_loss,
-            'angular_velocity_loss': angular_vel_loss,
-            'linear_velocity_loss': linear_vel_loss
-        }
-    
-    def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        """Training step with all-frame prediction."""
-        predictions = self(batch)
-        losses = self.compute_loss(predictions, batch)
-        
-        # Log losses
-        for name, loss in losses.items():
-            self.log(f'train/{name}', loss, on_step=True, on_epoch=True, prog_bar=True)
-        
-        # Update metrics (using mean across all frames)
-        pred_rot = predictions['rotation'][:, 1:, :].reshape(-1, 4).contiguous()
-        target_rot = batch['poses'][:, 1:, 3:7].reshape(-1, 4).contiguous()
-        self.train_rot_mae(pred_rot, target_rot)
-        
-        pred_trans = predictions['translation'][:, 1:, :].reshape(-1, 3).contiguous()
-        target_trans = batch['poses'][:, 1:, :3].reshape(-1, 3).contiguous()
-        self.train_trans_mae(pred_trans, target_trans)
-        
-        self.log('train/rotation_mae', self.train_rot_mae, on_step=True, on_epoch=True)
-        self.log('train/translation_mae', self.train_trans_mae, on_step=True, on_epoch=True)
-        
-        # Log current learning rate (handled by LearningRateMonitor callback now)
-        # But we can still log it here for consistency with original VIFT
-        if self.trainer.optimizers:
-            lr = self.trainer.optimizers[0].param_groups[0]['lr']
-            self.log('train/lr', lr, on_step=True, on_epoch=False, prog_bar=False)
-        
-        return losses['total_loss']
-    
-    def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int):
-        """Validation step with all-frame prediction."""
-        predictions = self(batch)
-        losses = self.compute_loss(predictions, batch)
-        
-        # Log losses
-        for name, loss in losses.items():
-            self.log(f'val/{name}', loss, on_epoch=True)
-        
-        # Update metrics (using mean across all frames)
-        pred_rot = predictions['rotation'][:, 1:, :].reshape(-1, 4).contiguous()
-        target_rot = batch['poses'][:, 1:, 3:7].reshape(-1, 4).contiguous()
-        self.val_rot_mae(pred_rot, target_rot)
-        
-        pred_trans = predictions['translation'][:, 1:, :].reshape(-1, 3).contiguous()
-        target_trans = batch['poses'][:, 1:, :3].reshape(-1, 3).contiguous()
-        self.val_trans_mae(pred_trans, target_trans)
-        
-        self.log('val/rotation_mae', self.val_rot_mae, on_epoch=True)
-        self.log('val/translation_mae', self.val_trans_mae, on_epoch=True)
-    
-    def configure_optimizers(self):
-        """Configure optimizer with parameter groups."""
-        # Different learning rates for different components
-        param_groups = [
-            {'params': self.feature_encoder.parameters(), 'lr': self.hparams.learning_rate * 0.5},
-            {'params': self.imu_encoder.parameters(), 'lr': self.hparams.learning_rate * 0.5},
-            {'params': self.shared_processor.parameters(), 'lr': self.hparams.learning_rate},
-            {'params': self.rotation_head.parameters(), 'lr': self.hparams.learning_rate * 1.5},
-            {'params': self.translation_head.parameters(), 'lr': self.hparams.learning_rate * 1.5},
-            {'params': self.cross_modal_fusion.parameters(), 'lr': self.hparams.learning_rate}
-        ]
-        
-        optimizer = torch.optim.AdamW(
-            param_groups,
-            weight_decay=self.hparams.weight_decay
+        # Compute AR/VR optimized loss
+        loss_dict = self.arvr_loss(
+            pred_rotation=pred_rot,
+            target_rotation=target_rot,
+            pred_translation=pred_trans,
+            target_translation=target_trans
         )
         
-        # Cosine annealing scheduler
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        # Add velocity losses if available
+        if 'angular_velocity' in predictions:
+            # Compute angular velocity targets from consecutive rotations
+            # This is a simplified version - ideally should use proper SO(3) derivatives
+            angular_vel_target = target_rotation[:, 1:, :] - target_rotation[:, :-1, :]
+            angular_vel_pred = predictions['angular_velocity'][:, 1:-1, :]
+            
+            if angular_vel_target.shape[1] > 0:
+                vel_loss = nn.functional.mse_loss(angular_vel_pred, angular_vel_target)
+                loss_dict['angular_velocity_loss'] = vel_loss * self.hparams.velocity_weight
+        
+        if 'linear_velocity' in predictions:
+            # Compute linear velocity targets
+            linear_vel_target = target_translation[:, 1:, :] - target_translation[:, :-1, :]
+            linear_vel_pred = predictions['linear_velocity'][:, 1:-1, :]
+            
+            if linear_vel_target.shape[1] > 0:
+                vel_loss = nn.functional.mse_loss(linear_vel_pred, linear_vel_target)
+                loss_dict['linear_velocity_loss'] = vel_loss * self.hparams.velocity_weight
+        
+        # Weight the losses
+        loss_dict['rotation_loss'] *= self.hparams.rotation_weight
+        loss_dict['translation_loss'] *= self.hparams.translation_weight
+        
+        return loss_dict
+    
+    def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        predictions = self(batch)
+        loss_dict = self.compute_loss(predictions, batch)
+        
+        # Total loss
+        total_loss = sum(loss_dict.values())
+        
+        # Log losses
+        self.log('train/total_loss', total_loss, prog_bar=True)
+        for key, value in loss_dict.items():
+            self.log(f'train/{key}', value)
+        
+        # Update metrics
+        with torch.no_grad():
+            # Get non-first frame predictions and targets
+            pred_rot = predictions['rotation'][:, 1:, :].reshape(-1, 4)
+            target_rot = batch['poses'][:, 1:, 3:7].reshape(-1, 4)
+            pred_trans = predictions['translation'][:, 1:, :].reshape(-1, 3)
+            target_trans = batch['poses'][:, 1:, :3].reshape(-1, 3)
+            
+            self.train_rot_mae(pred_rot, target_rot)
+            self.train_trans_mae(pred_trans, target_trans)
+            
+            self.log('train/rot_mae', self.train_rot_mae, prog_bar=True)
+            self.log('train/trans_mae', self.train_trans_mae, prog_bar=True)
+        
+        return total_loss
+    
+    def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        predictions = self(batch)
+        loss_dict = self.compute_loss(predictions, batch)
+        
+        # Total loss
+        total_loss = sum(loss_dict.values())
+        
+        # Log losses
+        self.log('val/total_loss', total_loss, prog_bar=True)
+        for key, value in loss_dict.items():
+            self.log(f'val/{key}', value)
+        
+        # Update metrics
+        with torch.no_grad():
+            # Get non-first frame predictions and targets
+            pred_rot = predictions['rotation'][:, 1:, :].reshape(-1, 4)
+            target_rot = batch['poses'][:, 1:, 3:7].reshape(-1, 4)
+            pred_trans = predictions['translation'][:, 1:, :].reshape(-1, 3)
+            target_trans = batch['poses'][:, 1:, :3].reshape(-1, 3)
+            
+            self.val_rot_mae(pred_rot, target_rot)
+            self.val_trans_mae(pred_trans, target_trans)
+            
+            self.log('val/rot_mae', self.val_rot_mae, prog_bar=True)
+            self.log('val/trans_mae', self.val_trans_mae, prog_bar=True)
+        
+        return total_loss
+    
+    def configure_optimizers(self):
+        # AdamW optimizer with cosine annealing
+        optimizer = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+            weight_decay=self.hparams.weight_decay,
+            betas=(0.9, 0.999)
+        )
+        
+        # Cosine annealing scheduler with warm restarts
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
             optimizer,
-            T_max=50,  # Adjust based on expected epochs
-            eta_min=self.hparams.learning_rate * 0.01
+            T_0=10,
+            T_mult=2,
+            eta_min=1e-6
         )
         
         return {
             'optimizer': optimizer,
             'lr_scheduler': {
                 'scheduler': scheduler,
-                'monitor': 'val/total_loss'
+                'monitor': 'val/total_loss',
+                'interval': 'epoch',
+                'frequency': 1
             }
         }

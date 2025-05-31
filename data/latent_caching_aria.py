@@ -7,17 +7,28 @@ import json
 import numpy as np
 import torch
 from torch import nn
-from torchvision import transforms, models
+from torchvision import transforms
 from pathlib import Path
 from tqdm import tqdm
 
 class SimpleVisualEncoder(nn.Module):
-    """Simple visual encoder using ResNet"""
+    """Simple visual encoder using basic CNN"""
     def __init__(self):
         super().__init__()
-        # Use ResNet18 backbone
-        resnet = models.resnet18(pretrained=True)
-        self.backbone = nn.Sequential(*list(resnet.children())[:-1])
+        # Use a simple CNN backbone
+        self.backbone = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(64, 128, kernel_size=5, stride=2, padding=2),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1))
+        )
         self.projection = nn.Linear(512, 512)  # Project to 512 dims
         
         self.transform = transforms.Compose([

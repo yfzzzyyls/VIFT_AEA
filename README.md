@@ -146,8 +146,9 @@ python train_pretrained_relative.py \
 **Key Training Details:**
 - **Pose Format**: Converts absolute world coordinates to relative poses
 - **Scale**: Automatically handles 100x conversion from meters to centimeters (default)
-- **Features**: 768-dimensional Visual-Selective-VIO features
+- **Features**: 768-dimensional Visual-Selective-VIO features (512 visual + 256 IMU pre-concatenated)
 - **Model**: Multi-head architecture with specialized rotation/translation heads
+- **Architecture**: Directly processes 768-dim features without redundant encoding
 
 #### Training Progress
 
