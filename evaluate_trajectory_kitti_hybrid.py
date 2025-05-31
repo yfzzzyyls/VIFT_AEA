@@ -86,6 +86,7 @@ def compute_rpe_from_trajectories(traj_est: List[np.ndarray], traj_gt: List[np.n
 def evaluate_sequence_hybrid(model, dataloader, device) -> Dict:
     """
     Hybrid evaluation combining KITTI trajectory accumulation with modern ATE/RPE metrics.
+    Modified to handle all-frames prediction models.
     """
     model.eval()
     
@@ -106,92 +107,150 @@ def evaluate_sequence_hybrid(model, dataloader, device) -> Dict:
             batch_size = batch['poses'].shape[0]
             seq_len = batch['poses'].shape[1]
             
-            # Get predictions for each frame in sequence
-            predictions_list = []
-            targets_list = []
+            # Get predictions for all frames at once
+            pred = model(batch)
             
-            for i in range(1, seq_len):
-                window_end = i + 1
-                window_start = max(0, window_end - 11)
+            # Check if model outputs all frames or just last frame
+            if len(pred['rotation'].shape) == 3:  # [B, seq_len, 4] - all frames
+                # Model predicts all frames
+                pred_rotations = pred['rotation'][:, 1:, :].cpu().numpy()  # Skip first frame
+                pred_translations = pred['translation'][:, 1:, :].cpu().numpy()
+                target_rotations = batch['poses'][:, 1:, 3:7].cpu().numpy()
+                target_translations = batch['poses'][:, 1:, :3].cpu().numpy()
                 
-                if window_end <= seq_len:
-                    window_batch = {
-                        'images': batch['images'][:, window_start:window_end],
-                        'imus': batch['imus'][:, window_start:window_end],
-                        'poses': batch['poses'][:, window_start:window_end]
-                    }
+                # Process each sequence in batch
+                for b in range(batch_size):
+                    # Convert to 6DOF format for KITTI
+                    pred_6dof = []
+                    gt_6dof = []
                     
-                    pred = model(window_batch)
+                    for i in range(pred_rotations.shape[1]):
+                        pred_6dof.append(quaternion_to_6dof(pred_rotations[b, i], pred_translations[b, i]))
+                        gt_6dof.append(quaternion_to_6dof(target_rotations[b, i], target_translations[b, i]))
                     
-                    predictions_list.append({
-                        'rotation': pred['rotation'].cpu().numpy(),
-                        'translation': pred['translation'].cpu().numpy()
-                    })
+                    if len(pred_6dof) < 2:
+                        continue
+                        
+                    # Convert to numpy arrays
+                    pred_poses = np.array(pred_6dof)
+                    gt_poses = np.array(gt_6dof)
                     
-                    targets_list.append({
-                        'rotation': batch['poses'][:, i, 3:7].cpu().numpy(),
-                        'translation': batch['poses'][:, i, :3].cpu().numpy()
-                    })
-            
-            # Process each sequence in batch
-            for b in range(batch_size):
-                if len(predictions_list) < 2:
-                    continue
+                    try:
+                        # Use KITTI trajectory accumulation
+                        traj_est = path_accu(pred_poses)
+                        traj_gt = path_accu(gt_poses)
+                        
+                        # Compute metrics (rest of the code remains the same)
+                        ate = compute_ate_from_trajectories(traj_est, traj_gt)
+                        all_ates.append(ate)
+                        
+                        # RPE at different time scales
+                        trans_rpe_1s, rot_rpe_1s = compute_rpe_from_trajectories(traj_est, traj_gt, delta_frames=1)
+                        all_rpe_trans_1s.append(trans_rpe_1s)
+                        all_rpe_rot_1s.append(rot_rpe_1s)
+                        
+                        if len(traj_est) > 5:
+                            trans_rpe_5s, rot_rpe_5s = compute_rpe_from_trajectories(traj_est, traj_gt, delta_frames=5)
+                            all_rpe_trans_5s.append(trans_rpe_5s)
+                            all_rpe_rot_5s.append(rot_rpe_5s)
+                        
+                        # Distance analysis
+                        distances, _ = trajectoryDistances(traj_gt)
+                        if distances:
+                            total_distance = distances[-1] if distances else 0
+                            all_distances.append(total_distance)
+                            all_durations.append(len(traj_gt) - 1)
+                            
+                    except Exception as e:
+                        continue
+                        
+            else:  # [B, 4] - single frame (legacy sliding window approach)
+                # Original sliding window code for backward compatibility
+                predictions_list = []
+                targets_list = []
                 
-                # Convert to 6DOF format for KITTI
-                pred_6dof = []
-                gt_6dof = []
+                for i in range(1, seq_len):
+                    window_end = i + 1
+                    window_start = max(0, window_end - 11)
+                    
+                    if window_end <= seq_len:
+                        window_batch = {
+                            'images': batch['images'][:, window_start:window_end],
+                            'imus': batch['imus'][:, window_start:window_end],
+                            'poses': batch['poses'][:, window_start:window_end]
+                        }
+                        
+                        pred = model(window_batch)
+                        
+                        predictions_list.append({
+                            'rotation': pred['rotation'].cpu().numpy(),
+                            'translation': pred['translation'].cpu().numpy()
+                        })
+                        
+                        targets_list.append({
+                            'rotation': batch['poses'][:, i, 3:7].cpu().numpy(),
+                            'translation': batch['poses'][:, i, :3].cpu().numpy()
+                        })
                 
-                for pred, target in zip(predictions_list, targets_list):
-                    pred_6dof.append(quaternion_to_6dof(pred['rotation'][b], pred['translation'][b]))
-                    gt_6dof.append(quaternion_to_6dof(target['rotation'][b], target['translation'][b]))
-                
-                if len(pred_6dof) < 2:
-                    continue
-                
-                # Convert to numpy arrays
-                pred_poses = np.array(pred_6dof)
-                gt_poses = np.array(gt_6dof)
-                
-                try:
-                    # Use KITTI trajectory accumulation (reusing existing proven code)
-                    traj_est = path_accu(pred_poses)
-                    traj_gt = path_accu(gt_poses)
+                # Process each sequence in batch
+                for b in range(batch_size):
+                    if len(predictions_list) < 2:
+                        continue
                     
-                    # Modern ATE/RPE metrics
-                    ate = compute_ate_from_trajectories(traj_est, traj_gt)
-                    all_ates.append(ate)
+                    # Convert to 6DOF format for KITTI
+                    pred_6dof = []
+                    gt_6dof = []
                     
-                    # RPE at different time scales
-                    trans_rpe_1s, rot_rpe_1s = compute_rpe_from_trajectories(traj_est, traj_gt, delta_frames=1)
-                    all_rpe_trans_1s.append(trans_rpe_1s)
-                    all_rpe_rot_1s.append(rot_rpe_1s)
+                    for pred, target in zip(predictions_list, targets_list):
+                        pred_6dof.append(quaternion_to_6dof(pred['rotation'][b], pred['translation'][b]))
+                        gt_6dof.append(quaternion_to_6dof(target['rotation'][b], target['translation'][b]))
                     
-                    if len(traj_est) > 5:
-                        trans_rpe_5s, rot_rpe_5s = compute_rpe_from_trajectories(traj_est, traj_gt, delta_frames=5)
-                        all_rpe_trans_5s.append(trans_rpe_5s)
-                        all_rpe_rot_5s.append(rot_rpe_5s)
+                    if len(pred_6dof) < 2:
+                        continue
                     
-                    # KITTI-style metrics (for comparison with automotive benchmarks)
-                    if len(traj_est) > 10:  # Need sufficient length for KITTI evaluation
-                        try:
-                            err_list, t_rel, r_rel, speed = kitti_err_cal(traj_est, traj_gt)
-                            all_kitti_t_rel.append(t_rel * 100)  # Convert to %/100m
-                            all_kitti_r_rel.append(r_rel / np.pi * 180 * 100)  # Convert to deg/100m
-                        except:
-                            # KITTI evaluation can fail on short sequences
-                            pass
+                    # Convert to numpy arrays
+                    pred_poses = np.array(pred_6dof)
+                    gt_poses = np.array(gt_6dof)
                     
-                    # Distance analysis
-                    distances, _ = trajectoryDistances(traj_gt)
-                    if distances:
-                        total_distance = distances[-1] if distances else 0
-                        all_distances.append(total_distance)
-                        all_durations.append(len(traj_gt) - 1)
-                    
-                except Exception as e:
-                    # Skip sequences that cause numerical issues
-                    continue
+                    try:
+                        # Use KITTI trajectory accumulation (reusing existing proven code)
+                        traj_est = path_accu(pred_poses)
+                        traj_gt = path_accu(gt_poses)
+                        
+                        # Modern ATE/RPE metrics
+                        ate = compute_ate_from_trajectories(traj_est, traj_gt)
+                        all_ates.append(ate)
+                        
+                        # RPE at different time scales
+                        trans_rpe_1s, rot_rpe_1s = compute_rpe_from_trajectories(traj_est, traj_gt, delta_frames=1)
+                        all_rpe_trans_1s.append(trans_rpe_1s)
+                        all_rpe_rot_1s.append(rot_rpe_1s)
+                        
+                        if len(traj_est) > 5:
+                            trans_rpe_5s, rot_rpe_5s = compute_rpe_from_trajectories(traj_est, traj_gt, delta_frames=5)
+                            all_rpe_trans_5s.append(trans_rpe_5s)
+                            all_rpe_rot_5s.append(rot_rpe_5s)
+                        
+                        # KITTI-style metrics (for comparison with automotive benchmarks)
+                        if len(traj_est) > 10:  # Need sufficient length for KITTI evaluation
+                            try:
+                                err_list, t_rel, r_rel, speed = kitti_err_cal(traj_est, traj_gt)
+                                all_kitti_t_rel.append(t_rel * 100)  # Convert to %/100m
+                                all_kitti_r_rel.append(r_rel / np.pi * 180 * 100)  # Convert to deg/100m
+                            except:
+                                # KITTI evaluation can fail on short sequences
+                                pass
+                        
+                        # Distance analysis
+                        distances, _ = trajectoryDistances(traj_gt)
+                        if distances:
+                            total_distance = distances[-1] if distances else 0
+                            all_distances.append(total_distance)
+                            all_durations.append(len(traj_gt) - 1)
+                        
+                    except Exception as e:
+                        # Skip sequences that cause numerical issues
+                        continue
             
             if batch_idx % 5 == 0:
                 print(f"  Processed batch {batch_idx}/{len(dataloader)}")

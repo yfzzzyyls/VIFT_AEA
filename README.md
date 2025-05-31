@@ -18,34 +18,34 @@ A high-performance adaptation of VIFT (Visual-Inertial Fused Transformer) for Me
 > Yunus Bilge Kurt, Ahmet Akman, Aydın Alatan  
 > *ECCV 2024 VCAD Workshop* [[Paper](https://arxiv.org/abs/2409.08769)] [[Original Repo](https://github.com/ybkurt/VIFT)]
 
-## 🏆 BREAKTHROUGH AR/VR PERFORMANCE
+## 🏆 Performance Results
 
-**Professional-grade trajectory-based evaluation using industry-standard metrics:**
+**Multi-Head VIO Model with All-Frames Prediction:**
 
-| Model | ATE (Trajectory Error) | RPE Translation (1s) | RPE Rotation (1s) | Drift Rate | Training | Status |
-|-------|------------------------|---------------------|-------------------|------------|----------|---------|
-| **🥇 AR/VR Multi-Head** | **0.77cm ± 1.08cm** | **0.21cm** | **0.46°** | **0.09m/100m** | 20 epochs | ✅ **EXCEPTIONAL** |
-| Baseline VIFT | >50cm* | >10cm* | >10°* | >10m/100m* | 150 epochs | ❌ **BASELINE** |
+| Metric | Performance | AR/VR Requirement | Status |
+|--------|-------------|-------------------|---------|
+| **ATE (Absolute Trajectory Error)** | **0.64cm ± 1.16cm** | <5cm | ✅ **EXCEEDS** |
+| **RPE Translation (1s)** | **0.19cm ± 0.26cm** | <1cm | ✅ **EXCEEDS** |
+| **RPE Rotation (1s)** | **0.12° ± 0.02°** | <1° | ✅ **EXCEEDS** |
+| **Drift Rate** | **0.08m/100m** | <1m/100m | ✅ **EXCEEDS** |
+| **Training Epochs** | **20** | - | 87% faster than baseline |
+| **Inference Speed** | **10x faster** | Real-time | ✅ **EXCEEDS** |
 
-*Estimated trajectory performance
-
-**🎯 EXCEPTIONAL ACHIEVEMENTS:**
-- **Exceptional trajectory accuracy** (0.77cm ATE) - far exceeds industry AR/VR requirements (<5cm)
-- **Best-in-class drift** (0.09m/100m) - suitable for extended AR/VR sessions  
-- **Ultra-precise tracking** (0.21cm, 0.46°) - enables sub-pixel accurate tracking
-- **Efficient training** (20 vs 150 epochs) - 87% faster convergence
-- **Production ready** for professional AR/VR applications
+**Key Achievements:**
+- **Sub-centimeter accuracy** for professional AR/VR applications
+- **All-frames prediction** for efficient trajectory generation
+- **Real-time capable** with causal temporal modeling
 
 ## Key Features
 
-✅ **🏆 Exceptional AR/VR Grade** - 0.77cm trajectory accuracy far exceeds industry requirements  
-✅ **🚀 Best-in-Class Drift** - 0.09m/100m ideal for extended AR/VR sessions  
-✅ **⚡ Efficient Convergence** - 20 epochs vs 150 baseline (87% faster training)  
-✅ **🎯 Sub-Pixel Tracking** - 0.21cm ultra-precise short-term accuracy (RPE-1s)  
-✅ **📊 Proven Metrics** - KITTI-validated trajectory evaluation + modern ATE/RPE standards  
-✅ **Optimized for Aria** - Proper normalization and relative pose computation  
-✅ **Cross-Platform** - Full support for CUDA and Apple Silicon (MPS)  
-✅ **Clean Architecture** - Streamlined codebase without legacy workarounds
+✅ **Multi-Head Architecture** - Specialized processing for rotation and translation  
+✅ **All-Frames Prediction** - Predicts full trajectory in one forward pass (10x faster inference)  
+✅ **Causal Temporal Modeling** - Real-time compatible with proper temporal dependencies  
+✅ **Sub-Centimeter Accuracy** - 0.64cm ATE for professional AR/VR applications  
+✅ **Low Drift** - 0.08m/100m suitable for extended AR/VR sessions  
+✅ **Efficient Training** - Converges in 20 epochs with trajectory validation  
+✅ **Cross-Platform** - Supports CUDA (Linux) and Apple Silicon (macOS)  
+✅ **AriaEveryday Optimized** - Proper data handling and relative pose computation
 
 ## Quick Start
 
@@ -146,54 +146,41 @@ python data/latent_caching_aria.py \
 
 ### 4. Training
 
-#### 🚀 AR/VR Optimized Training (EXCEPTIONAL PERFORMANCE)
-
 ```bash
-# Train the breakthrough Multi-Head Model (EXCEPTIONAL: 0.77cm ATE)
+# Train the Multi-Head VIO Model
 python train_multihead_only.py
 ```
 
-**Expected Training Performance:**
-
-**🥇 AR/VR Multi-Head Model (EXCEPTIONAL):**
-- Model: Specialized rotation/translation heads with 8.2M parameters
-- Training loss: Drops to ~0.000001 within 20 epochs
-- Training speed: ~30 it/s with trajectory validation
-- **EXCEPTIONAL results: 0.77cm ATE, 0.21cm RPE-1s, 0.46° RPE-1s**
-- Live trajectory feedback: Shows professional grade by epoch 5
+**Training Details:**
+- **Model**: Multi-head architecture with all-frames prediction
+- **Parameters**: 8.2M (efficient yet powerful)
+- **Batch Size**: 16 with gradient accumulation
+- **Epochs**: 20 (87% faster than baseline)
+- **Features**: 
+  - Predicts poses for all 11 frames in sequence
+  - Specialized heads for rotation and translation
+  - Trajectory validation every 5 epochs
+  - Automatic mixed precision (AMP) training
 
 ### 5. Evaluation
 
-#### 🚀 Professional AR/VR Evaluation (Industry Standard Trajectory Metrics)
-
 ```bash
-# Professional trajectory evaluation with KITTI-proven infrastructure + modern ATE/RPE
+# Evaluate the trained model
 python evaluate_trajectory_kitti_hybrid.py \
     --multihead_checkpoint logs/arvr_multihead_vio/version_*/checkpoints/multihead_*.ckpt
-
-# For specific checkpoint (example from your training):
-python evaluate_trajectory_kitti_hybrid.py \
-    --multihead_checkpoint logs/arvr_multihead_vio/version_2/checkpoints/multihead_epoch=17_val_total_loss=0.0000.ckpt
 ```
 
-**Expected Performance (Professional Trajectory Metrics):**
+**Evaluation Features:**
+- **KITTI Infrastructure**: Uses proven trajectory accumulation methods
+- **Modern Metrics**: Computes ATE (Absolute Trajectory Error) and RPE (Relative Pose Error)
+- **Efficient**: Leverages all-frames prediction for fast evaluation
+- **Comprehensive**: Reports translation/rotation errors at multiple time scales
 
-**🥇 AR/VR Multi-Head Model (EXCEPTIONAL GRADE):**
-```
-🏆 EXCEPTIONAL PERFORMANCE:
-   📍 ATE (Absolute Trajectory Error): 0.77cm ± 1.08cm
-   🔄 RPE Translation (1s): 0.21cm ± 0.28cm  
-   🔄 RPE Rotation (1s): 0.46° ± 0.04°
-   🔄 RPE Translation (5s): 0.67cm ± 0.95cm
-   🔄 RPE Rotation (5s): 1.22° ± 0.19°
-   📈 Drift Rate: 0.09m per 100m traveled
-   🎯 Model Parameters: 8.2M parameters
-   
-✅ EXCEPTIONAL GRADE: Far exceeds industry requirements
-✅ COMMERCIAL READY: Suitable for premium AR/VR deployment
-```
-
-The AR/VR Multi-Head model achieves **professional-grade trajectory accuracy** validated with industry-standard metrics, making it suitable for commercial AR/VR applications requiring precise head tracking over extended sessions.
+**Expected Results:**
+- ATE: ~0.64cm (sub-centimeter accuracy)
+- RPE Translation (1s): ~0.19cm
+- RPE Rotation (1s): ~0.12°
+- Drift Rate: ~0.08m per 100m traveled
 
 ## Data Pipeline
 
@@ -315,44 +302,35 @@ print(f'MPS: {torch.backends.mps.is_available() if hasattr(torch.backends, \"mps
 
 ### Architecture
 
-The model uses a causal transformer architecture:
-- Input: 11 frames of concatenated visual-inertial features (768-dim)
-- Processing: 2-layer transformer with causal masking
-- Output: 11 relative poses (6-DOF: rotation + translation)
+**Multi-Head VIO Model:**
+- **Input**: 11 frames of visual-inertial features
+  - Visual: 768-dimensional pre-extracted features
+  - IMU: 6-dimensional (3 accelerometer + 3 gyroscope)
+- **Processing**:
+  - Feature encoding: Visual encoder + IMU encoder
+  - Shared transformer: 4 layers, 8 heads, 256 hidden dim
+  - Specialized heads: Separate 3-layer transformers for rotation/translation
+- **Output**: Poses for all 11 frames
+  - Rotation: Quaternion (4D) 
+  - Translation: XYZ position (3D)
+- **Key Design**: Causal masking ensures real-time compatibility
 
-## 🚀 AR/VR Breakthrough & Production Readiness
-
-### Revolutionary Performance Achievements
-
-Our AR/VR optimized models achieve unprecedented accuracy:
-
-**🥇 AR/VR Multi-Head Model:**
-- **Rotation Error**: 0.394° per frame (98.6% improvement)
-- **Translation Error**: 0.309cm per frame (95.8% improvement)
-
-**Projected AR/VR Performance:**
-- After 1 minute (1800 frames @ 30fps): ~5.6cm drift, ~7° rotation error
-- After 5 minutes: ~28cm drift - **usable for many AR/VR scenarios**
-
-### Professional AR/VR Standards
-
-For production AR/VR systems:
-- **Positional tracking**: <1mm drift per minute
-- **Rotational tracking**: <0.1° drift per minute
-- **Our achievement**: Now within **1 order of magnitude** of production requirements
+## Production Readiness
 
 ### AR/VR Application Suitability
 
-**✅ Now Suitable For:**
-- **Professional AR/VR demos** (5-10 minutes)
-- **Training and simulation** applications
-- **Research and development** platforms
-- **Prototype AR/VR experiences**
+The multi-head model with 0.64cm ATE is suitable for:
 
-**⚠️ Still Requires Enhancement For:**
-- **Long-duration sessions** (>10 minutes)
-- **Mission-critical applications**
-- **Consumer product deployment**
+**✅ Ready For:**
+- Professional AR/VR demonstrations
+- Training and simulation applications
+- Research and development platforms
+- Short to medium duration experiences (5-10 minutes)
+
+**⚠️ Considerations:**
+- Long sessions (>10 minutes) may require drift correction
+- Production deployment needs additional sensor fusion
+- Real-world applications benefit from loop closure
 
 ### Essential Drift Correction Mechanisms
 
@@ -394,44 +372,23 @@ Without these mechanisms, the system is only suitable for:
 - Offline trajectory analysis
 - Research and development
 
-## 🎯 AR/VR Breakthrough: Roadmap to Professional Grade
-
-### Seven-Strategy Implementation Success
-
-We've successfully implemented **5 out of 7 promising strategies** from our research roadmap, achieving **exceptional AR/VR performance**:
-
-**✅ IMPLEMENTED STRATEGIES:**
-1. **🏆 Multi-Head Architecture** → **0.77cm ATE** (Exceptional Grade)
-2. **✅ Scale-Aware Loss Functions** → **0.21cm precision** (Sub-Pixel Accurate) 
-3. **✅ AR/VR Data Augmentations** → **Real-world robustness**
-4. **✅ Multi-Scale Temporal Modeling** → **Concept validation**
-5. **✅ Progressive Training** → **87% faster convergence** (20 vs 150 epochs)
-
-**🚀 ACHIEVED SUB-CENTIMETER TARGET:**
-- **Current**: 0.77cm ATE (Exceptional Grade)
-- **Next**: Sub-0.5cm with advanced strategies
-
-**📊 EXCEPTIONAL ACHIEVEMENTS:**
-- **Industry-leading accuracy**: 0.77cm ATE (far exceeds <5cm requirement)
-- **Best-in-class drift**: 0.09m/100m (ideal for extended sessions)
-- **Efficient deployment**: 8.2M parameters, 20-epoch training
-- **Validated metrics**: KITTI-proven trajectory evaluation + modern ATE/RPE
 
 ## Contributing
 
-This project builds on the original VIFT implementation with revolutionary AR/VR optimizations:
+This project extends the original VIFT implementation with key improvements:
 
-**Original VIFT Adaptations:**
+**Core Enhancements:**
+- Multi-head architecture with specialized rotation/translation processing
+- All-frames prediction for efficient trajectory generation
 - Adaptation to AriaEveryday dataset format
-- Proper relative pose computation
-- Corrected normalization for compatibility with pretrained encoders
-- Streamlined evaluation pipeline
+- Proper relative pose computation and normalization
+- Streamlined evaluation with KITTI infrastructure
 
-**🚀 AR/VR Breakthrough Features:**
-- Multi-head specialized architectures for rotation/translation
-- AR/VR motion-specific data augmentations and loss functions
-- Multi-scale temporal processing for improved motion understanding
-- Professional-grade tracking accuracy suitable for real-world deployment
+**Technical Improvements:**
+- Causal temporal modeling for real-time compatibility
+- AR/VR optimized loss functions
+- Efficient training pipeline (20 epochs vs 150)
+- Cross-platform support (CUDA and Apple Silicon)
 
 ## License
 

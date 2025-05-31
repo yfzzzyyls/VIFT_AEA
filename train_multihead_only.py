@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Train just the multi-head model.
+Train the multi-head model with all-frames prediction.
+Modified to predict poses for all frames in the sequence, similar to original VIFT.
 """
 
 import os
@@ -27,19 +28,18 @@ def train_multihead_model():
     
     # Create model
     model = MultiHeadVIOModel(
-        sequence_length=11,
         feature_dim=768,
         hidden_dim=256,
-        num_transformer_layers=4,
-        num_attention_heads=8,
-        head_layers=3,
+        num_shared_layers=4,
+        num_specialized_layers=3,
+        num_heads=8,
         dropout=0.1,
-        use_auxiliary_tasks=True,
-        lr=1e-4,
+        learning_rate=1e-4,
         weight_decay=1e-5,
         rotation_weight=1.0,
         translation_weight=1.0,
-        velocity_weight=0.3
+        velocity_weight=0.3,
+        sequence_length=11
     )
     
     print(f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
