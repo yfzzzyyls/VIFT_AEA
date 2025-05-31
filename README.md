@@ -137,7 +137,7 @@ Train with relative pose conversion and proper scaling:
 python train_pretrained_relative.py \
     --lr 1e-4 \
     --batch_size 32 \
-    --epochs 50
+    --epochs 20
 ```
 
 **Key Training Details:**
