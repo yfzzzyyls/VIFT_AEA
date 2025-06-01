@@ -63,19 +63,14 @@ pip install -r requirements.txt
 ### 2. Download Pretrained Model
 
 ```bash
-# Download Visual-Selective-VIO pretrained model (185MB)
-mkdir -p pretrained_models
-cd pretrained_models
+# Automatic download using Python script
+python download_pretrained_model.py
 
-# Download using gdown (already installed via requirements.txt)
-gdown "https://drive.google.com/uc?id=1-LhiWkLfR1B4freXMKTPznYAq_rx1yN2"
-
-# Alternative: Download manually if gdown fails
-# https://drive.google.com/file/d/1-LhiWkLfR1B4freXMKTPznYAq_rx1yN2/view
-
-# Verify download (should be ~185MB)
-ls -lh vf_512_if_256_3e-05.model
-cd ..
+# The scripts will:
+# - Check if the model already exists
+# - Download from the Visual-Selective-VIO official repository
+# - Verify the file size (~185MB)
+# - Place it in pretrained_models/vf_512_if_256_3e-05.model
 ```
 
 ### 3. Data Preparation

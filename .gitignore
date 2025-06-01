@@ -5,6 +5,7 @@ data/aria_real_test/
 data/kitti_data/
 aria_latent_data/
 data/aria_processed/
+pretrained_models/vf_512_if_256_3e-05.model
 *.DS_Store
 # Python cache files
 __pycache__/
