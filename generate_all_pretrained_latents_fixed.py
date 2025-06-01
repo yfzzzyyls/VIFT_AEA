@@ -234,7 +234,7 @@ def process_sequence(seq_dir, model, device, window_size=11, stride=1, pose_scal
     return features_list, poses_list, imus_list
 
 
-def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100.0, stride=1, split_ratios=(0.8, 0.1, 0.1)):
+def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100.0, stride=1, split_ratios=(0.7, 0.1, 0.2)):
     """Generate train/val/test splits from processed sequences with relative poses."""
     
     # Get all sequence directories (filter out non-numeric directories)
