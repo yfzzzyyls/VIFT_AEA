@@ -31,23 +31,28 @@ console = Console()
 
 
 def quaternion_multiply(q1, q2):
-    """Multiply two quaternions."""
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
+    """Multiply two quaternions in XYZW format."""
+    # Unpack XYZW format
+    x1, y1, z1, w1 = q1
+    x2, y2, z2, w2 = q2
     
+    # Quaternion multiplication
     w = w1*w2 - x1*x2 - y1*y2 - z1*z2
     x = w1*x2 + x1*w2 + y1*z2 - z1*y2
     y = w1*y2 - x1*z2 + y1*w2 + z1*x2
     z = w1*z2 + x1*y2 - y1*x2 + z1*w2
     
-    return np.array([w, x, y, z])
+    # Return in XYZW format
+    return np.array([x, y, z, w])
 
 
 def quaternion_inverse(q):
-    """Compute quaternion inverse."""
-    w, x, y, z = q
+    """Compute quaternion inverse for XYZW format."""
+    # Unpack XYZW format
+    x, y, z, w = q
     norm_sq = w*w + x*x + y*y + z*z
-    return np.array([w, -x, -y, -z]) / norm_sq
+    # Return conjugate/norm_sq in XYZW format
+    return np.array([-x, -y, -z, w]) / norm_sq
 
 
 def convert_absolute_to_relative(poses):
@@ -65,7 +70,7 @@ def convert_absolute_to_relative(poses):
     
     # First pose is always at origin
     relative_poses[0, :3] = [0, 0, 0]
-    relative_poses[0, 3:] = [0, 0, 0, 1]  # Identity quaternion
+    relative_poses[0, 3:] = [0, 0, 0, 1]  # Identity quaternion in XYZW format
     
     # Convert subsequent poses to relative
     for i in range(1, seq_len):
@@ -131,14 +136,17 @@ class RelativePoseDataset(Dataset):
         features = np.load(os.path.join(self.data_dir, f"{sample_id}.npy"))
         features = torch.from_numpy(features).float()  # [11, 768]
         
-        # Load ground truth poses (absolute)
-        absolute_poses = np.load(os.path.join(self.data_dir, f"{sample_id}_gt.npy"))
+        # Load ground truth poses (already in relative format if using fixed data)
+        relative_poses = np.load(os.path.join(self.data_dir, f"{sample_id}_gt.npy"))
         
-        # Convert to relative poses
-        relative_poses = convert_absolute_to_relative(absolute_poses)
-        
-        # Scale translation from meters to centimeters
-        relative_poses[:, :3] *= self.pose_scale
+        # Check if we need to convert (old data) or if already relative (fixed data)
+        # If first pose is not at origin, it's absolute poses that need conversion
+        if np.linalg.norm(relative_poses[0, :3]) > 1e-6 or np.linalg.norm(relative_poses[0, 3:] - [0, 0, 0, 1]) > 1e-6:
+            # Old format - convert to relative
+            relative_poses = convert_absolute_to_relative(relative_poses)
+            # Scale translation from meters to centimeters
+            relative_poses[:, :3] *= self.pose_scale
+        # else: already in relative format with correct scale
         
         # Convert to tensor
         relative_poses = torch.from_numpy(relative_poses).float()
@@ -185,6 +193,7 @@ class FirstBatchLogger(Callback):
 
 
 def train_with_relative_poses(
+    data_dir: str = "aria_latent_data_pretrained",
     pose_scale: float = 100.0,
     learning_rate: float = 1e-4,
     batch_size: int = 32,
@@ -219,13 +228,13 @@ def train_with_relative_poses(
     # Create datasets
     console.print("\n[bold]Loading data with relative pose conversion...[/bold]")
     train_dataset = RelativePoseDataset(
-        "aria_latent_data_pretrained/train",
+        f"{data_dir}/train",
         pose_scale=pose_scale,
         max_samples=None
     )
     
     val_dataset = RelativePoseDataset(
-        "aria_latent_data_pretrained/val",
+        f"{data_dir}/val",
         pose_scale=pose_scale,
         max_samples=None
     )
@@ -361,6 +370,8 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Train with relative poses')
+    parser.add_argument('--data_dir', type=str, default='aria_latent_data_pretrained',
+                       help='Data directory (default: aria_latent_data_pretrained)')
     parser.add_argument('--scale', type=float, default=100.0,
                        help='Pose scale factor (default: 100.0 for meter to cm conversion)')
     parser.add_argument('--lr', type=float, default=1e-4,
@@ -378,6 +389,7 @@ if __name__ == "__main__":
     console.print("Converting absolute world coordinates to relative poses\n")
     
     train_with_relative_poses(
+        data_dir=args.data_dir,
         pose_scale=args.scale,
         learning_rate=args.lr,
         batch_size=args.batch_size,

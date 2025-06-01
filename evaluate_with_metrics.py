@@ -160,10 +160,10 @@ def calculate_rpe_quaternion(pred_quats, gt_quats, delta=1):
     return np.array(trans_errors), np.array(rot_errors)
 
 
-def evaluate_with_metrics(checkpoint_path: str, pose_scale: float = 100.0):
+def evaluate_with_metrics(checkpoint_path: str, pose_scale: float = 100.0, data_dir: str = "aria_latent_data_pretrained"):
     """Evaluate with proper ATE and RPE metrics."""
     
-    console.rule("[bold cyan]🚀 AR/VR Metrics Evaluation (Fixed)[/bold cyan]")
+    console.rule("[bold cyan]🚀 AR/VR Metrics Evaluation[/bold cyan]")
     
     # Load model
     model = MultiHeadVIOModel.load_from_checkpoint(checkpoint_path)
@@ -174,7 +174,7 @@ def evaluate_with_metrics(checkpoint_path: str, pose_scale: float = 100.0):
     
     # Create test dataset
     test_dataset = RelativePoseDataset(
-        "aria_latent_data_pretrained/test",
+        f"{data_dir}/test",
         pose_scale=pose_scale
     )
     
@@ -368,9 +368,11 @@ if __name__ == "__main__":
                        help='Path to model checkpoint')
     parser.add_argument('--scale', type=float, default=100.0,
                        help='Pose scale factor (default: 100.0 for meter to cm conversion)')
+    parser.add_argument('--data_dir', type=str, default='aria_latent_data_pretrained',
+                       help='Data directory (default: aria_latent_data_pretrained)')
     
     args = parser.parse_args()
     
     console.print("[bold magenta]Visual-Selective-VIO Evaluation with Fixed Quaternion Handling[/bold magenta]\n")
     
-    results = evaluate_with_metrics(args.checkpoint, args.scale)
+    results = evaluate_with_metrics(args.checkpoint, args.scale, args.data_dir)
