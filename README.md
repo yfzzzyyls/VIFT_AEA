@@ -63,19 +63,15 @@ pip install -r requirements.txt
 ### 2. Download Pretrained Model
 
 ```bash
-# Download Visual-Selective-VIO pretrained model (185MB)
-mkdir -p pretrained_models
-cd pretrained_models
+# Download the Visual-Selective-VIO pretrained model (185MB)
+# This script handles the download from the official repository
+python download_pretrained_model.py
 
-# Download using gdown (already installed via requirements.txt)
-gdown "https://drive.google.com/uc?id=1-LhiWkLfR1B4freXMKTPznYAq_rx1yN2"
-
-# Alternative: Download manually if gdown fails
-# https://drive.google.com/file/d/1-LhiWkLfR1B4freXMKTPznYAq_rx1yN2/view
-
-# Verify download (should be ~185MB)
-ls -lh vf_512_if_256_3e-05.model
-cd ..
+# The script will:
+# - Check if the model already exists
+# - Download from the Visual-Selective-VIO official repository
+# - Verify the file size (~185MB)
+# - Place it in pretrained_models/vf_512_if_256_3e-05.model
 ```
 
 ### 3. Data Preparation
@@ -107,22 +103,32 @@ python scripts/process_aria_to_vift.py \
   --max-sequences 100  # Adjust as needed
 ```
 
-### 4. Generate Pretrained Features
+### 4. Generate Pretrained Features with Correct Format
 
-> **Important Note**: If you encounter large rotation errors (>0.3° RPE), ensure you're using the corrected quaternion handling. The original code had a quaternion format mismatch (WXYZ vs XYZW) that has been fixed.
-
-This step extracts VIO-specific features using the Visual-Selective-VIO model:
+This step extracts VIO-specific features and directly converts poses to relative format with correct quaternion handling:
 
 ```bash
-# Generate features for all splits
-python generate_all_pretrained_latents.py
+# Generate features with default splits (70% train, 15% val, 15% test)
+python generate_all_pretrained_latents_fixed.py
+
+# Or use custom splits (e.g., 70% train, 10% val, 20% test)
+python generate_all_pretrained_latents_fixed.py \
+    --train_ratio 0.7 \
+    --val_ratio 0.1 \
+    --test_ratio 0.2
 
 # This will create:
-# aria_latent_data_pretrained/
-#   ├── train/     (45,570 samples)
-#   ├── val/       (5,390 samples)
-#   └── test/      (6,370 samples)
+# aria_latent_data_fixed/
+#   ├── train/     (70% of samples)
+#   ├── val/       (10% of samples)
+#   └── test/      (20% of samples)
 ```
+
+> **Note**: This script directly outputs data in the correct format with:
+> - Corrected quaternion handling (XYZW format)
+> - Relative poses (first frame at origin)
+> - Proper scaling (meters to centimeters)
+> - Custom train/val/test split ratios
 
 The feature generation will:
 
@@ -134,12 +140,9 @@ The feature generation will:
 
 #### Best Configuration (Recommended)
 
-Train with relative pose conversion and proper scaling:
+Train directly with the fixed data:
 
 ```bash
-# First, preprocess data with corrected quaternion handling
-python preprocess_aria_with_fixed_quaternions.py
-
 # Train the model with optimal settings
 python train_pretrained_relative.py \
     --data_dir aria_latent_data_fixed \
@@ -176,7 +179,8 @@ Epoch 1: val_loss=0.00017
 ```bash
 # Evaluate with ATE and RPE metrics
 python evaluate_with_metrics.py \
-    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt
+    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt \
+    --data_dir aria_latent_data_fixed
 ```
 
 Expected output:
@@ -354,16 +358,16 @@ VIFT_AEA/
 ├── train_pretrained_relative.py    # Main training script (RECOMMENDED)
 ├── evaluate_with_metrics.py        # ATE/RPE evaluation script
 ├── evaluate_simple.py              # Simple frame-wise evaluation
-├── generate_all_pretrained_latents.py  # Feature generation
+├── generate_all_pretrained_latents_fixed.py  # Feature generation with correct format
 ├── train_best_model.sh            # One-command training
 ├── pretrained_models/
 │   └── vf_512_if_256_3e-05.model  # VS-VIO pretrained model
-├── aria_latent_data_pretrained/   # Generated features
+├── aria_latent_data_fixed/        # Generated features with relative poses
 │   ├── train/
 │   ├── val/
 │   └── test/
 └── logs/                          # Training outputs
-    └── checkpoints_relative_scale_100.0/
+    └── checkpoints_lite_scale_100.0/
 ```
 
 ## Citation
