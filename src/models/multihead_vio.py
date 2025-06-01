@@ -96,8 +96,15 @@ class RotationSpecializedHead(nn.Module):
         # Normalize quaternions
         rotation_pred = rotation_pred / (torch.norm(rotation_pred, dim=-1, keepdim=True) + 1e-8)
         
+        # CRITICAL FIX: Model outputs WXYZ but ground truth is XYZW
+        # Swap the order: [W, X, Y, Z] -> [X, Y, Z, W]
+        rotation_pred_xyzw = torch.cat([
+            rotation_pred[..., 1:4],  # XYZ components
+            rotation_pred[..., 0:1]   # W component
+        ], dim=-1)
+        
         return {
-            'rotation': rotation_pred,
+            'rotation': rotation_pred_xyzw,
             'angular_velocity': angular_velocity_pred,
             'rotation_features': attended_features
         }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Complete pipeline to generate latent features using Visual-Selective-VIO pretrained model
-from processed Aria data with CORRECTED relative pose conversion.
+from processed Aria data with FIXED relative pose conversion in local coordinates.
 """
 
 import os
@@ -41,9 +41,30 @@ class WrapperModel(nn.Module):
         return torch.cat([v_feat_padded, i_feat_padded], dim=-1)
 
 
+def quaternion_to_rotation_matrix(q):
+    """Convert quaternion (XYZW) to rotation matrix."""
+    x, y, z, w = q
+    
+    # Normalize quaternion
+    norm = np.sqrt(x*x + y*y + z*z + w*w)
+    x, y, z, w = x/norm, y/norm, z/norm, w/norm
+    
+    # Convert to rotation matrix
+    xx, yy, zz = x*x, y*y, z*z
+    xy, xz, yz = x*y, x*z, y*z
+    wx, wy, wz = w*x, w*y, w*z
+    
+    R = np.array([
+        [1 - 2*(yy + zz), 2*(xy - wz), 2*(xz + wy)],
+        [2*(xy + wz), 1 - 2*(xx + zz), 2*(yz - wx)],
+        [2*(xz - wy), 2*(yz + wx), 1 - 2*(xx + yy)]
+    ])
+    
+    return R
+
+
 def quaternion_multiply(q1, q2):
     """Multiply two quaternions in XYZW format."""
-    # Unpack XYZW format
     x1, y1, z1, w1 = q1
     x2, y2, z2, w2 = q2
     
@@ -59,22 +80,23 @@ def quaternion_multiply(q1, q2):
 
 def quaternion_inverse(q):
     """Compute quaternion inverse for XYZW format."""
-    # Unpack XYZW format
     x, y, z, w = q
     norm_sq = w*w + x*x + y*y + z*z
     # Return conjugate/norm_sq in XYZW format
     return np.array([-x, -y, -z, w]) / norm_sq
 
 
-def convert_absolute_to_relative(poses):
+def convert_absolute_to_relative_fixed(poses):
     """
-    Convert absolute poses to relative poses.
+    Convert absolute poses to relative poses with proper coordinate transformation.
+    
+    CRITICAL FIX: Transform translation into the previous frame's coordinate system!
     
     Args:
         poses: [seq_len, 7] absolute poses (translation + quaternion XYZW)
     
     Returns:
-        relative_poses: [seq_len, 7] relative poses
+        relative_poses: [seq_len, 7] relative poses in local coordinates
     """
     seq_len = poses.shape[0]
     relative_poses = np.zeros_like(poses)
@@ -92,9 +114,12 @@ def convert_absolute_to_relative(poses):
         curr_trans = poses[i, :3]
         curr_rot = poses[i, 3:]
         
-        # Compute relative translation
-        # In the frame of the previous pose
-        trans_diff = curr_trans - prev_trans
+        # CRITICAL FIX: Transform translation into previous frame's coordinate system
+        # trans_world = curr_trans - prev_trans (world coordinates)
+        # trans_local = R_prev^T @ trans_world (local coordinates)
+        trans_world = curr_trans - prev_trans
+        R_prev = quaternion_to_rotation_matrix(prev_rot)
+        trans_local = R_prev.T @ trans_world  # Transform to local coordinates!
         
         # For rotation, we need the relative rotation
         # rel_rot = prev_rot^-1 * curr_rot
@@ -102,7 +127,7 @@ def convert_absolute_to_relative(poses):
         rel_rot = quaternion_multiply(prev_rot_inv, curr_rot)
         
         # Store relative pose
-        relative_poses[i, :3] = trans_diff
+        relative_poses[i, :3] = trans_local
         relative_poses[i, 3:] = rel_rot / np.linalg.norm(rel_rot)  # Normalize
     
     return relative_poses
@@ -125,7 +150,7 @@ def load_pretrained_model(model_path):
     return model
 
 
-def process_sequence(seq_dir, model, device, window_size=11, stride=10, pose_scale=100.0):
+def process_sequence(seq_dir, model, device, window_size=11, stride=1, pose_scale=100.0):
     """Process a single sequence and extract windowed features with relative poses."""
     
     # Load data
@@ -166,8 +191,8 @@ def process_sequence(seq_dir, model, device, window_size=11, stride=10, pose_sca
         window_imu = imu_data[start_idx:end_idx]        # [11, 33, 6]
         window_absolute_poses = absolute_poses[start_idx:end_idx]  # [11, 7]
         
-        # Convert absolute poses to relative poses
-        window_relative_poses = convert_absolute_to_relative(window_absolute_poses)
+        # Convert absolute poses to relative poses with FIXED coordinate transformation
+        window_relative_poses = convert_absolute_to_relative_fixed(window_absolute_poses)
         
         # Scale translation from meters to centimeters
         window_relative_poses[:, :3] *= pose_scale
@@ -209,12 +234,14 @@ def process_sequence(seq_dir, model, device, window_size=11, stride=10, pose_sca
     return features_list, poses_list, imus_list
 
 
-def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100.0, stride=10, split_ratios=(0.7, 0.1, 0.2)):
+def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100.0, stride=1, split_ratios=(0.8, 0.1, 0.1)):
     """Generate train/val/test splits from processed sequences with relative poses."""
     
     # Get all sequence directories (filter out non-numeric directories)
     seq_dirs = sorted([d for d in Path(processed_dir).iterdir() 
                       if d.is_dir() and d.name.isdigit()])
+    
+    # Use all available sequences
     num_sequences = len(seq_dirs)
     
     print(f"Found {num_sequences} sequences")
@@ -268,7 +295,7 @@ def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100
                     # Save features (768-dim latent features)
                     np.save(os.path.join(split_dir, f"{sample_id}.npy"), features.numpy())
                     
-                    # Save ground truth poses (now relative poses)
+                    # Save ground truth poses (now relative poses in local coordinates)
                     np.save(os.path.join(split_dir, f"{sample_id}_gt.npy"), poses.numpy())
                     
                     # Save IMU data
@@ -303,7 +330,7 @@ def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100
         translation_norms = np.array(all_translation_norms)
         
         print(f"\n{'='*60}")
-        print(f"Dataset Statistics (Relative Poses):")
+        print(f"Dataset Statistics (Relative Poses in Local Coordinates):")
         print(f"{'='*60}")
         print(f"Rotation angles (degrees):")
         print(f"  Mean: {np.mean(rotation_angles):.4f}")
@@ -322,7 +349,7 @@ def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description='Generate all latent features with pretrained model and relative poses')
+    parser = argparse.ArgumentParser(description='Generate all latent features with pretrained model and FIXED relative poses')
     parser.add_argument('--processed-dir', type=str, default='data/aria_processed',
                         help='Directory with processed Aria sequences')
     parser.add_argument('--output-dir', type=str, default='aria_latent_data_pretrained',
@@ -332,8 +359,8 @@ def main():
                         help='Path to pretrained model')
     parser.add_argument('--window-size', type=int, default=11,
                         help='Window size for sequences')
-    parser.add_argument('--stride', type=int, default=10,
-                        help='Stride for sliding window (default: 1, matching original VIFT data)')
+    parser.add_argument('--stride', type=int, default=1,
+                        help='Stride for sliding window (default: 1)')
     parser.add_argument('--pose-scale', type=float, default=100.0,
                         help='Scale factor for poses (default: 100.0 for meter to cm conversion)')
     
@@ -354,12 +381,12 @@ def main():
     model.eval()
     
     # Generate features for all splits
-    print(f"\nGenerating latent features with corrected quaternion handling...")
+    print(f"\nGenerating latent features with FIXED quaternion handling...")
     print(f"Window size: {args.window_size}")
     print(f"Stride: {args.stride}")
     print(f"Pose scale: {args.pose_scale} (meter → cm)")
     print(f"Output directory: {args.output_dir}")
-    print(f"Pose format: Relative poses (frame-to-frame)")
+    print(f"Pose format: Relative poses in LOCAL COORDINATES (fixed!)")
     
     sample_counts = generate_split_data(
         args.processed_dir, 
@@ -378,19 +405,19 @@ def main():
         'window_size': args.window_size,
         'stride': args.stride,
         'pose_scale': args.pose_scale,
-        'pose_format': 'relative',
+        'pose_format': 'relative_local',  # Changed to indicate local coordinates
         'quaternion_format': 'XYZW',
         'model_path': args.model_path,
         'normalization': '[-0.5, 0.5]',
         'sample_counts': sample_counts,
-        'note': 'Features generated using Visual-Selective-VIO pretrained encoders with corrected quaternion handling'
+        'note': 'Features with FIXED relative poses in local coordinates - proper coordinate transformation applied!'
     }
     
     import pickle
     with open(os.path.join(args.output_dir, 'metadata.pkl'), 'wb') as f:
         pickle.dump(metadata, f)
     
-    print(f"\n✅ Successfully generated all latent features with corrected quaternions!")
+    print(f"\n✅ Successfully generated all latent features with FIXED quaternions!")
     print(f"Total samples:")
     for split, count in sample_counts.items():
         print(f"  {split}: {count}")

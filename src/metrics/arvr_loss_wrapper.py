@@ -7,6 +7,48 @@ import torch.nn as nn
 from .arvr_loss import ARVRAdaptiveLoss
 
 
+class ProperQuaternionLoss(nn.Module):
+    """
+    Proper quaternion loss that accounts for double cover and uses geodesic distance.
+    """
+    
+    def __init__(self):
+        super().__init__()
+        
+    def forward(self, pred_q, target_q):
+        """
+        Compute quaternion loss using proper geodesic distance.
+        
+        Args:
+            pred_q: [B, 4] predicted quaternions (XYZW)
+            target_q: [B, 4] target quaternions (XYZW)
+        
+        Returns:
+            Scalar loss
+        """
+        # Normalize quaternions
+        pred_q = pred_q / (torch.norm(pred_q, dim=-1, keepdim=True) + 1e-8)
+        target_q = target_q / (torch.norm(target_q, dim=-1, keepdim=True) + 1e-8)
+        
+        # Compute dot product
+        dot = torch.sum(pred_q * target_q, dim=-1)
+        
+        # Handle double cover: if dot < 0, flip the predicted quaternion
+        # This ensures we're always taking the shorter path
+        mask = dot < 0
+        pred_q[mask] = -pred_q[mask]
+        dot[mask] = -dot[mask]
+        
+        # Clamp to avoid numerical issues with acos
+        dot = torch.clamp(dot, -1.0, 1.0)
+        
+        # Geodesic distance: angle = 2 * arccos(|dot|)
+        # Loss = 1 - |dot| is a good approximation and more stable
+        loss = 1.0 - torch.abs(dot)
+        
+        return loss.mean()
+
+
 class ARVRLossWrapper(nn.Module):
     """
     Wrapper that adapts the ARVRAdaptiveLoss to work with separate
@@ -16,7 +58,7 @@ class ARVRLossWrapper(nn.Module):
     def __init__(self):
         super().__init__()
         self.translation_loss = nn.MSELoss()
-        self.rotation_loss = nn.MSELoss()
+        self.rotation_loss = ProperQuaternionLoss()
         
     def forward(self, pred_rotation, target_rotation, pred_translation, target_translation):
         """
@@ -32,6 +74,10 @@ class ARVRLossWrapper(nn.Module):
         # Compute basic losses
         rot_loss = self.rotation_loss(pred_rotation, target_rotation)
         trans_loss = self.translation_loss(pred_translation, target_translation)
+        
+        # Scale rotation loss to be in similar range as translation
+        # Rotation loss is in [0, 1], scale it up
+        rot_loss = rot_loss * 10.0  # Adjust this scaling factor as needed
         
         # Compute scale-aware weights based on motion magnitude
         with torch.no_grad():
