@@ -438,8 +438,15 @@ class AriaToVIFTProcessor:
         print(f"✅ Processed {sequence_path.name}: {actual_frames} frames")
         return True
     
-    def process_dataset(self, start_index: int = 0, max_sequences: Optional[int] = None) -> Dict:
-        """Process multiple AriaEveryday sequences"""
+    def process_dataset(self, start_index: int = 0, max_sequences: Optional[int] = None, folder_offset: int = 0) -> Dict:
+        """Process multiple AriaEveryday sequences
+        
+        Args:
+            start_index: Starting index in the input directory (default: 0)
+            max_sequences: Maximum number of sequences to process (default: all)
+            folder_offset: Offset for output folder numbering (default: 0)
+                          e.g., offset=117 means first sequence will be saved as '117'
+        """
         print(f"🎯 Processing AriaEveryday Dataset")
         print(f"📁 Input: {self.aria_data_dir}")
         print(f"📁 Output: {self.output_dir}")
@@ -455,6 +462,7 @@ class AriaToVIFTProcessor:
         sequences = all_sequences[start_index:end_index]
         
         print(f"🔢 Processing sequences {start_index} to {end_index-1} (total: {len(sequences)})")
+        print(f"📝 Output folders will be numbered from {folder_offset} to {folder_offset + len(sequences) - 1}")
         print("=" * 60)
         
         print(f"📊 Found {len(sequences)} sequences to process")
@@ -463,7 +471,8 @@ class AriaToVIFTProcessor:
         processed_sequences = []
         
         for i, sequence_path in enumerate(tqdm(sequences, desc="Processing sequences")):
-            sequence_id = f"{start_index + i:02d}"  # Format as 00, 01, 02, etc.
+            # Apply folder offset to sequence ID
+            sequence_id = f"{folder_offset + i:03d}"  # Format as 000, 001, 002, etc.
             
             if self.process_sequence(sequence_path, sequence_id):
                 processed_count += 1
@@ -480,6 +489,7 @@ class AriaToVIFTProcessor:
             'processed_sequences': processed_count,
             'start_index': start_index,
             'max_sequences': max_sequences,
+            'folder_offset': folder_offset,
             'sequences': processed_sequences
         }
         
@@ -510,6 +520,8 @@ def main():
     parser.add_argument('--device', type=str, default='auto',
                       choices=['auto', 'cpu', 'cuda', 'mps'],
                       help='Device to use for processing (auto: detect best available)')
+    parser.add_argument('--folder-offset', type=int, default=0,
+                      help='Offset for output folder numbering (e.g., 117 to start from folder 117)')
     
     args = parser.parse_args()
     
@@ -547,7 +559,8 @@ def main():
     # Process dataset
     summary = processor.process_dataset(
         start_index=start_index,
-        max_sequences=max_sequences
+        max_sequences=max_sequences,
+        folder_offset=args.folder_offset
     )
     
     print(f"\n🚀 Next steps:")
