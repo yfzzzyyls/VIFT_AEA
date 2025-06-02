@@ -57,22 +57,13 @@ data/aria_processed/
 data/aria_latent_data*/
 aria_latent_data*/
 Visual-Selective-VIO-Pretrained/
-
-# Downloaded files
-AriaEverydayActivities_download_urls.json
-failed_downloads.txt
-sequence_mapping.json
+pretrained_models/
 
 # Temporary files
 *.tmp
 *.temp
 temp/
 tmp/
-
-# Process-specific files
-process_remaining_sequences_example.sh
-download_remaining_sequences.py
-map_sequences_to_original.py
 
 # Testing
 .pytest_cache/
