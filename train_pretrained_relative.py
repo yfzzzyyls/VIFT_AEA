@@ -212,7 +212,7 @@ def train_with_relative_poses(
     # Set seed
     L.seed_everything(42, workers=True)
     
-    # Create model (Lite configuration - reduced from 7.4M to ~1.1M params)
+    # Create model
     model = MultiHeadVIOModel(
         feature_dim=768,
         hidden_dim=128,         

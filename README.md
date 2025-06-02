@@ -145,17 +145,27 @@ tensorboard --logdir logs/
 
 ## 📈 Evaluation
 
-Evaluate the trained model with AR/VR standard metrics:
+Evaluate the trained model on full sequences with sliding window inference:
 
 ```bash
-python evaluate_with_metrics.py
+python inference_full_sequence.py \
+    --sequence-id 114 \
+    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt \
+    --stride 1
 ```
 
-This computes:
+This performs:
 
-- **ATE** (Absolute Trajectory Error)
-- **RPE** (Relative Pose Error) for translation and rotation
-- **Direct Quaternion Error** using geodesic distance
+- **Full sequence inference** with sliding windows
+- **Proper trajectory building** from relative poses
+- **AR/VR standard metrics** computation
+- **Performance comparison** against industry standards
+
+Visualize the trajectory:
+
+```bash
+python visualize_trajectory.py --results inference_results_seq_114_stride_1.npz
+```
 
 ## 🏆 Results
 

@@ -302,14 +302,18 @@ def sliding_window_inference(
 
 
 def calculate_metrics(results):
-    """Calculate ATE and other metrics."""
+    """Calculate ATE, RPE and other metrics."""
     pred_traj = results['absolute_trajectory']
     gt_traj = results['ground_truth']
+    pred_rel = results['relative_poses']
+    gt_rel = results['ground_truth_relative']
     
     # Ensure same length
     min_len = min(len(pred_traj), len(gt_traj))
     pred_traj = pred_traj[:min_len]
     gt_traj = gt_traj[:min_len]
+    pred_rel = pred_rel[:min_len]
+    gt_rel = gt_rel[:min_len]
     
     # Calculate ATE (Absolute Trajectory Error)
     ate_errors = []
@@ -319,7 +323,7 @@ def calculate_metrics(results):
     
     ate_errors = np.array(ate_errors)
     
-    # Calculate rotation errors
+    # Calculate rotation errors for absolute poses
     rot_errors = []
     for pred, gt in zip(pred_traj[1:], gt_traj[1:]):  # Skip first frame (origin)
         pred_r = Rotation.from_quat(pred[3:])
@@ -330,6 +334,65 @@ def calculate_metrics(results):
     
     rot_errors = np.array(rot_errors)
     
+    # Calculate RPE (Relative Pose Error) - frame-to-frame accuracy
+    rpe_trans_1 = []
+    rpe_rot_1 = []
+    
+    # Skip first frame (always origin)
+    for i in range(1, len(pred_rel)):
+        # Translation error
+        trans_error = np.linalg.norm(pred_rel[i, :3] - gt_rel[i, :3])
+        rpe_trans_1.append(trans_error)
+        
+        # Rotation error using quaternion distance
+        pred_q = pred_rel[i, 3:]
+        gt_q = gt_rel[i, 3:]
+        
+        # Normalize quaternions
+        pred_q = pred_q / (np.linalg.norm(pred_q) + 1e-8)
+        gt_q = gt_q / (np.linalg.norm(gt_q) + 1e-8)
+        
+        # Compute angle between quaternions
+        dot = np.clip(np.abs(np.dot(pred_q, gt_q)), 0, 1)
+        angle = 2 * np.arccos(dot)
+        rpe_rot_1.append(np.degrees(angle))
+    
+    rpe_trans_1 = np.array(rpe_trans_1)
+    rpe_rot_1 = np.array(rpe_rot_1)
+    
+    # Calculate RPE at 5 frames
+    rpe_trans_5 = []
+    rpe_rot_5 = []
+    
+    if len(pred_traj) > 5:
+        for i in range(len(pred_traj) - 5):
+            # Get 5-frame relative motion
+            start_pos_pred = pred_traj[i, :3]
+            end_pos_pred = pred_traj[i + 5, :3]
+            start_pos_gt = gt_traj[i, :3]
+            end_pos_gt = gt_traj[i + 5, :3]
+            
+            # Translation error over 5 frames
+            pred_motion = end_pos_pred - start_pos_pred
+            gt_motion = end_pos_gt - start_pos_gt
+            trans_error = np.linalg.norm(pred_motion - gt_motion)
+            rpe_trans_5.append(trans_error)
+            
+            # Rotation error over 5 frames
+            start_rot_pred = Rotation.from_quat(pred_traj[i, 3:])
+            end_rot_pred = Rotation.from_quat(pred_traj[i + 5, 3:])
+            start_rot_gt = Rotation.from_quat(gt_traj[i, 3:])
+            end_rot_gt = Rotation.from_quat(gt_traj[i + 5, 3:])
+            
+            rel_rot_pred = start_rot_pred.inv() * end_rot_pred
+            rel_rot_gt = start_rot_gt.inv() * end_rot_gt
+            rel_error = rel_rot_pred * rel_rot_gt.inv()
+            angle = np.abs(rel_error.magnitude())
+            rpe_rot_5.append(np.degrees(angle))
+    
+    rpe_trans_5 = np.array(rpe_trans_5) if rpe_trans_5 else np.array([0])
+    rpe_rot_5 = np.array(rpe_rot_5) if rpe_rot_5 else np.array([0])
+    
     return {
         'ate_mean': ate_errors.mean(),
         'ate_std': ate_errors.std(),
@@ -337,6 +400,14 @@ def calculate_metrics(results):
         'ate_95': np.percentile(ate_errors, 95),
         'rot_mean': rot_errors.mean(),
         'rot_std': rot_errors.std(),
+        'rpe_trans_1_mean': rpe_trans_1.mean(),
+        'rpe_trans_1_std': rpe_trans_1.std(),
+        'rpe_rot_1_mean': rpe_rot_1.mean(),
+        'rpe_rot_1_std': rpe_rot_1.std(),
+        'rpe_trans_5_mean': rpe_trans_5.mean(),
+        'rpe_trans_5_std': rpe_trans_5.std(),
+        'rpe_rot_5_mean': rpe_rot_5.mean(),
+        'rpe_rot_5_std': rpe_rot_5.std(),
         'total_frames': len(ate_errors)
     }
 
@@ -403,6 +474,99 @@ def main():
     
     console.print("\n")
     console.print(table)
+    
+    # Display performance vs industry standards
+    console.print("\n")
+    perf_table = Table(title="Performance vs AR/VR Industry Standards")
+    perf_table.add_column("Metric", style="cyan", width=40)
+    perf_table.add_column("Our Model", style="green", width=25)
+    perf_table.add_column("AR/VR Target", style="yellow", width=15)
+    perf_table.add_column("Status", style="white", width=15)
+    
+    # ATE - Accumulated error over entire trajectory
+    ate_status = "✅ EXCEEDS" if metrics['ate_mean'] < 1.0 else "❌ FAILS"
+    perf_table.add_row(
+        "ATE (Absolute Trajectory Error)",
+        f"{metrics['ate_mean']:.4f} ± {metrics['ate_std']:.4f} cm",
+        "<1 cm",
+        ate_status
+    )
+    perf_table.add_row(
+        "  ├─ Median",
+        f"{metrics['ate_median']:.4f} cm",
+        "-",
+        "-"
+    )
+    perf_table.add_row(
+        "  └─ 95th percentile",
+        f"{metrics['ate_95']:.4f} cm",
+        "-",
+        "-"
+    )
+    
+    # RPE Translation (1 frame) - Frame-to-frame accuracy
+    rpe_trans_1_status = "✅ EXCEEDS" if metrics['rpe_trans_1_mean'] < 0.1 else "❌ FAILS"
+    perf_table.add_row(
+        "RPE Translation (1 frame)",
+        f"{metrics['rpe_trans_1_mean']:.4f} ± {metrics['rpe_trans_1_std']:.4f} cm",
+        "<0.1 cm",
+        rpe_trans_1_status
+    )
+    
+    # RPE Rotation (1 frame)
+    rpe_rot_1_status = "✅ EXCEEDS" if metrics['rpe_rot_1_mean'] < 0.1 else ("⚠️  CLOSE" if metrics['rpe_rot_1_mean'] < 0.5 else "❌ FAILS")
+    perf_table.add_row(
+        "RPE Rotation (1 frame)",
+        f"{metrics['rpe_rot_1_mean']:.4f} ± {metrics['rpe_rot_1_std']:.4f}°",
+        "<0.1°",
+        rpe_rot_1_status
+    )
+    
+    # RPE Translation (5 frames)
+    rpe_trans_5_status = "✅ EXCEEDS" if metrics['rpe_trans_5_mean'] < 0.5 else "❌ FAILS"
+    perf_table.add_row(
+        "RPE Translation (5 frames)",
+        f"{metrics['rpe_trans_5_mean']:.4f} ± {metrics['rpe_trans_5_std']:.4f} cm",
+        "<0.5 cm",
+        rpe_trans_5_status
+    )
+    
+    # RPE Rotation (5 frames)
+    rpe_rot_5_status = "✅ EXCEEDS" if metrics['rpe_rot_5_mean'] < 0.5 else "❌ FAILS"
+    perf_table.add_row(
+        "RPE Rotation (5 frames)",
+        f"{metrics['rpe_rot_5_mean']:.4f} ± {metrics['rpe_rot_5_std']:.4f}°",
+        "<0.5°",
+        rpe_rot_5_status
+    )
+    
+    # Absolute Rotation Error (accumulated)
+    rot_status = "✅ EXCEEDS" if metrics['rot_mean'] < 0.1 else ("⚠️  CLOSE" if metrics['rot_mean'] < 0.5 else "❌ FAILS")
+    perf_table.add_row(
+        "Absolute Rotation Error",
+        f"{metrics['rot_mean']:.4f} ± {metrics['rot_std']:.4f}°",
+        "<0.1°",
+        rot_status
+    )
+    
+    console.print(perf_table)
+    
+    # Add metric explanations
+    console.print("\n[bold]Metric Explanations:[/bold]")
+    console.print("• ATE: Cumulative position error over entire trajectory (500 frames)")
+    console.print("• RPE: Relative Pose Error - frame-to-frame accuracy")
+    console.print("• Absolute Rotation: Accumulated rotation error over trajectory")
+    
+    # Performance summary
+    console.print("\n[bold]Performance Summary:[/bold]")
+    if metrics['ate_mean'] < 0.01:
+        console.print(f"[bold green]✅ EXCEPTIONAL! Sub-millimeter accuracy of {metrics['ate_mean']:.4f} cm![/bold green]")
+    elif metrics['ate_mean'] < 0.1:
+        console.print(f"[bold green]✅ EXCELLENT! ATE of {metrics['ate_mean']:.4f} cm far exceeds AR/VR requirements![/bold green]")
+    elif metrics['ate_mean'] < 1.0:
+        console.print(f"[bold yellow]⚠️  GOOD. ATE of {metrics['ate_mean']:.4f} cm meets AR/VR requirements.[/bold yellow]")
+    else:
+        console.print(f"[bold red]❌ NEEDS IMPROVEMENT. ATE of {metrics['ate_mean']:.4f} cm exceeds 1cm threshold.[/bold red]")
     
     # Save trajectory for visualization
     output_path = Path(f"inference_results_seq_{args.sequence_id}_stride_{args.stride}.npz")
