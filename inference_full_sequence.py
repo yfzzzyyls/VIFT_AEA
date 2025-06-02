@@ -133,7 +133,8 @@ def sliding_window_inference(
     device: torch.device,
     window_size: int = 11,
     stride: int = 1,
-    pose_scale: float = 100.0
+    pose_scale: float = 100.0,
+    mode: str = 'independent'
 ):
     """
     Run sliding window inference on a full sequence.
@@ -146,6 +147,7 @@ def sliding_window_inference(
         window_size: Window size (default 11)
         stride: Stride for sliding window (default 1)
         pose_scale: Scale factor for poses
+        mode: 'independent' or 'history' - inference mode
     
     Returns:
         predictions: Dict with trajectory and metrics
@@ -164,6 +166,7 @@ def sliding_window_inference(
     console.print(f"  Total frames: {num_frames}")
     console.print(f"  Window size: {window_size}")
     console.print(f"  Stride: {stride}")
+    console.print(f"  Mode: {mode}")
     
     # Store predictions for each window
     window_predictions = []
@@ -174,6 +177,12 @@ def sliding_window_inference(
     vio_model = vio_model.to(device)
     encoder_model.eval()
     vio_model.eval()
+    
+    # For history mode, maintain a buffer of past features
+    if mode == 'history':
+        history_size = 5  # Number of past windows to consider
+        feature_history = []
+        pose_history = []
     
     # Process with sliding window
     num_windows = 0
@@ -207,6 +216,30 @@ def sliding_window_inference(
         with torch.no_grad():
             features = encoder_model(batch_visual, batch_imu)  # [1, 11, 768]
         
+        if mode == 'history' and len(feature_history) > 0:
+            # Blend current features with history
+            # Use weighted average giving more weight to recent features
+            blended_features = features.clone()
+            
+            # Apply temporal smoothing to overlapping frames
+            overlap_frames = min(stride, window_size)
+            if overlap_frames > 0 and len(feature_history) > 0:
+                # Get weights for blending (exponential decay)
+                weights = torch.exp(-torch.arange(overlap_frames, dtype=torch.float32) / overlap_frames).to(device)
+                weights = weights / weights.sum()
+                
+                # Blend overlapping frames with previous window
+                for i in range(overlap_frames):
+                    if i < features.shape[1]:
+                        prev_idx = window_size - overlap_frames + i
+                        if prev_idx < feature_history[-1].shape[1]:
+                            blended_features[0, i] = (
+                                weights[i] * features[0, i] + 
+                                (1 - weights[i]) * feature_history[-1][0, prev_idx]
+                            )
+            
+            features = blended_features
+        
         # Prepare batch for VIO model
         batch = {
             'images': features,
@@ -226,26 +259,88 @@ def sliding_window_inference(
             predictions['rotation'][0]      # [11, 4]
         ], dim=1).cpu().numpy()  # [11, 7]
         
+        if mode == 'history':
+            # Update history buffers (keep on same device)
+            feature_history.append(features)  # Keep on GPU
+            pose_history.append(pred_poses)
+            
+            # Keep only recent history
+            if len(feature_history) > history_size:
+                feature_history.pop(0)
+                pose_history.pop(0)
+            
+            # Apply temporal consistency constraints
+            if len(pose_history) > 1:
+                # Smooth predictions based on history
+                for i in range(min(overlap_frames, pred_poses.shape[0])):
+                    if i > 0:  # Don't modify first frame
+                        # Blend with corresponding frame from previous window
+                        prev_window_idx = window_size - overlap_frames + i - stride
+                        if 0 <= prev_window_idx < pose_history[-2].shape[0]:
+                            # Weighted average for translation
+                            alpha = 0.7  # Weight for current prediction
+                            pred_poses[i, :3] = (
+                                alpha * pred_poses[i, :3] + 
+                                (1 - alpha) * pose_history[-2][prev_window_idx, :3]
+                            )
+                            
+                            # SLERP for rotation quaternions
+                            q1 = pred_poses[i, 3:] / np.linalg.norm(pred_poses[i, 3:])
+                            q2 = pose_history[-2][prev_window_idx, 3:] / np.linalg.norm(pose_history[-2][prev_window_idx, 3:])
+                            
+                            # Simple quaternion interpolation
+                            dot = np.dot(q1, q2)
+                            if dot < 0:
+                                q2 = -q2
+                                dot = -dot
+                            
+                            if dot > 0.9995:
+                                # Linear interpolation for close quaternions
+                                pred_poses[i, 3:] = alpha * q1 + (1 - alpha) * q2
+                            else:
+                                # Spherical interpolation
+                                theta = np.arccos(np.clip(dot, -1, 1))
+                                sin_theta = np.sin(theta)
+                                if sin_theta > 0.001:
+                                    w1 = np.sin(alpha * theta) / sin_theta
+                                    w2 = np.sin((1 - alpha) * theta) / sin_theta
+                                    pred_poses[i, 3:] = w1 * q1 + w2 * q2
+                            
+                            # Normalize quaternion
+                            pred_poses[i, 3:] /= np.linalg.norm(pred_poses[i, 3:])
+        
         window_predictions.append(pred_poses)
         window_indices.append((start_idx, end_idx))
         num_windows += 1
     
     console.print(f"  Processed {num_windows} windows")
     
-    # Mode 1: Simple aggregation - use non-overlapping predictions
-    # For overlapping frames, we'll use the first prediction
+    # Aggregation based on mode
     aggregated_poses = np.zeros((num_frames, 7))
     aggregated_poses[:, 3:] = [0, 0, 0, 1]  # Initialize with identity quaternions
     
     frame_counts = np.zeros(num_frames)
     
-    for (start_idx, end_idx), pred_poses in zip(window_indices, window_predictions):
-        for i in range(window_size):
-            frame_idx = start_idx + i
-            if frame_idx < num_frames:
-                if frame_counts[frame_idx] == 0:  # Use first prediction
+    if mode == 'independent':
+        # Mode 1: Simple aggregation - use first prediction for each frame
+        for (start_idx, end_idx), pred_poses in zip(window_indices, window_predictions):
+            for i in range(window_size):
+                frame_idx = start_idx + i
+                if frame_idx < num_frames:
+                    if frame_counts[frame_idx] == 0:  # Use first prediction
+                        aggregated_poses[frame_idx] = pred_poses[i]
+                    frame_counts[frame_idx] += 1
+    
+    else:  # mode == 'history'
+        # Mode 2: Use predictions that have been smoothed with history
+        # Priority to more recent predictions as they have more context
+        for (start_idx, end_idx), pred_poses in zip(window_indices, window_predictions):
+            for i in range(window_size):
+                frame_idx = start_idx + i
+                if frame_idx < num_frames:
+                    # Always use the latest prediction (which has been smoothed)
                     aggregated_poses[frame_idx] = pred_poses[i]
-                frame_counts[frame_idx] += 1
+                    frame_counts[frame_idx] += 1
     
     # Build absolute trajectory from relative poses
     absolute_trajectory = accumulate_poses(aggregated_poses)
@@ -425,6 +520,9 @@ def main():
                         help='Directory with processed sequences')
     parser.add_argument('--stride', type=int, default=1,
                         help='Stride for sliding window')
+    parser.add_argument('--mode', type=str, default='independent',
+                        choices=['independent', 'history'],
+                        help='Inference mode: independent or history-based')
     parser.add_argument('--device', type=str, default='cuda',
                         help='Device to use')
     
@@ -452,7 +550,8 @@ def main():
         encoder_model=encoder_model,
         vio_model=vio_model,
         device=device,
-        stride=args.stride
+        stride=args.stride,
+        mode=args.mode
     )
     
     # Calculate metrics
@@ -569,7 +668,7 @@ def main():
         console.print(f"[bold red]❌ NEEDS IMPROVEMENT. ATE of {metrics['ate_mean']:.4f} cm exceeds 1cm threshold.[/bold red]")
     
     # Save trajectory for visualization
-    output_path = Path(f"inference_results_seq_{args.sequence_id}_stride_{args.stride}.npz")
+    output_path = Path(f"inference_results_seq_{args.sequence_id}_stride_{args.stride}_mode_{args.mode}.npz")
     np.savez(
         output_path,
         relative_poses=results['relative_poses'],
