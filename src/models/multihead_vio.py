@@ -367,7 +367,7 @@ class MultiHeadVIOModel(L.LightningModule):
         
         # Add velocity losses if available
         if 'angular_velocity' in predictions and False:  # Disabled for now
-            # TODO: Compute proper angular velocity from quaternions
+            # Angular velocity computation from quaternions requires additional implementation
             pass
         
         if 'linear_velocity' in predictions:

@@ -1,3 +1,9 @@
+# PyTorch (install appropriate version for your CUDA)
+# For CUDA 11.8: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# For CPU only: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+torchvision>=0.15.0
+
 # PyTorch Lightning and related
 lightning>=2.0.0
 torchmetrics>=0.11.0

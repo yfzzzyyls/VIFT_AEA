@@ -70,8 +70,8 @@ class KITTI_tester():
             self.dataloader.append(data_partition(args, seq))
         self.args = args
     
-    # TODO: testing should consider shift in window
     def test_one_path(self, net, df, num_gpu=1):
+        """Test one sequence path. Note: Future versions may consider window shifts."""
         pose_list= []
         for i, (image_seq, imu_seq, gt_seq) in tqdm(enumerate(df), total=len(df), smoothing=0.9):  
             
