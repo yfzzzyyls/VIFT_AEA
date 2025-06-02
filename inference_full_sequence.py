@@ -168,6 +168,9 @@ def sliding_window_inference(
     console.print(f"  Stride: {stride}")
     console.print(f"  Mode: {mode}")
     
+    if mode == 'independent':
+        console.print(f"  Aggregation: Middle-priority (frames near window center preferred)")
+    
     # Store predictions for each window
     window_predictions = []
     window_indices = []
@@ -322,13 +325,22 @@ def sliding_window_inference(
     frame_counts = np.zeros(num_frames)
     
     if mode == 'independent':
-        # Mode 1: Simple aggregation - use first prediction for each frame
+        # Mode 1: Middle-priority aggregation - prioritize predictions from window center
+        quality_scores = np.full(num_frames, -1.0)  # Track best quality score for each frame
+        middle_idx = window_size // 2  # Center of window (index 5 for window_size=11)
+        
         for (start_idx, end_idx), pred_poses in zip(window_indices, window_predictions):
             for i in range(window_size):
                 frame_idx = start_idx + i
                 if frame_idx < num_frames:
-                    if frame_counts[frame_idx] == 0:  # Use first prediction
+                    # Quality score: 1.0 at center, decreases linearly to edges
+                    # For window_size=11: center (i=5) gets 1.0, edges (i=0,10) get 0.0
+                    quality = 1.0 - abs(i - middle_idx) / middle_idx
+                    
+                    # Use this prediction if it has higher quality than previous
+                    if quality > quality_scores[frame_idx]:
                         aggregated_poses[frame_idx] = pred_poses[i]
+                        quality_scores[frame_idx] = quality
                     frame_counts[frame_idx] += 1
     
     else:  # mode == 'history'
@@ -509,8 +521,8 @@ def calculate_metrics(results):
 
 def main():
     parser = argparse.ArgumentParser(description='Full sequence inference for VIFT-AEA')
-    parser.add_argument('--sequence-id', type=str, default='114',
-                        help='Sequence ID from test set (114-142)')
+    parser.add_argument('--sequence-id', type=str, default='all',
+                        help='Sequence ID from test set (114-142) or "all" for all test sequences')
     parser.add_argument('--checkpoint', type=str, required=True,
                         help='Path to trained model checkpoint')
     parser.add_argument('--encoder-path', type=str, 
@@ -539,40 +551,138 @@ def main():
     encoder_model = load_pretrained_encoder(args.encoder_path)
     vio_model = MultiHeadVIOModel.load_from_checkpoint(args.checkpoint)
     
-    # Run inference
-    sequence_path = Path(args.processed_dir) / args.sequence_id
-    if not sequence_path.exists():
-        console.print(f"[red]Error: Sequence {sequence_path} not found![/red]")
-        return
+    # Determine which sequences to run
+    if args.sequence_id.lower() == 'all':
+        # Test sequences are typically 114-142 (last ~20% of data)
+        # Get all numeric sequence directories
+        all_seqs = sorted([d.name for d in Path(args.processed_dir).iterdir() 
+                          if d.is_dir() and d.name.isdigit()])
+        # Take last 20% as test set (matching train script split)
+        num_test = max(1, int(len(all_seqs) * 0.2))
+        test_sequences = all_seqs[-num_test:]
+        console.print(f"\nRunning on {len(test_sequences)} test sequences: {test_sequences[0]} to {test_sequences[-1]}")
+    else:
+        test_sequences = [args.sequence_id]
     
-    results = sliding_window_inference(
-        sequence_path=sequence_path,
-        encoder_model=encoder_model,
-        vio_model=vio_model,
-        device=device,
-        stride=args.stride,
-        mode=args.mode
-    )
+    # Store metrics for all sequences
+    all_metrics = []
     
-    # Calculate metrics
-    metrics = calculate_metrics(results)
+    for seq_id in test_sequences:
+        sequence_path = Path(args.processed_dir) / seq_id
+        if not sequence_path.exists():
+            console.print(f"[red]Warning: Sequence {sequence_path} not found, skipping![/red]")
+            continue
+        
+        results = sliding_window_inference(
+            sequence_path=sequence_path,
+            encoder_model=encoder_model,
+            vio_model=vio_model,
+            device=device,
+            stride=args.stride,
+            mode=args.mode
+        )
+        
+        # Calculate metrics
+        metrics = calculate_metrics(results)
+        metrics['sequence_id'] = seq_id
+        all_metrics.append(metrics)
+        
+        # Save individual results
+        if len(test_sequences) == 1:
+            output_path = Path(f"inference_results_seq_{seq_id}_stride_{args.stride}_mode_{args.mode}.npz")
+        else:
+            output_dir = Path(f"inference_results_all_stride_{args.stride}_mode_{args.mode}")
+            output_dir.mkdir(exist_ok=True)
+            output_path = output_dir / f"seq_{seq_id}.npz"
+        
+        np.savez(
+            output_path,
+            relative_poses=results['relative_poses'],
+            absolute_trajectory=results['absolute_trajectory'],
+            ground_truth=results['ground_truth'],
+            metrics=metrics
+        )
     
     # Display results
-    table = Table(title="Full Sequence Inference Results")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="green")
-    
-    table.add_row("Sequence", args.sequence_id)
-    table.add_row("Total Frames", f"{metrics['total_frames']:,}")
-    table.add_row("ATE Mean", f"{metrics['ate_mean']:.4f} cm")
-    table.add_row("ATE Std", f"{metrics['ate_std']:.4f} cm")
-    table.add_row("ATE Median", f"{metrics['ate_median']:.4f} cm")
-    table.add_row("ATE 95%", f"{metrics['ate_95']:.4f} cm")
-    table.add_row("Rotation Error Mean", f"{metrics['rot_mean']:.4f}°")
-    table.add_row("Rotation Error Std", f"{metrics['rot_std']:.4f}°")
-    
-    console.print("\n")
-    console.print(table)
+    if len(all_metrics) == 1:
+        # Single sequence - show detailed results
+        metrics = all_metrics[0]
+        table = Table(title="Full Sequence Inference Results")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        
+        table.add_row("Sequence", metrics['sequence_id'])
+        table.add_row("Total Frames", f"{metrics['total_frames']:,}")
+        table.add_row("ATE Mean", f"{metrics['ate_mean']:.4f} cm")
+        table.add_row("ATE Std", f"{metrics['ate_std']:.4f} cm")
+        table.add_row("ATE Median", f"{metrics['ate_median']:.4f} cm")
+        table.add_row("ATE 95%", f"{metrics['ate_95']:.4f} cm")
+        table.add_row("Rotation Error Mean", f"{metrics['rot_mean']:.4f}°")
+        table.add_row("Rotation Error Std", f"{metrics['rot_std']:.4f}°")
+        
+        console.print("\n")
+        console.print(table)
+    else:
+        # Multiple sequences - show per-sequence and averaged results
+        console.print("\n")
+        per_seq_table = Table(title="Per-Sequence Results")
+        per_seq_table.add_column("Sequence", style="cyan")
+        per_seq_table.add_column("Frames", style="white")
+        per_seq_table.add_column("ATE Mean", style="green")
+        per_seq_table.add_column("RPE Trans(1)", style="green")
+        per_seq_table.add_column("RPE Rot(1)", style="green")
+        per_seq_table.add_column("Status", style="white")
+        
+        for m in all_metrics:
+            status = "✅" if m['ate_mean'] < 1.0 else "❌"
+            per_seq_table.add_row(
+                m['sequence_id'],
+                f"{m['total_frames']:,}",
+                f"{m['ate_mean']:.4f} cm",
+                f"{m['rpe_trans_1_mean']:.4f} cm",
+                f"{m['rpe_rot_1_mean']:.4f}°",
+                status
+            )
+        
+        console.print(per_seq_table)
+        
+        # Calculate averaged metrics
+        avg_metrics = {}
+        for key in ['ate_mean', 'ate_std', 'ate_median', 'ate_95', 
+                    'rot_mean', 'rot_std', 'rpe_trans_1_mean', 'rpe_trans_1_std',
+                    'rpe_rot_1_mean', 'rpe_rot_1_std', 'rpe_trans_5_mean', 'rpe_trans_5_std',
+                    'rpe_rot_5_mean', 'rpe_rot_5_std']:
+            values = [m[key] for m in all_metrics]
+            avg_metrics[key] = np.mean(values)
+            avg_metrics[key + '_std_across_seqs'] = np.std(values)
+        
+        # Display averaged results
+        console.print("\n")
+        avg_table = Table(title=f"Averaged Results over {len(all_metrics)} Test Sequences")
+        avg_table.add_column("Metric", style="cyan")
+        avg_table.add_column("Mean ± Std", style="green")
+        avg_table.add_column("Std Across Seqs", style="yellow")
+        
+        avg_table.add_row("ATE Mean", 
+                         f"{avg_metrics['ate_mean']:.4f} ± {avg_metrics['ate_std']:.4f} cm",
+                         f"{avg_metrics['ate_mean_std_across_seqs']:.4f} cm")
+        avg_table.add_row("ATE Median", 
+                         f"{avg_metrics['ate_median']:.4f} cm",
+                         f"{avg_metrics['ate_median_std_across_seqs']:.4f} cm")
+        avg_table.add_row("RPE Trans (1 frame)", 
+                         f"{avg_metrics['rpe_trans_1_mean']:.4f} ± {avg_metrics['rpe_trans_1_std']:.4f} cm",
+                         f"{avg_metrics['rpe_trans_1_mean_std_across_seqs']:.4f} cm")
+        avg_table.add_row("RPE Rot (1 frame)", 
+                         f"{avg_metrics['rpe_rot_1_mean']:.4f} ± {avg_metrics['rpe_rot_1_std']:.4f}°",
+                         f"{avg_metrics['rpe_rot_1_mean_std_across_seqs']:.4f}°")
+        avg_table.add_row("Absolute Rotation Error", 
+                         f"{avg_metrics['rot_mean']:.4f} ± {avg_metrics['rot_std']:.4f}°",
+                         f"{avg_metrics['rot_mean_std_across_seqs']:.4f}°")
+        
+        console.print(avg_table)
+        
+        # Use averaged metrics for performance comparison
+        metrics = avg_metrics
     
     # Display performance vs industry standards
     console.print("\n")
@@ -603,37 +713,37 @@ def main():
         "-"
     )
     
-    # RPE Translation (1 frame) - Frame-to-frame accuracy
+    # RPE-1: Frame-to-frame accuracy (critical for AR/VR)
     rpe_trans_1_status = "✅ EXCEEDS" if metrics['rpe_trans_1_mean'] < 0.1 else "❌ FAILS"
     perf_table.add_row(
-        "RPE Translation (1 frame)",
+        "RPE-1 Translation (frame-to-frame)",
         f"{metrics['rpe_trans_1_mean']:.4f} ± {metrics['rpe_trans_1_std']:.4f} cm",
         "<0.1 cm",
         rpe_trans_1_status
     )
     
-    # RPE Rotation (1 frame)
+    # RPE-1 Rotation
     rpe_rot_1_status = "✅ EXCEEDS" if metrics['rpe_rot_1_mean'] < 0.1 else ("⚠️  CLOSE" if metrics['rpe_rot_1_mean'] < 0.5 else "❌ FAILS")
     perf_table.add_row(
-        "RPE Rotation (1 frame)",
+        "RPE-1 Rotation (frame-to-frame)",
         f"{metrics['rpe_rot_1_mean']:.4f} ± {metrics['rpe_rot_1_std']:.4f}°",
         "<0.1°",
         rpe_rot_1_status
     )
     
-    # RPE Translation (5 frames)
+    # RPE-5: Short-term accuracy (~167ms @ 30fps)
     rpe_trans_5_status = "✅ EXCEEDS" if metrics['rpe_trans_5_mean'] < 0.5 else "❌ FAILS"
     perf_table.add_row(
-        "RPE Translation (5 frames)",
+        "RPE-5 Translation (167ms window)",
         f"{metrics['rpe_trans_5_mean']:.4f} ± {metrics['rpe_trans_5_std']:.4f} cm",
         "<0.5 cm",
         rpe_trans_5_status
     )
     
-    # RPE Rotation (5 frames)
+    # RPE-5 Rotation
     rpe_rot_5_status = "✅ EXCEEDS" if metrics['rpe_rot_5_mean'] < 0.5 else "❌ FAILS"
     perf_table.add_row(
-        "RPE Rotation (5 frames)",
+        "RPE-5 Rotation (167ms window)",
         f"{metrics['rpe_rot_5_mean']:.4f} ± {metrics['rpe_rot_5_std']:.4f}°",
         "<0.5°",
         rpe_rot_5_status
@@ -652,9 +762,10 @@ def main():
     
     # Add metric explanations
     console.print("\n[bold]Metric Explanations:[/bold]")
-    console.print("• ATE: Cumulative position error over entire trajectory (500 frames)")
-    console.print("• RPE: Relative Pose Error - frame-to-frame accuracy")
-    console.print("• Absolute Rotation: Accumulated rotation error over trajectory")
+    console.print("• ATE (Absolute Trajectory Error): Cumulative drift over entire sequence - critical for mapping")
+    console.print("• RPE-1 (Relative Pose Error @ 1 frame): Frame-to-frame accuracy - critical for smooth AR/VR rendering")
+    console.print("• RPE-5 (Relative Pose Error @ 5 frames): Short-term accuracy over ~167ms - important for tracking")
+    console.print("• Absolute Rotation Error: Total orientation drift - affects heading accuracy")
     
     # Performance summary
     console.print("\n[bold]Performance Summary:[/bold]")
@@ -667,20 +778,26 @@ def main():
     else:
         console.print(f"[bold red]❌ NEEDS IMPROVEMENT. ATE of {metrics['ate_mean']:.4f} cm exceeds 1cm threshold.[/bold red]")
     
-    # Save trajectory for visualization
-    output_path = Path(f"inference_results_seq_{args.sequence_id}_stride_{args.stride}_mode_{args.mode}.npz")
-    np.savez(
-        output_path,
-        relative_poses=results['relative_poses'],
-        absolute_trajectory=results['absolute_trajectory'],
-        ground_truth=results['ground_truth'],
-        metrics=metrics
-    )
-    console.print(f"\n✅ Saved results to {output_path}")
+    if args.mode == 'independent':
+        console.print("\n[dim]Note: Using middle-priority aggregation for improved accuracy[/dim]")
     
-    # Show usage example
-    console.print("\n[bold cyan]Visualize trajectory:[/bold cyan]")
-    console.print(f"python visualize_trajectory.py --results {output_path}")
+    if len(all_metrics) > 1:
+        # Save averaged metrics
+        avg_output_path = Path(f"inference_results_averaged_stride_{args.stride}_mode_{args.mode}.json")
+        import json
+        with open(avg_output_path, 'w') as f:
+            json.dump({
+                'num_sequences': len(all_metrics),
+                'sequences': [m['sequence_id'] for m in all_metrics],
+                'averaged_metrics': avg_metrics,
+                'per_sequence_metrics': all_metrics
+            }, f, indent=2)
+        console.print(f"\n✅ Saved averaged results to {avg_output_path}")
+        console.print(f"✅ Individual trajectories saved to inference_results_all_stride_{args.stride}_mode_{args.mode}/")
+    else:
+        console.print(f"\n✅ Saved results to {output_path}")
+        console.print("\n[bold cyan]Visualize trajectory:[/bold cyan]")
+        console.print(f"python visualize_trajectory.py --results {output_path}")
 
 
 if __name__ == "__main__":

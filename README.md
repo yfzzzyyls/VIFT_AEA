@@ -125,6 +125,9 @@ Train the relative pose prediction model:
 
 ```bash
 python train_pretrained_relative.py
+
+# Monitor training progress
+tensorboard --logdir logs/
 ```
 
 Training configuration:
@@ -148,35 +151,71 @@ tensorboard --logdir logs/
 Evaluate the trained model on full sequences with sliding window inference:
 
 ```bash
+# Evaluate on a single test sequence
 python inference_full_sequence.py \
     --sequence-id 114 \
     --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt \
-    --stride 1
+    --stride 1 \
+    --mode independent
+
+# Evaluate on ALL test sequences (recommended)
+python inference_full_sequence.py \
+    --sequence-id all \
+    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt \
+    --stride 1 \
+    --mode independent
+
+# Mode 2: History-based (temporal smoothing)
+python inference_full_sequence.py \
+    --sequence-id all \
+    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt \
+    --stride 1 \
+    --mode history
 ```
 
 This performs:
 
 - **Full sequence inference** with sliding windows
+- **Two inference modes**: independent (middle-priority aggregation) or history-based (temporal smoothing)
+- **Multi-sequence evaluation** with averaged metrics when using `--sequence-id all`
 - **Proper trajectory building** from relative poses
-- **AR/VR standard metrics** computation
+- **AR/VR standard metrics** computation (ATE, RPE, rotation errors)
 - **Performance comparison** against industry standards
 
 Visualize the trajectory:
 
 ```bash
-python visualize_trajectory.py --results inference_results_seq_114_stride_1.npz
+python visualize_trajectory.py --results inference_results_seq_114_stride_1_mode_independent.npz
 ```
 
 ## 🏆 Results
 
-Our implementation achieves state-of-the-art performance:
+Our implementation achieves excellent frame-to-frame accuracy on the full test set (28 sequences):
 
-| Metric                     | Value     | Target  | Status |
-| -------------------------- | --------- | ------- | ------ |
-| **ATE**              | 0.0688 cm | <1 cm   | ✅     |
-| **RPE Translation**  | 0.0144 cm | <0.1 cm | ✅     |
-| **RPE Rotation**     | 0.0263°  | <0.1°  | ✅     |
-| **Quaternion Error** | 0.0263°  | <0.1°  | ✅     |
+### Averaged Performance Across All Test Sequences
+
+| Metric                                    | Mean ± Std         | AR/VR Target | Status |
+| ----------------------------------------- | ------------------ | ------------ | ------ |
+| **ATE (Absolute Trajectory Error)**       | 2.14 ± 1.36 cm    | <1 cm        | ⚠️     |
+| **RPE-1 Translation (frame-to-frame)**    | 0.0096 ± 0.0042 cm | <0.1 cm      | ✅     |
+| **RPE-1 Rotation (frame-to-frame)**       | 0.0374 ± 0.0105°  | <0.1°       | ✅     |
+| **RPE-5 Translation (167ms window)**      | 0.0486 ± 0.0208 cm | <0.5 cm      | ✅     |
+| **RPE-5 Rotation (167ms window)**         | 0.1177 ± 0.0646°  | <0.5°       | ✅     |
+
+### Performance Distribution
+- **46% of sequences** (13/28) achieve ATE < 1cm
+- **Best sequence**: 0.445 cm ATE
+- **Median ATE**: 2.10 cm
+- **Frame-to-frame accuracy**: Exceeds all AR/VR requirements
+
+### Understanding the Metrics
+
+Following standard VIO evaluation practices (as in ORB-SLAM, VINS-Mono papers):
+
+- **ATE**: Measures cumulative drift over the entire sequence - critical for mapping applications
+- **RPE-1**: Measures frame-to-frame accuracy (33ms @ 30fps) - critical for smooth AR/VR rendering
+- **RPE-5**: Measures short-term drift (167ms @ 30fps) - important for robust tracking
+- **Different timescales matter**: AR/VR requires excellent RPE-1, while mapping needs low ATE
 
 ## 📚 Citation
 
