@@ -215,10 +215,10 @@ def train_with_relative_poses(
     # Create model (Lite configuration - reduced from 7.4M to ~1.1M params)
     model = MultiHeadVIOModel(
         feature_dim=768,
-        hidden_dim=128,         # Reduced from 256
-        num_shared_layers=2,    # Reduced from 4
-        num_specialized_layers=2, # Reduced from 3
-        num_heads=4,            # Reduced from 8
+        hidden_dim=128,         
+        num_shared_layers=2,    
+        num_specialized_layers=2, 
+        num_heads=4,
         dropout=0.1,
         learning_rate=learning_rate,
         weight_decay=1e-5,
