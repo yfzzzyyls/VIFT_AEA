@@ -4,7 +4,7 @@
 
 defaults:
   - _self_
-  - data: simple_aria
+  - data: aria_latent
   - model: arvr_vio_optimized
   - callbacks: default
   - logger: tensorboard
