@@ -214,10 +214,15 @@ Our implementation achieves excellent frame-to-frame accuracy on the full test s
 
 Following standard VIO evaluation practices (as in ORB-SLAM, VINS-Mono papers):
 
-- **ATE**: Measures cumulative drift over the entire sequence - critical for mapping applications
-- **RPE-1**: Measures frame-to-frame accuracy (33ms @ 30fps) - critical for smooth AR/VR rendering
-- **RPE-5**: Measures short-term drift (167ms @ 30fps) - important for robust tracking
-- **Different timescales matter**: AR/VR requires excellent RPE-1, while mapping needs low ATE
+- **ATE (Absolute Trajectory Error)**: Cumulative position drift over entire 500-frame sequence (~16.7 seconds @ 30fps)
+- **RPE-1 (Relative Pose Error @ 1 frame)**: Frame-to-frame accuracy (33ms interval @ 30fps)
+- **RPE-5 (Relative Pose Error @ 5 frames)**: Short-term accuracy (167ms interval @ 30fps)
+- **Absolute Rotation Error**: Total orientation drift accumulated from frame 0 to frame 500
+
+#### Why these specific intervals?
+- **1 frame (33ms)**: Tests immediate motion estimation quality, critical for smooth AR/VR rendering
+- **5 frames (167ms)**: Tests short-term consistency, roughly 1/6 second of motion
+- **Different timescales matter**: AR/VR requires excellent RPE-1, while mapping/navigation needs low ATE
 
 ## 📚 Citation
 

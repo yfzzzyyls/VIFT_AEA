@@ -1026,10 +1026,10 @@ def main():
     
     # Add metric explanations
     console.print("\n[bold]Metric Explanations:[/bold]")
-    console.print("• ATE (Absolute Trajectory Error): Cumulative drift over entire sequence - critical for mapping")
-    console.print("• RPE-1 (Relative Pose Error @ 1 frame): Frame-to-frame accuracy - critical for smooth AR/VR rendering")
-    console.print("• RPE-5 (Relative Pose Error @ 5 frames): Short-term accuracy over ~167ms - important for tracking")
-    console.print("• Absolute Rotation Error: Total orientation drift - affects heading accuracy")
+    console.print("• ATE (Absolute Trajectory Error): Cumulative position drift over entire sequence (500 frames)")
+    console.print("• RPE-1 (Relative Pose Error @ 1 frame): Frame-to-frame accuracy (33ms @ 30fps)")
+    console.print("• RPE-5 (Relative Pose Error @ 5 frames): Short-term accuracy (167ms @ 30fps)")
+    console.print("• Absolute Rotation Error: Accumulated orientation drift from start to end of sequence")
     
     # Performance summary
     console.print("\n[bold]Performance Summary:[/bold]")
