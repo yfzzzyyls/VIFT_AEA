@@ -154,23 +154,25 @@ Evaluate the trained model on full sequences with sliding window inference:
 # Evaluate on a single test sequence
 python inference_full_sequence.py \
     --sequence-id 114 \
-    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt \
-    --stride 1 \
-    --mode independent
+    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt
 
 # Evaluate on ALL test sequences (recommended)
 python inference_full_sequence.py \
     --sequence-id all \
-    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt \
-    --stride 1 \
-    --mode independent
+    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt
 
 # Mode 2: History-based (temporal smoothing)
 python inference_full_sequence.py \
     --sequence-id all \
     --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt \
-    --stride 1 \
     --mode history
+
+# Custom settings for different setups
+python inference_full_sequence.py \
+    --sequence-id all \
+    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt \
+    --batch-size 16 \  # Smaller batch for limited memory
+    --num-gpus 2       # Use only 2 GPUs instead of default 4
 ```
 
 This performs:

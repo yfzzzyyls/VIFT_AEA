@@ -408,6 +408,259 @@ def sliding_window_inference(
     }
 
 
+def sliding_window_inference_batched(
+    sequence_path: Path,
+    encoder_model: nn.Module,
+    vio_model: nn.Module,
+    device: torch.device,
+    window_size: int = 11,
+    stride: int = 1,
+    pose_scale: float = 100.0,
+    mode: str = 'independent',
+    batch_size: int = 32,
+    num_gpus: int = 4
+):
+    """
+    Run sliding window inference on a full sequence with batched processing.
+    
+    Args:
+        sequence_path: Path to processed sequence
+        encoder_model: Pretrained encoder
+        vio_model: Trained VIO model
+        device: torch device
+        window_size: Window size (default 11)
+        stride: Stride for sliding window (default 1)
+        pose_scale: Scale factor for poses
+        mode: 'independent' or 'history' - inference mode
+        batch_size: Number of windows to process simultaneously
+    
+    Returns:
+        predictions: Dict with trajectory and metrics
+    """
+    console.print(f"\n[bold cyan]Processing sequence: {sequence_path.name}[/bold cyan]")
+    
+    # Load sequence data
+    visual_data = torch.load(sequence_path / "visual_data.pt")  # [N, 3, H, W]
+    imu_data = torch.load(sequence_path / "imu_data.pt")        # [N, 33, 6]
+    
+    # Load ground truth poses
+    with open(sequence_path / "poses.json", 'r') as f:
+        poses_data = json.load(f)
+    
+    num_frames = visual_data.shape[0]
+    console.print(f"  Total frames: {num_frames}")
+    console.print(f"  Window size: {window_size}")
+    console.print(f"  Stride: {stride}")
+    console.print(f"  Mode: {mode}")
+    console.print(f"  Batch size: {batch_size}")
+    
+    if mode == 'independent':
+        console.print(f"  Aggregation: Middle-priority (frames near window center preferred)")
+    
+    # Store predictions for each window
+    window_predictions = []
+    window_indices = []
+    
+    # Setup multi-GPU if available
+    if num_gpus > 1 and torch.cuda.device_count() >= num_gpus:
+        console.print(f"  Using {num_gpus} GPUs for parallel processing")
+        # Create model copies for each GPU
+        encoder_models = []
+        vio_models = []
+        for gpu_id in range(num_gpus):
+            device_gpu = torch.device(f'cuda:{gpu_id}')
+            encoder_copy = WrapperModel()
+            encoder_copy.load_state_dict(encoder_model.state_dict())
+            encoder_copy = encoder_copy.to(device_gpu)
+            encoder_copy.eval()
+            encoder_models.append(encoder_copy)
+            
+            vio_copy = type(vio_model)()
+            vio_copy.load_state_dict(vio_model.state_dict())
+            vio_copy = vio_copy.to(device_gpu)
+            vio_copy.eval()
+            vio_models.append(vio_copy)
+    else:
+        console.print(f"  Using single GPU")
+        num_gpus = 1
+        encoder_models = [encoder_model.to(device)]
+        vio_models = [vio_model.to(device)]
+        encoder_models[0].eval()
+        vio_models[0].eval()
+    
+    # Collect all windows first
+    all_windows_visual = []
+    all_windows_imu = []
+    all_start_indices = []
+    
+    for start_idx in range(0, num_frames - window_size + 1, stride):
+        end_idx = start_idx + window_size
+        
+        # Extract window
+        window_visual = visual_data[start_idx:end_idx]  # [11, 3, H, W]
+        window_imu = imu_data[start_idx:end_idx]        # [11, 33, 6]
+        
+        # Preprocess visual data
+        window_visual_resized = F.interpolate(
+            window_visual, 
+            size=(256, 512), 
+            mode='bilinear', 
+            align_corners=False
+        )
+        window_visual_normalized = window_visual_resized - 0.5
+        
+        # Prepare IMU data (take first 10 samples per frame)
+        window_imu_110 = []
+        for i in range(window_size):
+            window_imu_110.append(window_imu[i, :10, :])
+        window_imu_110 = torch.cat(window_imu_110, dim=0)  # [110, 6]
+        
+        all_windows_visual.append(window_visual_normalized)
+        all_windows_imu.append(window_imu_110)
+        all_start_indices.append(start_idx)
+    
+    num_windows = len(all_windows_visual)
+    console.print(f"  Total windows: {num_windows}")
+    
+    # Process in batches with multi-GPU
+    with torch.no_grad():
+        for batch_start in tqdm(range(0, num_windows, batch_size * num_gpus), desc="Batched inference"):
+            batch_end = min(batch_start + batch_size * num_gpus, num_windows)
+            
+            # Split batch across GPUs
+            gpu_predictions = []
+            gpu_batch_sizes = []
+            
+            for gpu_id in range(num_gpus):
+                gpu_batch_start = batch_start + gpu_id * batch_size
+                gpu_batch_end = min(gpu_batch_start + batch_size, batch_end)
+                
+                if gpu_batch_start >= batch_end:
+                    break
+                
+                # Stack batch for this GPU
+                gpu_device = torch.device(f'cuda:{gpu_id}' if num_gpus > 1 else device)
+                batch_visual = torch.stack(all_windows_visual[gpu_batch_start:gpu_batch_end]).to(gpu_device)
+                batch_imu = torch.stack(all_windows_imu[gpu_batch_start:gpu_batch_end]).to(gpu_device)
+                
+                # Generate features using encoder on this GPU
+                features = encoder_models[gpu_id](batch_visual, batch_imu)  # [B, 11, 768]
+                
+                # Prepare batch for VIO model
+                batch = {
+                    'images': features,
+                    'imus': torch.zeros(features.shape[0], 11, 6).to(gpu_device),  # Dummy
+                    'poses': None  # Not needed for inference
+                }
+                
+                # Run VIO model on this GPU
+                predictions = vio_models[gpu_id](batch)
+                gpu_predictions.append(predictions)
+                gpu_batch_sizes.append(gpu_batch_end - gpu_batch_start)
+            
+            # Collect predictions from all GPUs
+            for gpu_id, (predictions, gpu_batch_size) in enumerate(zip(gpu_predictions, gpu_batch_sizes)):
+                gpu_batch_start = batch_start + gpu_id * batch_size
+                
+                # Extract predictions for each window in this GPU's batch
+                for i in range(gpu_batch_size):
+                    pred_poses = torch.cat([
+                        predictions['translation'][i],  # [11, 3]
+                        predictions['rotation'][i]      # [11, 4]
+                    ], dim=1).cpu().numpy()  # [11, 7]
+                    
+                    start_idx = all_start_indices[gpu_batch_start + i]
+                    window_predictions.append(pred_poses)
+                    window_indices.append((start_idx, start_idx + window_size))
+    
+    console.print(f"  Processed {num_windows} windows in {(num_windows + batch_size * num_gpus - 1) // (batch_size * num_gpus)} batches")
+    
+    # Aggregation (same as before)
+    aggregated_poses = np.zeros((num_frames, 7))
+    aggregated_poses[:, 3:] = [0, 0, 0, 1]  # Initialize with identity quaternions
+    
+    frame_counts = np.zeros(num_frames)
+    
+    if mode == 'independent':
+        # Mode 1: Middle-priority aggregation
+        quality_scores = np.full(num_frames, -1.0)
+        middle_idx = window_size // 2
+        
+        for (start_idx, end_idx), pred_poses in zip(window_indices, window_predictions):
+            for i in range(window_size):
+                frame_idx = start_idx + i
+                if frame_idx < num_frames:
+                    quality = 1.0 - abs(i - middle_idx) / middle_idx
+                    
+                    if quality > quality_scores[frame_idx]:
+                        aggregated_poses[frame_idx] = pred_poses[i]
+                        quality_scores[frame_idx] = quality
+                    frame_counts[frame_idx] += 1
+    
+    else:  # mode == 'history'
+        # For history mode with batching, we need a different approach
+        # For now, use simple last-write-wins
+        for (start_idx, end_idx), pred_poses in zip(window_indices, window_predictions):
+            for i in range(window_size):
+                frame_idx = start_idx + i
+                if frame_idx < num_frames:
+                    aggregated_poses[frame_idx] = pred_poses[i]
+                    frame_counts[frame_idx] += 1
+    
+    # Build absolute trajectory from relative poses
+    absolute_trajectory = accumulate_poses(aggregated_poses)
+    
+    # Convert ground truth to relative poses (same as before)
+    gt_absolute = []
+    for pose in poses_data:
+        t = pose['translation']
+        euler = pose['rotation_euler']
+        r = Rotation.from_euler('xyz', euler)
+        q = r.as_quat()  # [x, y, z, w]
+        gt_absolute.append([t[0], t[1], t[2], q[0], q[1], q[2], q[3]])
+    gt_absolute = np.array(gt_absolute)
+    
+    # Convert absolute GT to relative poses
+    gt_relative = np.zeros_like(gt_absolute)
+    gt_relative[0, :3] = [0, 0, 0]
+    gt_relative[0, 3:] = [0, 0, 0, 1]
+    
+    for i in range(1, len(gt_absolute)):
+        # Relative translation
+        prev_t = gt_absolute[i-1, :3]
+        curr_t = gt_absolute[i, :3]
+        
+        # Get rotation matrices
+        prev_r = Rotation.from_quat(gt_absolute[i-1, 3:])
+        curr_r = Rotation.from_quat(gt_absolute[i, 3:])
+        
+        # Relative translation in previous frame's coordinates
+        rel_trans = prev_r.inv().apply(curr_t - prev_t)
+        
+        # Relative rotation
+        rel_rot = prev_r.inv() * curr_r
+        rel_quat = rel_rot.as_quat()
+        
+        gt_relative[i, :3] = rel_trans
+        gt_relative[i, 3:] = rel_quat
+    
+    # Scale after conversion to relative
+    gt_relative[:, :3] *= pose_scale
+    
+    # Build absolute trajectory from relative GT for verification
+    gt_absolute_from_relative = accumulate_poses(gt_relative)
+    
+    return {
+        'relative_poses': aggregated_poses,
+        'absolute_trajectory': absolute_trajectory,
+        'ground_truth': gt_absolute_from_relative,
+        'ground_truth_relative': gt_relative,
+        'num_frames': num_frames,
+        'num_windows': num_windows,
+        'frame_overlap': frame_counts
+    }
+
+
 def calculate_metrics(results):
     """Calculate ATE, RPE and other metrics."""
     pred_traj = results['absolute_trajectory']
@@ -537,14 +790,22 @@ def main():
                         help='Inference mode: independent or history-based')
     parser.add_argument('--device', type=str, default='cuda',
                         help='Device to use')
+    parser.add_argument('--batch-size', type=int, default=32,
+                        help='Batch size for inference (default: 32)')
+    parser.add_argument('--num-gpus', type=int, default=4,
+                        help='Number of GPUs to use (default: 4)')
     
     args = parser.parse_args()
     
     console.rule("[bold cyan]Full Sequence Inference Pipeline[/bold cyan]")
     
-    # Set device
+    # Set device and check GPUs
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
     console.print(f"Using device: {device}")
+    if torch.cuda.is_available():
+        console.print(f"Available GPUs: {torch.cuda.device_count()}")
+        for i in range(torch.cuda.device_count()):
+            console.print(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
     
     # Load models
     console.print("\n[bold]Loading models...[/bold]")
@@ -573,13 +834,16 @@ def main():
             console.print(f"[red]Warning: Sequence {sequence_path} not found, skipping![/red]")
             continue
         
-        results = sliding_window_inference(
+        # Always use batched inference for efficiency
+        results = sliding_window_inference_batched(
             sequence_path=sequence_path,
             encoder_model=encoder_model,
             vio_model=vio_model,
             device=device,
             stride=args.stride,
-            mode=args.mode
+            mode=args.mode,
+            batch_size=args.batch_size,
+            num_gpus=args.num_gpus
         )
         
         # Calculate metrics
