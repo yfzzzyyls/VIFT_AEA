@@ -2,6 +2,7 @@
 """
 Complete pipeline to generate latent features using Visual-Selective-VIO pretrained model
 from processed Aria data with FIXED relative pose conversion in local coordinates.
+Updated to work with quaternion data directly without Euler conversion.
 """
 
 import os
@@ -13,7 +14,6 @@ import json
 from tqdm import tqdm
 from pathlib import Path
 import torch.nn.functional as F
-from scipy.spatial.transform import Rotation
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from src.models.components.vsvio import Encoder
@@ -157,23 +157,41 @@ def process_sequence(seq_dir, model, device, window_size=11, stride=1, pose_scal
     visual_data = torch.load(os.path.join(seq_dir, 'visual_data.pt'))  # [N, 3, H, W]
     imu_data = torch.load(os.path.join(seq_dir, 'imu_data.pt'))        # [N, 33, 6]
     
-    # Load poses
-    with open(os.path.join(seq_dir, 'poses.json'), 'r') as f:
+    # Ensure float32 data type for compatibility with the model
+    visual_data = visual_data.float()  # Convert to float32 if it's float64
+    imu_data = imu_data.float()  # Convert to float32 if it's float64
+    
+    # Load poses - check for quaternion version first
+    poses_file = os.path.join(seq_dir, 'poses_quaternion.json')
+    if not os.path.exists(poses_file):
+        # Fallback to regular poses.json
+        poses_file = os.path.join(seq_dir, 'poses.json')
+    
+    with open(poses_file, 'r') as f:
         poses_data = json.load(f)
     
     # Convert poses to tensor with XYZW quaternion format
     absolute_poses = []
     for pose in poses_data:
-        # Get translation and rotation
+        # Get translation
         t = pose['translation']
-        euler = pose['rotation_euler']  # [roll, pitch, yaw]
         
-        # Convert Euler angles to quaternion
-        r = Rotation.from_euler('xyz', euler)
-        q = r.as_quat()  # [x, y, z, w] - already in XYZW format
+        # Check if we have quaternion data directly
+        if 'quaternion' in pose:
+            # Already have quaternion in XYZW format
+            q = pose['quaternion']
+            pose_vec = [t[0], t[1], t[2], q[0], q[1], q[2], q[3]]
+        elif 'rotation_euler' in pose:
+            # Convert Euler to quaternion (backward compatibility)
+            from scipy.spatial.transform import Rotation
+            euler = pose['rotation_euler']  # [roll, pitch, yaw]
+            r = Rotation.from_euler('xyz', euler)
+            q = r.as_quat()  # [x, y, z, w] - already in XYZW format
+            pose_vec = [t[0], t[1], t[2], q[0], q[1], q[2], q[3]]
+        else:
+            # No rotation data - use identity
+            pose_vec = [t[0], t[1], t[2], 0, 0, 0, 1]
         
-        # Combine translation and quaternion
-        pose_vec = [t[0], t[1], t[2], q[0], q[1], q[2], q[3]]
         absolute_poses.append(pose_vec)
     absolute_poses = np.array(absolute_poses, dtype=np.float32)
     
@@ -386,7 +404,7 @@ def main():
     print(f"Stride: {args.stride}")
     print(f"Pose scale: {args.pose_scale} (meter → cm)")
     print(f"Output directory: {args.output_dir}")
-    print(f"Pose format: Relative poses in LOCAL COORDINATES (fixed!)")
+    print(f"Pose format: Relative poses in LOCAL COORDINATES with quaternions")
     
     sample_counts = generate_split_data(
         args.processed_dir, 
@@ -410,7 +428,7 @@ def main():
         'model_path': args.model_path,
         'normalization': '[-0.5, 0.5]',
         'sample_counts': sample_counts,
-        'note': 'Features with FIXED relative poses in local coordinates - proper coordinate transformation applied!'
+        'note': 'Features with quaternions throughout - supports both quaternion and Euler input data'
     }
     
     import pickle

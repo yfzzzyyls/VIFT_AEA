@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-AriaEveryday to VIFT Data Processing Pipeline
-Extracts SLAM trajectories, RGB frames, and IMU data from AriaEveryday dataset
-and transforms them into VIFT-compatible format for training and inference.
+AriaEveryday to VIFT Data Processing Pipeline - Quaternion Version
+Maintains quaternions throughout the pipeline without Euler conversion.
 """
 
 import os
@@ -19,41 +18,9 @@ from tqdm import tqdm
 import ffmpeg
 from typing import List, Dict, Tuple, Optional
 
-# Add quaternion to Euler conversion utilities
-def quaternion_to_euler(qx, qy, qz, qw):
-    """
-    Convert quaternion to Euler angles (roll, pitch, yaw) in radians
-    Args:
-        qx, qy, qz, qw: quaternion components
-    Returns:
-        (rx, ry, rz): Euler angles in radians (roll, pitch, yaw)
-    """
-    # Normalize quaternion
-    norm = np.sqrt(qx*qx + qy*qy + qz*qz + qw*qw)
-    if norm > 0:
-        qx, qy, qz, qw = qx/norm, qy/norm, qz/norm, qw/norm
-    
-    # Roll (x-axis rotation)
-    sinr_cosp = 2 * (qw * qx + qy * qz)
-    cosr_cosp = 1 - 2 * (qx * qx + qy * qy)
-    roll = np.arctan2(sinr_cosp, cosr_cosp)
-    
-    # Pitch (y-axis rotation)
-    sinp = 2 * (qw * qy - qz * qx)
-    if abs(sinp) >= 1:
-        pitch = np.copysign(np.pi / 2, sinp)  # use 90 degrees if out of range
-    else:
-        pitch = np.arcsin(sinp)
-    
-    # Yaw (z-axis rotation)
-    siny_cosp = 2 * (qw * qz + qx * qy)
-    cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
-    yaw = np.arctan2(siny_cosp, cosy_cosp)
-    
-    return roll, pitch, yaw
 
 class AriaToVIFTProcessor:
-    """Process AriaEveryday dataset into VIFT-compatible format"""
+    """Process AriaEveryday dataset maintaining quaternions"""
     
     def __init__(self, aria_data_dir: str, output_dir: str, max_frames: int = 500, device: str = "auto"):
         self.aria_data_dir = Path(aria_data_dir)
@@ -75,9 +42,9 @@ class AriaToVIFTProcessor:
         else:
             self.device = torch.device(device)
             print(f"🎯 Using specified device: {self.device}")
-        
+    
     def extract_slam_trajectory(self, sequence_path: Path) -> Optional[List[Dict]]:
-        """Extract SLAM trajectory from MPS results"""
+        """Extract SLAM trajectory from MPS results, keeping quaternions"""
         print(f"📍 Extracting SLAM trajectory from {sequence_path.name}")
 
         # Prefer SLAM summary JSON for trajectories
@@ -112,12 +79,17 @@ class AriaToVIFTProcessor:
                                     tx,ty,tz = obj['tx_world_device'],obj['ty_world_device'],obj['tz_world_device']
                                     qx,qy,qz,qw = obj['qx_world_device'],obj['qy_world_device'],obj['qz_world_device'],obj['qw_world_device']
                                     
-                                    # Convert quaternion to Euler angles for VIFT compatibility
-                                    rx, ry, rz = quaternion_to_euler(qx, qy, qz, qw)
+                                    # Ensure quaternion is normalized
+                                    q_norm = np.sqrt(qx*qx + qy*qy + qz*qz + qw*qw)
+                                    if q_norm > 0:
+                                        qx, qy, qz, qw = qx/q_norm, qy/q_norm, qz/q_norm, qw/q_norm
                                     
-                                    # Store in VIFT 6-DoF format: [rx, ry, rz, tx, ty, tz]
-                                    pose_6dof = [rx, ry, rz, tx, ty, tz]
-                                    poses.append({'timestamp':ts, 'pose_6dof': pose_6dof, 'translation':[tx,ty,tz],'rotation_euler':[rx,ry,rz]})
+                                    # Store pose with quaternion in XYZW format
+                                    poses.append({
+                                        'timestamp': ts, 
+                                        'translation': [tx, ty, tz],
+                                        'quaternion': [qx, qy, qz, qw]  # XYZW format
+                                    })
                             except json.JSONDecodeError:
                                 continue
                     shutil.rmtree(temp_sum, ignore_errors=True)
@@ -204,7 +176,7 @@ class AriaToVIFTProcessor:
                 csv_file = csv_files[0]
                 print(f"📖 Using: {csv_file.name}")
                 
-                poses = self._parse_trajectory_csv(csv_file)
+                poses = self._parse_trajectory_csv_quaternion(csv_file)
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 
                 if poses:
@@ -219,8 +191,8 @@ class AriaToVIFTProcessor:
                 
         return None
     
-    def _parse_trajectory_csv(self, csv_file: Path) -> List[Dict]:
-        """Parse SLAM trajectory CSV into pose list"""
+    def _parse_trajectory_csv_quaternion(self, csv_file: Path) -> List[Dict]:
+        """Parse SLAM trajectory CSV keeping quaternions"""
         poses = []
         
         with open(csv_file, 'r') as f:
@@ -244,24 +216,16 @@ class AriaToVIFTProcessor:
                         tx, ty, tz = float(row[tx_col]), float(row[ty_col]), float(row[tz_col])
                         qx, qy, qz, qw = float(row[qx_col]), float(row[qy_col]), float(row[qz_col]), float(row[qw_col])
                         
-                        # Ensure quaternion is normalized and qw >= 0
+                        # Ensure quaternion is normalized
                         q_norm = np.sqrt(qx*qx + qy*qy + qz*qz + qw*qw)
                         if q_norm > 0:
                             qx, qy, qz, qw = qx/q_norm, qy/q_norm, qz/q_norm, qw/q_norm
-                            if qw < 0:  # Ensure positive w for consistency
-                                qx, qy, qz, qw = -qx, -qy, -qz, -qw
                         
-                        # Convert quaternion to Euler angles for VIFT compatibility
-                        rx, ry, rz = quaternion_to_euler(qx, qy, qz, qw)
-                        
-                        # Store in VIFT 6-DoF format: [rx, ry, rz, tx, ty, tz]
-                        pose_6dof = [rx, ry, rz, tx, ty, tz]
-                        
+                        # Store pose with quaternion in XYZW format
                         poses.append({
                             'timestamp': timestamp,
-                            'pose_6dof': pose_6dof,
                             'translation': [tx, ty, tz],
-                            'rotation_euler': [rx, ry, rz]
+                            'quaternion': [qx, qy, qz, qw]  # XYZW format
                         })
                 except (ValueError, IndexError):
                     continue
@@ -325,7 +289,7 @@ class AriaToVIFTProcessor:
         return None
     
     def generate_imu_data(self, poses: List[Dict], num_frames: int) -> torch.Tensor:
-        """Generate realistic IMU data from SLAM trajectory"""
+        """Generate realistic IMU data from SLAM trajectory using quaternions"""
         print(f"📊 Generating IMU data from trajectory")
         
         imu_frequency = 1000.0  # 1kHz IMU
@@ -353,10 +317,23 @@ class AriaToVIFTProcessor:
             acceleration = velocity / dt if dt > 0 else np.zeros(3)
             acceleration[2] += 9.81  # Add gravity in Z direction
             
-            # Simple angular velocity estimation using Euler angles
-            euler1 = np.array(current_pose['rotation_euler'])
-            euler2 = np.array(next_pose['rotation_euler'])
-            angular_velocity = (euler2 - euler1) / dt if dt > 0 else np.zeros(3)
+            # Angular velocity from quaternions
+            q1 = np.array(current_pose['quaternion'])  # [qx, qy, qz, qw]
+            q2 = np.array(next_pose['quaternion'])
+            
+            # Compute relative rotation: q_rel = q1^(-1) * q2
+            q1_inv = np.array([-q1[0], -q1[1], -q1[2], q1[3]]) / np.dot(q1, q1)
+            
+            # Quaternion multiplication
+            q_rel = np.array([
+                q1_inv[3]*q2[0] + q1_inv[0]*q2[3] + q1_inv[1]*q2[2] - q1_inv[2]*q2[1],
+                q1_inv[3]*q2[1] - q1_inv[0]*q2[2] + q1_inv[1]*q2[3] + q1_inv[2]*q2[0],
+                q1_inv[3]*q2[2] + q1_inv[0]*q2[1] - q1_inv[1]*q2[0] + q1_inv[2]*q2[3],
+                q1_inv[3]*q2[3] - q1_inv[0]*q2[0] - q1_inv[1]*q2[1] - q1_inv[2]*q2[2]
+            ])
+            
+            # Convert to angular velocity (simplified)
+            angular_velocity = 2.0 * np.array([q_rel[0], q_rel[1], q_rel[2]]) / dt
             
             # Create IMU sequence for this frame
             frame_imu = []
@@ -366,13 +343,13 @@ class AriaToVIFTProcessor:
                 gyro_noise = np.random.normal(0, 0.05, 3)
                 
                 imu_sample = torch.tensor([
-                    acceleration[0] + accel_noise[0],
-                    acceleration[1] + accel_noise[1],
-                    acceleration[2] + accel_noise[2],
                     angular_velocity[0] + gyro_noise[0],
                     angular_velocity[1] + gyro_noise[1],
-                    angular_velocity[2] + gyro_noise[2]
-                ], dtype=torch.float32, device=self.device)
+                    angular_velocity[2] + gyro_noise[2],
+                    acceleration[0] + accel_noise[0],
+                    acceleration[1] + accel_noise[1],
+                    acceleration[2] + accel_noise[2]
+                ], device=self.device)
                 
                 frame_imu.append(imu_sample)
             
@@ -382,7 +359,7 @@ class AriaToVIFTProcessor:
         return torch.stack(imu_data)  # Shape: [T, samples_per_frame, 6]
     
     def process_sequence(self, sequence_path: Path, sequence_id: str) -> bool:
-        """Process a single AriaEveryday sequence"""
+        """Process a single AriaEveryday sequence with quaternions"""
         print(f"\n🔄 Processing sequence: {sequence_path.name}")
         
         # Extract SLAM trajectory
@@ -413,8 +390,8 @@ class AriaToVIFTProcessor:
         seq_output_dir = self.output_dir / sequence_id
         seq_output_dir.mkdir(exist_ok=True)
         
-        # Save poses as JSON
-        poses_file = seq_output_dir / "poses.json"
+        # Save poses as JSON with quaternions
+        poses_file = seq_output_dir / "poses_quaternion.json"
         with open(poses_file, 'w') as f:
             json.dump(poses, f, indent=2, default=str)
         
@@ -429,7 +406,8 @@ class AriaToVIFTProcessor:
             'num_frames': actual_frames,
             'visual_shape': list(visual_data.shape),
             'imu_shape': list(imu_data.shape),
-            'slam_trajectory_type': 'mps_slam'
+            'slam_trajectory_type': 'mps_slam',
+            'rotation_format': 'quaternion_xyzw'
         }
         
         with open(seq_output_dir / "metadata.json", 'w') as f:
@@ -447,7 +425,7 @@ class AriaToVIFTProcessor:
             folder_offset: Offset for output folder numbering (default: 0)
                           e.g., offset=117 means first sequence will be saved as '117'
         """
-        print(f"🎯 Processing AriaEveryday Dataset")
+        print(f"🎯 Processing AriaEveryday Dataset (Quaternion Version)")
         print(f"📁 Input: {self.aria_data_dir}")
         print(f"📁 Output: {self.output_dir}")
         
@@ -484,12 +462,13 @@ class AriaToVIFTProcessor:
         
         # Save dataset summary
         summary = {
-            'dataset_name': 'AriaEveryday_VIFT',
+            'dataset_name': 'AriaEveryday_VIFT_Quaternion',
             'total_sequences': len(sequences),
             'processed_sequences': processed_count,
             'start_index': start_index,
             'max_sequences': max_sequences,
             'folder_offset': folder_offset,
+            'rotation_format': 'quaternion_xyzw',
             'sequences': processed_sequences
         }
         
@@ -504,7 +483,7 @@ class AriaToVIFTProcessor:
         return summary
 
 def main():
-    parser = argparse.ArgumentParser(description='Process AriaEveryday dataset for VIFT training')
+    parser = argparse.ArgumentParser(description='Process AriaEveryday dataset for VIFT training (Quaternion version)')
     parser.add_argument('--input-dir', type=str, 
                       default='data/aria_everyday_subset',
                       help='Path to AriaEveryday dataset')
@@ -565,7 +544,7 @@ def main():
     
     print(f"\n🚀 Next steps:")
     print(f"   1. Create sequence lists for training/testing")
-    print(f"   2. Run latent caching: python data/latent_caching_aria.py")
+    print(f"   2. Run latent caching: python generate_all_pretrained_latents_quaternion.py")
     print(f"   3. Train VIFT: python src/train.py data=aria_vio")
     
     return 0

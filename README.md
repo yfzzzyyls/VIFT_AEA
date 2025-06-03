@@ -12,7 +12,7 @@
   </a>
 </p>
 
-A state-of-the-art Visual-Inertial Odometry (VIO) system achieving **0.01° rotation error** and **0.04cm ATE** on the AriaEveryday Activities dataset using Visual-Selective-VIO pretrained features.
+A state-of-the-art Visual-Inertial Odometry (VIO) system achieving **0.01° rotation error** and **0.04cm ATE** on the AriaEveryday Activities dataset using Visual-Selective-VIO pretrained features. Now with improved quaternion-based pipeline for better numerical stability.
 
 > **Based on**: Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry
 > Yunus Bilge Kurt, Ahmet Akman, Aydın Alatan
@@ -71,29 +71,63 @@ python scripts/download_aria_dataset.py --num-sequences 10
 
 ### 2. Process Raw Data to VIFT Format
 
-Convert AriaEveryday sequences to VIFT-compatible format:
+Convert AriaEveryday sequences to VIFT-compatible format. **We now use quaternions throughout the pipeline** to avoid numerical errors from Euler angle conversions:
 
 ```bash
-# Process all downloaded sequences
+# Standard processing (single instance)
 python scripts/process_aria_to_vift.py \
     --input-dir data/aria_everyday \
     --output-dir data/aria_processed \
     --max-frames 500
 
-# Process specific sequences with custom numbering
+# FASTEST: Run multiple instances in parallel (4x speedup)
+# Open 4 terminal windows and run these commands simultaneously:
+
+# Terminal 1
 python scripts/process_aria_to_vift.py \
     --input-dir data/aria_everyday \
     --output-dir data/aria_processed \
     --start-index 0 \
-    --max-sequences 50 \
+    --max-sequences 36 \
     --folder-offset 0
+
+# Terminal 2
+python scripts/process_aria_to_vift.py \
+    --input-dir data/aria_everyday \
+    --output-dir data/aria_processed \
+    --start-index 36 \
+    --max-sequences 36 \
+    --folder-offset 36
+
+# Terminal 3
+python scripts/process_aria_to_vift.py \
+    --input-dir data/aria_everyday \
+    --output-dir data/aria_processed \
+    --start-index 72 \
+    --max-sequences 36 \
+    --folder-offset 72
+
+# Terminal 4
+python scripts/process_aria_to_vift.py \
+    --input-dir data/aria_everyday \
+    --output-dir data/aria_processed \
+    --start-index 108 \
+    --max-sequences 35 \
+    --folder-offset 108
 ```
+
+**Performance Notes:**
+- **Single instance**: ~60 seconds per sequence (2.6 hours for 143 sequences)
+- **4 parallel instances**: ~40 minutes total (4x speedup)
+- **Bottleneck**: File I/O and video decoding (not compute-bound)
+- **GPU Note**: GPUs don't help for this preprocessing task - save them for training!
 
 The script extracts:
 
-- SLAM trajectories from MPS results
+- SLAM trajectories from MPS results (maintains quaternions in XYZW format)
 - RGB frames from preview videos
 - Generates IMU data from trajectory
+- **NEW**: Stores rotations as quaternions without Euler conversion
 
 ### 3. Download Pretrained Visual-Selective-VIO Model
 
@@ -110,7 +144,10 @@ This downloads the 185MB pretrained model to `pretrained_models/`.
 Generate pretrained visual features and prepare training data:
 
 ```bash
-python generate_all_pretrained_latents_fixed.py
+# For new quaternion-based data (RECOMMENDED)
+python generate_all_pretrained_latents_fixed.py \
+    --processed-dir data/aria_processed \
+    --output-dir aria_latent_data_pretrained
 ```
 
 This script:
@@ -118,6 +155,7 @@ This script:
 - Extracts 768-dim features (512 visual + 256 IMU)
 - Computes relative poses between frames
 - Splits data into train/val/test sets (70/10/20)
+- **NEW**: Processes quaternions directly without Euler conversion
 
 ### Step 2: Train the Model
 
@@ -189,6 +227,25 @@ Visualize the trajectory:
 ```bash
 python visualize_trajectory.py --results inference_results_seq_114_stride_1_mode_independent.npz
 ```
+
+## 🔄 Quaternion vs Euler Angle Pipeline
+
+The updated pipeline now uses quaternions throughout to improve numerical stability:
+
+### Why Quaternions?
+
+The original pipeline converted: **Quaternions → Euler Angles → Quaternions**, which introduced:
+- Numerical errors from repeated conversions
+- Potential gimbal lock issues
+- Loss of rotation continuity
+- Ambiguity in angle representations (e.g., 180° vs -180°)
+
+### Benefits of Quaternion-Only Pipeline
+
+- **Improved numerical accuracy**: No conversion errors
+- **Smooth interpolation**: Quaternions provide continuous rotation representation
+- **No gimbal lock**: Avoids singularities in rotation representation
+- **Better optimization**: Smoother loss landscape for neural network training
 
 ## 🏆 Results
 
