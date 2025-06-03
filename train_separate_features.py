@@ -31,8 +31,9 @@ console = Console()
 class SeparateFeatureDataset(Dataset):
     """Dataset that loads separate visual and IMU features"""
     
-    def __init__(self, data_dir: str):
+    def __init__(self, data_dir: str, augment: bool = False):
         self.data_dir = data_dir
+        self.augment = augment
         
         # Find all samples
         self.samples = []
@@ -70,6 +71,22 @@ class SeparateFeatureDataset(Dataset):
         poses = np.load(os.path.join(self.data_dir, f"{sample_id}_gt.npy"))
         poses = torch.from_numpy(poses).float()
         
+        # Apply augmentation during training
+        if self.augment:
+            # Add noise to features
+            visual_noise = torch.randn_like(visual_features) * 0.01
+            imu_noise = torch.randn_like(imu_features) * 0.01
+            visual_features = visual_features + visual_noise
+            imu_features = imu_features + imu_noise
+            
+            # Add small perturbations to poses (to teach robustness)
+            trans_noise = torch.randn(poses.shape[0], 3) * 0.001  # 0.1mm noise
+            rot_noise = torch.randn(poses.shape[0], 4) * 0.001    # Small rotation noise
+            poses[:, :3] = poses[:, :3] + trans_noise
+            poses[:, 3:] = poses[:, 3:] + rot_noise
+            # Renormalize quaternions
+            poses[:, 3:] = poses[:, 3:] / torch.norm(poses[:, 3:], dim=-1, keepdim=True)
+        
         return visual_features, imu_features, poses
 
 
@@ -93,24 +110,24 @@ def train_with_separate_features(
     # Set seed
     L.seed_everything(42, workers=True)
     
-    # Create model
+    # Create model with reduced capacity to prevent overfitting
     model = MultiHeadVIOModelSeparate(
         visual_dim=512,
         imu_dim=256,
-        hidden_dim=256,
-        num_shared_layers=4,
-        num_specialized_layers=3,
-        num_heads=8,
-        dropout=0.1,
+        hidden_dim=128,  # Reduced from 256
+        num_shared_layers=2,  # Reduced from 4
+        num_specialized_layers=2,  # Reduced from 3
+        num_heads=4,  # Reduced from 8
+        dropout=0.2,  # Increased from 0.1
         learning_rate=learning_rate,
-        weight_decay=1e-5,
+        weight_decay=1e-4,  # Increased from 1e-5
         sequence_length=10
     )
     
     # Create datasets
     console.print("\n[bold]Loading separate visual and IMU features...[/bold]")
-    train_dataset = SeparateFeatureDataset(f"{data_dir}/train")
-    val_dataset = SeparateFeatureDataset(f"{data_dir}/val")
+    train_dataset = SeparateFeatureDataset(f"{data_dir}/train", augment=True)
+    val_dataset = SeparateFeatureDataset(f"{data_dir}/val", augment=False)
     
     # Create dataloaders
     def collate_fn(batch):
@@ -180,9 +197,10 @@ def train_with_separate_features(
         ),
         EarlyStopping(
             monitor="val/total_loss",
-            patience=10,
+            patience=20,  # Increased patience
             mode="min",
-            verbose=True
+            verbose=True,
+            min_delta=0.0001  # Minimum change to qualify as improvement
         ),
         LearningRateMonitor(logging_interval='step'),
         RichProgressBar(refresh_rate=10)
@@ -238,7 +256,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train with separate visual and IMU features')
     parser.add_argument('--data_dir', type=str, default='aria_latent_data_pretrained',
                        help='Data directory')
-    parser.add_argument('--lr', type=float, default=5e-4,
+    parser.add_argument('--lr', type=float, default=1e-3,
                        help='Learning rate')
     parser.add_argument('--batch_size', type=int, default=32,
                        help='Batch size')

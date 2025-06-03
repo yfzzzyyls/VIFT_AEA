@@ -529,8 +529,9 @@ def sliding_window_inference_batched(
             encoder_copy.eval()
             encoder_models.append(encoder_copy)
             
-            vio_copy = type(vio_model)()
-            vio_copy.load_state_dict(vio_model.state_dict())
+            # Create a copy by deep copying the model
+            import copy
+            vio_copy = copy.deepcopy(vio_model)
             vio_copy = vio_copy.to(device_gpu)
             vio_copy.eval()
             vio_models.append(vio_copy)
@@ -912,6 +913,11 @@ def main():
     
     if is_separate_model:
         console.print("Detected separate visual/IMU features model")
+        # Extract hyperparameters from checkpoint
+        hparams = checkpoint.get('hyper_parameters', {})
+        console.print(f"Model config: hidden_dim={hparams.get('hidden_dim', 256)}, " +
+                     f"num_shared_layers={hparams.get('num_shared_layers', 4)}, " +
+                     f"num_specialized_layers={hparams.get('num_specialized_layers', 3)}")
         vio_model = MultiHeadVIOModelSeparate.load_from_checkpoint(args.checkpoint)
     else:
         console.print("Detected concatenated features model")

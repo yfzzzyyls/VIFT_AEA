@@ -117,6 +117,7 @@ python scripts/process_aria_to_vift.py \
 ```
 
 **Performance Notes:**
+
 - **Single instance**: ~60 seconds per sequence (2.6 hours for 143 sequences)
 - **4 parallel instances**: ~40 minutes total (4x speedup)
 - **Bottleneck**: File I/O and video decoding (not compute-bound)
@@ -144,7 +145,6 @@ This downloads the 185MB pretrained model to `pretrained_models/`.
 Generate pretrained visual features and prepare training data:
 
 ```bash
-# For new quaternion-based data (RECOMMENDED)
 python generate_all_pretrained_latents_fixed.py \
     --processed-dir data/aria_processed \
     --output-dir aria_latent_data_pretrained
@@ -154,20 +154,14 @@ This script:
 
 - Extracts separate visual (512-dim) and IMU (256-dim) features
 - Computes relative poses between frames (10 transitions from 11 frames)
-- Splits data into train/val sets (70/10 split)
-- **Skips test set by default** (use real-time encoding during inference)
-- **NEW**: Processes quaternions directly without Euler conversion
+- Splits data into train/val sets (70/10 split) - rest 20% for test
 
 ### Step 2: Train the Model
 
-Train the model with separate visual and IMU features:
+Train the model with improved architecture and loss function:
 
 ```bash
-# Train with separate features (RECOMMENDED)
-python train_separate_features.py \
-    --data_dir aria_latent_data_pretrained \
-    --batch_size 32 \
-    --epochs 100
+python train_improved.py
 
 # Monitor training progress
 tensorboard --logdir logs/
@@ -177,11 +171,12 @@ Training configuration:
 
 - **Epochs**: 100
 - **Batch Size**: 32
-- **Learning Rate**: 5e-4 with cosine annealing
-- **Loss**: MSE for translation + Geodesic for rotation
-- **Architecture**: Multi-modal transformer with separate visual/IMU processing
+- **Learning Rate**: 1e-3 with OneCycleLR schedule
+- **Loss**: SmoothL1 (Huber) with log-scale for numerical stability
+- **Architecture**: Lightweight multi-modal transformer (1.2M params)
 - **Features**: 512-dim visual + 256-dim IMU (actual encoded features)
 - **Output**: 10 transition predictions from 11 input frames
+- **Improvements**: Data augmentation, regularization, no bias toward zero motion
 
 ### Step 3: Monitor Training
 
@@ -199,17 +194,17 @@ Evaluate the trained model on full sequences with sliding window inference:
 # Evaluate on a single test sequence
 python inference_full_sequence.py \
     --sequence-id 114 \
-    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt
+    --checkpoint logs/checkpoints_improved/best_model.ckpt
 
 # Evaluate on ALL test sequences (recommended)
 python inference_full_sequence.py \
     --sequence-id all \
-    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt
+    --checkpoint logs/checkpoints_improved/best_model.ckpt
 
 # Mode 2: History-based (temporal smoothing)
 python inference_full_sequence.py \
     --sequence-id all \
-    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt \
+    --checkpoint logs/checkpoints_improved/best_model.ckpt \
     --mode history
 
 # Custom settings for different setups
@@ -242,6 +237,7 @@ The updated pipeline now uses quaternions throughout to improve numerical stabil
 ### Why Quaternions?
 
 The original pipeline converted: **Quaternions → Euler Angles → Quaternions**, which introduced:
+
 - Numerical errors from repeated conversions
 - Potential gimbal lock issues
 - Loss of rotation continuity
@@ -260,15 +256,16 @@ Our implementation achieves excellent frame-to-frame accuracy on the full test s
 
 ### Averaged Performance Across All Test Sequences
 
-| Metric                                    | Mean ± Std         | AR/VR Target | Status |
-| ----------------------------------------- | ------------------ | ------------ | ------ |
-| **ATE (Absolute Trajectory Error)**       | 2.14 ± 1.36 cm    | <1 cm        | ⚠️     |
-| **RPE-1 Translation (frame-to-frame)**    | 0.0096 ± 0.0042 cm | <0.1 cm      | ✅     |
-| **RPE-1 Rotation (frame-to-frame)**       | 0.0374 ± 0.0105°  | <0.1°       | ✅     |
-| **RPE-5 Translation (167ms window)**      | 0.0486 ± 0.0208 cm | <0.5 cm      | ✅     |
-| **RPE-5 Rotation (167ms window)**         | 0.1177 ± 0.0646°  | <0.5°       | ✅     |
+| Metric                                       | Mean ± Std         | AR/VR Target | Status |
+| -------------------------------------------- | ------------------- | ------------ | ------ |
+| **ATE (Absolute Trajectory Error)**    | 2.14 ± 1.36 cm     | <1 cm        | ⚠️   |
+| **RPE-1 Translation (frame-to-frame)** | 0.0096 ± 0.0042 cm | <0.1 cm      | ✅     |
+| **RPE-1 Rotation (frame-to-frame)**    | 0.0374 ± 0.0105°  | <0.1°       | ✅     |
+| **RPE-5 Translation (167ms window)**   | 0.0486 ± 0.0208 cm | <0.5 cm      | ✅     |
+| **RPE-5 Rotation (167ms window)**      | 0.1177 ± 0.0646°  | <0.5°       | ✅     |
 
 ### Performance Distribution
+
 - **46% of sequences** (13/28) achieve ATE < 1cm
 - **Best sequence**: 0.445 cm ATE
 - **Median ATE**: 2.10 cm
@@ -284,6 +281,7 @@ Following standard VIO evaluation practices (as in ORB-SLAM, VINS-Mono papers):
 - **Absolute Rotation Error**: Total orientation drift accumulated from frame 0 to frame 500
 
 #### Why these specific intervals?
+
 - **1 frame (33ms)**: Tests immediate motion estimation quality, critical for smooth AR/VR rendering
 - **5 frames (167ms)**: Tests short-term consistency, roughly 1/6 second of motion
 - **Different timescales matter**: AR/VR requires excellent RPE-1, while mapping/navigation needs low ATE

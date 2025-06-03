@@ -310,8 +310,8 @@ class MultiHeadVIOModelSeparate(L.LightningModule):
             nn.Linear(hidden_dim, hidden_dim)
         )
         
-        # Loss function
-        self.arvr_loss = ARVRLossWrapper()
+        # Loss function with improved settings
+        self.arvr_loss = ARVRLossWrapper(use_log_scale=True, use_weighted_loss=False)
         
         # Metrics
         self.train_rot_mae = MeanAbsoluteError()
@@ -404,11 +404,21 @@ class MultiHeadVIOModelSeparate(L.LightningModule):
         
         total_loss = loss_dict.get('total_loss', sum(v for k, v in loss_dict.items() if k != 'total_loss'))
         
-        # Log losses
+        # Log losses with actual values (not just 0.0000)
         self.log('train/total_loss', total_loss, prog_bar=True)
         for key, value in loss_dict.items():
             if key != 'total_loss':
                 self.log(f'train/{key}', value)
+        
+        # Log gradient norms for debugging
+        if batch_idx % 100 == 0:  # Every 100 batches
+            total_norm = 0
+            for p in self.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.data.norm(2)
+                    total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** 0.5
+            self.log('train/grad_norm', total_norm)
         
         # Update metrics
         with torch.no_grad():
@@ -422,6 +432,13 @@ class MultiHeadVIOModelSeparate(L.LightningModule):
             
             self.log('train/rot_mae', self.train_rot_mae, prog_bar=True)
             self.log('train/trans_mae', self.train_trans_mae, prog_bar=True)
+            
+            # Log prediction statistics
+            if batch_idx % 100 == 0:
+                self.log('train/pred_trans_mean', pred_trans.abs().mean())
+                self.log('train/pred_trans_std', pred_trans.std())
+                self.log('train/target_trans_mean', target_trans.abs().mean())
+                self.log('train/target_trans_std', target_trans.std())
         
         return total_loss
     
@@ -457,22 +474,26 @@ class MultiHeadVIOModelSeparate(L.LightningModule):
             self.parameters(),
             lr=self.hparams.learning_rate,
             weight_decay=self.hparams.weight_decay,
-            betas=(0.9, 0.999)
+            betas=(0.9, 0.999),
+            eps=1e-7  # Slightly higher epsilon for stability
         )
         
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        # Use OneCycleLR for better training dynamics
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer,
-            T_0=10,
-            T_mult=2,
-            eta_min=1e-6
+            max_lr=self.hparams.learning_rate * 10,  # Peak at 10x base LR
+            total_steps=self.trainer.estimated_stepping_batches,
+            pct_start=0.3,  # 30% of training for warmup
+            anneal_strategy='cos',
+            div_factor=10,  # Start at LR/10
+            final_div_factor=100  # End at LR/100
         )
         
         return {
             'optimizer': optimizer,
             'lr_scheduler': {
                 'scheduler': scheduler,
-                'monitor': 'val/total_loss',
-                'interval': 'epoch',
+                'interval': 'step',  # Update every step, not epoch
                 'frequency': 1
             }
         }
