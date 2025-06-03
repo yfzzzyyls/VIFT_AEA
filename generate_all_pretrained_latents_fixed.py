@@ -241,18 +241,12 @@ def process_sequence(seq_dir, model, device, window_size=11, stride=1, pose_scal
             v_feat = v_feat.squeeze(0).cpu()  # [10, 512]
             i_feat = i_feat.squeeze(0).cpu()  # [10, 256]
         
-        # Note: The model uses downsampled IMU (110 samples: 10 per frame × 11 frames)
-        # The averaged IMU is only saved for reference, not used in training
-        # We save 10 averages to match the 10 transition features
-        window_imu_avg = window_imu[1:].mean(dim=1)  # [10, 6] - skip first frame
-        
         # Store visual and IMU features separately
         features_list.append((v_feat, i_feat))
         # Store poses for transitions (skip first pose as it's always origin)
         poses_list.append(torch.from_numpy(window_relative_poses[1:]))  # [10, 7]
-        imus_list.append(window_imu_avg)  # Only saved for reference, not used in model
     
-    return features_list, poses_list, imus_list
+    return features_list, poses_list
 
 
 def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100.0, stride=1, split_ratios=(0.7, 0.1, 0.2), skip_test=True):
@@ -345,13 +339,13 @@ def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100
         for seq_dir in tqdm(sequences, desc=f"{split_name} sequences"):
             try:
                 # Process sequence with relative poses
-                features_list, poses_list, imus_list = process_sequence(
+                features_list, poses_list = process_sequence(
                     seq_dir, model, device, 
                     window_size=11, stride=stride, pose_scale=pose_scale
                 )
                 
                 # Save each window as a sample
-                for (v_feat, i_feat), poses, imus in zip(features_list, poses_list, imus_list):
+                for (v_feat, i_feat), poses in zip(features_list, poses_list):
                     sample_id = sample_counter[split_name]
                     
                     # Save visual and IMU features separately
@@ -360,13 +354,6 @@ def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100
                     
                     # Save ground truth poses (now relative poses for transitions)
                     np.save(os.path.join(split_dir, f"{sample_id}_gt.npy"), poses.numpy())
-                    
-                    # Save IMU data
-                    np.save(os.path.join(split_dir, f"{sample_id}_w.npy"), imus.numpy())
-                    
-                    # Save rotation component separately (for compatibility)
-                    rotations = poses[:, 3:7].numpy()  # quaternions
-                    np.save(os.path.join(split_dir, f"{sample_id}_rot.npy"), rotations)
                     
                     # Collect statistics (all poses are now transitions, no identity)
                     for i in range(len(poses)):
