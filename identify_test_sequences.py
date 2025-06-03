@@ -1,103 +1,114 @@
 #!/usr/bin/env python3
 """
-Identify which sequences from aria_processed are in the test split.
+Identify and save test sequence indices for consistent evaluation
 """
 
 import os
 import json
 from pathlib import Path
-import pickle
 
 
-def identify_test_sequences():
-    """Map test samples back to original sequences."""
+def identify_test_sequences(processed_dir, output_dir, split_ratios=(0.7, 0.1, 0.2)):
+    """
+    Identify which sequences belong to train/val/test splits and save the information
+    """
+    # Get all sequence directories
+    seq_dirs = sorted([d for d in Path(processed_dir).iterdir() 
+                      if d.is_dir() and d.name.isdigit()])
     
-    # Load metadata to understand the split
-    metadata_path = "aria_latent_data_pretrained/metadata.pkl"
-    if os.path.exists(metadata_path):
-        with open(metadata_path, 'rb') as f:
-            metadata = pickle.load(f)
-        print("Metadata loaded:")
-        print(f"  Sample counts: {metadata['sample_counts']}")
+    num_sequences = len(seq_dirs)
+    print(f"Found {num_sequences} sequences")
     
-    # Check processed sequences
-    processed_dir = Path("data/aria_processed")
-    if not processed_dir.exists():
-        print(f"Error: {processed_dir} not found!")
-        return
+    # Calculate split sizes
+    train_size = int(num_sequences * split_ratios[0])
+    val_size = int(num_sequences * split_ratios[1])
+    test_size = num_sequences - train_size - val_size
     
-    # Get all processed sequences
-    all_sequences = sorted([d for d in processed_dir.iterdir() if d.is_dir() and d.name.isdigit()])
-    print(f"\nTotal processed sequences: {len(all_sequences)}")
+    # Split sequences
+    train_indices = list(range(0, train_size))
+    val_indices = list(range(train_size, train_size + val_size))
+    test_indices = list(range(train_size + val_size, num_sequences))
     
-    # Load sequence names from metadata files
-    sequence_info = {}
-    for seq_dir in all_sequences:
-        metadata_file = seq_dir / "metadata.json"
-        if metadata_file.exists():
-            with open(metadata_file, 'r') as f:
-                meta = json.load(f)
-                sequence_info[seq_dir.name] = meta['sequence_name']
+    # Get sequence names
+    train_seqs = [seq_dirs[i].name for i in train_indices]
+    val_seqs = [seq_dirs[i].name for i in val_indices]
+    test_seqs = [seq_dirs[i].name for i in test_indices]
     
-    # Based on the split: 70/10/20 of 143 sequences
-    num_sequences = len(all_sequences)
-    if num_sequences != 143:
-        print(f"WARNING: Expected 143 sequences, found {num_sequences}")
+    print(f"\nSplit sizes:")
+    print(f"  Train: {len(train_seqs)} sequences ({train_indices[0]}-{train_indices[-1]})")
+    print(f"  Val: {len(val_seqs)} sequences ({val_indices[0]}-{val_indices[-1]})")
+    print(f"  Test: {len(test_seqs)} sequences ({test_indices[0]}-{test_indices[-1]})")
     
-    # Fixed split sizes based on 143 total sequences
-    train_size = 100  # 70% of 143 ≈ 100
-    val_size = 14     # 10% of 143 ≈ 14
-    test_size = 29    # 20% of 143 ≈ 29 (remaining)
-    
-    print(f"\nSplit sizes (70/10/20 of 143 sequences):")
-    print(f"  Train: {train_size} sequences (000-099)")
-    print(f"  Val: {val_size} sequences (100-113)")
-    print(f"  Test: {test_size} sequences (114-142)")
-    
-    # Identify test sequences
-    test_start_idx = train_size + val_size
-    test_sequences = all_sequences[test_start_idx:]
-    
-    print(f"\nTest sequences:")
-    for seq_dir in test_sequences:
-        seq_id = seq_dir.name
-        seq_name = sequence_info.get(seq_id, "Unknown")
-        
-        # Check if visual data exists
-        visual_path = seq_dir / "visual_data.pt"
-        poses_path = seq_dir / "poses.json"
-        
-        if visual_path.exists() and poses_path.exists():
-            # Get number of frames
-            import torch
-            visual_data = torch.load(visual_path)
-            num_frames = visual_data.shape[0]
-            
-            print(f"  Sequence {seq_id}: {seq_name}")
-            print(f"    - Frames: {num_frames}")
-            print(f"    - Path: {seq_dir}")
-        else:
-            print(f"  Sequence {seq_id}: Missing data files!")
-    
-    # Save mapping
-    test_mapping = {
-        "test_sequences": [
-            {
-                "id": seq.name,
-                "name": sequence_info.get(seq.name, "Unknown"),
-                "path": str(seq)
+    # Save split information
+    split_info = {
+        'total_sequences': num_sequences,
+        'split_ratios': split_ratios,
+        'splits': {
+            'train': {
+                'indices': train_indices,
+                'sequences': train_seqs,
+                'count': len(train_seqs)
+            },
+            'val': {
+                'indices': val_indices,
+                'sequences': val_seqs,
+                'count': len(val_seqs)
+            },
+            'test': {
+                'indices': test_indices,
+                'sequences': test_seqs,
+                'count': len(test_seqs)
             }
-            for seq in test_sequences
-        ]
+        }
     }
     
-    with open("test_sequences_mapping.json", 'w') as f:
-        json.dump(test_mapping, f, indent=2)
+    # Save to output directory
+    os.makedirs(output_dir, exist_ok=True)
+    split_file = os.path.join(output_dir, 'dataset_splits.json')
     
-    print(f"\nTest sequence mapping saved to test_sequences_mapping.json")
+    with open(split_file, 'w') as f:
+        json.dump(split_info, f, indent=2)
     
-    return test_sequences
+    print(f"\nSplit information saved to: {split_file}")
+    
+    # Also save just the test sequence list for easy access
+    test_file = os.path.join(output_dir, 'test_sequences.txt')
+    with open(test_file, 'w') as f:
+        f.write('\n'.join(test_seqs))
+    
+    print(f"Test sequence list saved to: {test_file}")
+    
+    # Print some test sequences as examples
+    print(f"\nExample test sequences:")
+    for i in range(min(5, len(test_seqs))):
+        print(f"  {test_seqs[i]}")
+    if len(test_seqs) > 5:
+        print(f"  ... and {len(test_seqs) - 5} more")
+    
+    return split_info
 
 
 if __name__ == "__main__":
-    identify_test_sequences()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Identify dataset splits')
+    parser.add_argument('--processed-dir', type=str, default='data/aria_processed',
+                        help='Directory with processed sequences')
+    parser.add_argument('--output-dir', type=str, default='aria_latent_data_pretrained',
+                        help='Output directory for split information')
+    parser.add_argument('--train-ratio', type=float, default=0.7,
+                        help='Training set ratio')
+    parser.add_argument('--val-ratio', type=float, default=0.1,
+                        help='Validation set ratio')
+    
+    args = parser.parse_args()
+    
+    # Calculate test ratio
+    test_ratio = 1.0 - args.train_ratio - args.val_ratio
+    split_ratios = (args.train_ratio, args.val_ratio, test_ratio)
+    
+    print(f"Dataset Split Identification")
+    print(f"{'='*40}")
+    print(f"Split ratios: Train={args.train_ratio}, Val={args.val_ratio}, Test={test_ratio:.1f}")
+    
+    identify_test_sequences(args.processed_dir, args.output_dir, split_ratios)

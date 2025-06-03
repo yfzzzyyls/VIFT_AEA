@@ -30,6 +30,7 @@ sys.path.append('src')
 
 from src.models.components.vsvio import Encoder
 from src.models.multihead_vio import MultiHeadVIOModel
+from src.models.multihead_vio_separate import MultiHeadVIOModelSeparate
 
 console = Console()
 
@@ -47,13 +48,18 @@ class WrapperModel(nn.Module):
             
         self.Feature_net = Encoder(Params())
         
-    def forward(self, imgs, imus):
+    def forward(self, imgs, imus, return_separate=False):
         # The model outputs 10 frames for 11 input frames
         v_feat, i_feat = self.Feature_net(imgs, imus)
-        # Pad to 11 frames by repeating the last frame
-        v_feat_padded = torch.cat([v_feat, v_feat[:, -1:, :]], dim=1)
-        i_feat_padded = torch.cat([i_feat, i_feat[:, -1:, :]], dim=1)
-        return torch.cat([v_feat_padded, i_feat_padded], dim=-1)
+        
+        if return_separate:
+            # Return separate features without padding (10 frames)
+            return v_feat, i_feat
+        else:
+            # Pad to 11 frames by repeating the last frame
+            v_feat_padded = torch.cat([v_feat, v_feat[:, -1:, :]], dim=1)
+            i_feat_padded = torch.cat([i_feat, i_feat[:, -1:, :]], dim=1)
+            return torch.cat([v_feat_padded, i_feat_padded], dim=-1)
 
 
 def load_pretrained_encoder(model_path):
@@ -155,11 +161,15 @@ def sliding_window_inference(
     console.print(f"\n[bold cyan]Processing sequence: {sequence_path.name}[/bold cyan]")
     
     # Load sequence data
-    visual_data = torch.load(sequence_path / "visual_data.pt")  # [N, 3, H, W]
-    imu_data = torch.load(sequence_path / "imu_data.pt")        # [N, 33, 6]
+    visual_data = torch.load(sequence_path / "visual_data.pt").float()  # [N, 3, H, W]
+    imu_data = torch.load(sequence_path / "imu_data.pt").float()        # [N, 33, 6]
     
-    # Load ground truth poses
-    with open(sequence_path / "poses.json", 'r') as f:
+    # Load ground truth poses - check for quaternion version first
+    poses_file = sequence_path / "poses_quaternion.json"
+    if not poses_file.exists():
+        poses_file = sequence_path / "poses.json"
+    
+    with open(poses_file, 'r') as f:
         poses_data = json.load(f)
     
     num_frames = visual_data.shape[0]
@@ -215,12 +225,18 @@ def sliding_window_inference(
         batch_visual = window_visual_normalized.unsqueeze(0).to(device)  # [1, 11, 3, 256, 512]
         batch_imu = window_imu_110.unsqueeze(0).to(device)              # [1, 110, 6]
         
+        # Check if using separate features model
+        is_separate_model = hasattr(vio_model, 'visual_projection')
+        
         # Generate features using encoder
         with torch.no_grad():
-            features = encoder_model(batch_visual, batch_imu)  # [1, 11, 768]
+            if is_separate_model:
+                v_feat, i_feat = encoder_model(batch_visual, batch_imu, return_separate=True)  # [1, 10, 512], [1, 10, 256]
+            else:
+                features = encoder_model(batch_visual, batch_imu, return_separate=False)  # [1, 11, 768]
         
-        if mode == 'history' and len(feature_history) > 0:
-            # Blend current features with history
+        if not is_separate_model and mode == 'history' and len(feature_history) > 0:
+            # Blend current features with history (only for concatenated model)
             # Use weighted average giving more weight to recent features
             blended_features = features.clone()
             
@@ -244,27 +260,51 @@ def sliding_window_inference(
             features = blended_features
         
         # Prepare batch for VIO model
-        batch = {
-            'images': features,
-            'imus': torch.zeros(1, 11, 6).to(device),  # Dummy
-            'poses': None  # Not needed for inference
-        }
+        if is_separate_model:
+            batch = {
+                'visual_features': v_feat,
+                'imu_features': i_feat,
+                'poses': None  # Not needed for inference
+            }
+        else:
+            batch = {
+                'images': features,
+                'imus': torch.zeros(1, 11, 6).to(device),  # Dummy
+                'poses': None  # Not needed for inference
+            }
         
         # Run VIO model
         with torch.no_grad():
             predictions = vio_model(batch)
-            # predictions['rotation']: [1, 11, 4]
-            # predictions['translation']: [1, 11, 3]
+            # For separate model: predictions['rotation']: [1, 10, 4], predictions['translation']: [1, 10, 3]
+            # For concat model: predictions['rotation']: [1, 11, 4], predictions['translation']: [1, 11, 3]
         
         # Extract predictions
-        pred_poses = torch.cat([
-            predictions['translation'][0],  # [11, 3]
-            predictions['rotation'][0]      # [11, 4]
-        ], dim=1).cpu().numpy()  # [11, 7]
+        if is_separate_model:
+            # Separate model outputs 10 predictions (transitions between 11 frames)
+            # We need to add the identity pose at the beginning
+            pred_rotation = predictions['rotation'][0].cpu().numpy()  # [10, 4]
+            pred_translation = predictions['translation'][0].cpu().numpy()  # [10, 3]
+            
+            # Add identity pose at the beginning
+            identity_pose = np.array([[0, 0, 0, 0, 0, 0, 1]])  # [x, y, z, qx, qy, qz, qw]
+            pred_poses = np.vstack([
+                identity_pose,
+                np.concatenate([pred_translation, pred_rotation], axis=1)
+            ])  # [11, 7]
+        else:
+            pred_poses = torch.cat([
+                predictions['translation'][0],  # [11, 3]
+                predictions['rotation'][0]      # [11, 4]
+            ], dim=1).cpu().numpy()  # [11, 7]
         
         if mode == 'history':
             # Update history buffers (keep on same device)
-            feature_history.append(features)  # Keep on GPU
+            if is_separate_model:
+                # For separate model, we don't support history mode yet
+                pass
+            else:
+                feature_history.append(features)  # Keep on GPU
             pose_history.append(pred_poses)
             
             # Keep only recent history
@@ -361,10 +401,20 @@ def sliding_window_inference(
     gt_absolute = []
     for pose in poses_data:
         t = pose['translation']
-        euler = pose['rotation_euler']
-        r = Rotation.from_euler('xyz', euler)
-        q = r.as_quat()  # [x, y, z, w]
-        gt_absolute.append([t[0], t[1], t[2], q[0], q[1], q[2], q[3]])
+        # Check if we have quaternion data directly
+        if 'quaternion' in pose:
+            # Already have quaternion in XYZW format
+            q = pose['quaternion']
+            gt_absolute.append([t[0], t[1], t[2], q[0], q[1], q[2], q[3]])
+        elif 'rotation_euler' in pose:
+            # Convert Euler to quaternion (backward compatibility)
+            euler = pose['rotation_euler']
+            r = Rotation.from_euler('xyz', euler)
+            q = r.as_quat()  # [x, y, z, w]
+            gt_absolute.append([t[0], t[1], t[2], q[0], q[1], q[2], q[3]])
+        else:
+            # No rotation data - use identity
+            gt_absolute.append([t[0], t[1], t[2], 0, 0, 0, 1])
     gt_absolute = np.array(gt_absolute)
     
     # Convert absolute GT to relative poses
@@ -440,11 +490,15 @@ def sliding_window_inference_batched(
     console.print(f"\n[bold cyan]Processing sequence: {sequence_path.name}[/bold cyan]")
     
     # Load sequence data
-    visual_data = torch.load(sequence_path / "visual_data.pt")  # [N, 3, H, W]
-    imu_data = torch.load(sequence_path / "imu_data.pt")        # [N, 33, 6]
+    visual_data = torch.load(sequence_path / "visual_data.pt").float()  # [N, 3, H, W]
+    imu_data = torch.load(sequence_path / "imu_data.pt").float()        # [N, 33, 6]
     
-    # Load ground truth poses
-    with open(sequence_path / "poses.json", 'r') as f:
+    # Load ground truth poses - check for quaternion version first
+    poses_file = sequence_path / "poses_quaternion.json"
+    if not poses_file.exists():
+        poses_file = sequence_path / "poses.json"
+    
+    with open(poses_file, 'r') as f:
         poses_data = json.load(f)
     
     num_frames = visual_data.shape[0]
@@ -540,18 +594,31 @@ def sliding_window_inference_batched(
                 
                 # Stack batch for this GPU
                 gpu_device = torch.device(f'cuda:{gpu_id}' if num_gpus > 1 else device)
-                batch_visual = torch.stack(all_windows_visual[gpu_batch_start:gpu_batch_end]).to(gpu_device)
-                batch_imu = torch.stack(all_windows_imu[gpu_batch_start:gpu_batch_end]).to(gpu_device)
+                batch_visual = torch.stack(all_windows_visual[gpu_batch_start:gpu_batch_end]).to(gpu_device).float()
+                batch_imu = torch.stack(all_windows_imu[gpu_batch_start:gpu_batch_end]).to(gpu_device).float()
+                
+                # Check if using separate features model
+                is_separate_model = hasattr(vio_models[gpu_id], 'visual_projection')
                 
                 # Generate features using encoder on this GPU
-                features = encoder_models[gpu_id](batch_visual, batch_imu)  # [B, 11, 768]
+                if is_separate_model:
+                    v_feat, i_feat = encoder_models[gpu_id](batch_visual, batch_imu, return_separate=True)  # [B, 10, 512], [B, 10, 256]
+                else:
+                    features = encoder_models[gpu_id](batch_visual, batch_imu, return_separate=False)  # [B, 11, 768]
                 
                 # Prepare batch for VIO model
-                batch = {
-                    'images': features,
-                    'imus': torch.zeros(features.shape[0], 11, 6).to(gpu_device),  # Dummy
-                    'poses': None  # Not needed for inference
-                }
+                if is_separate_model:
+                    batch = {
+                        'visual_features': v_feat,
+                        'imu_features': i_feat,
+                        'poses': None  # Not needed for inference
+                    }
+                else:
+                    batch = {
+                        'images': features,
+                        'imus': torch.zeros(features.shape[0], 11, 6).to(gpu_device),  # Dummy
+                        'poses': None  # Not needed for inference
+                    }
                 
                 # Run VIO model on this GPU
                 predictions = vio_models[gpu_id](batch)
@@ -564,10 +631,25 @@ def sliding_window_inference_batched(
                 
                 # Extract predictions for each window in this GPU's batch
                 for i in range(gpu_batch_size):
-                    pred_poses = torch.cat([
-                        predictions['translation'][i],  # [11, 3]
-                        predictions['rotation'][i]      # [11, 4]
-                    ], dim=1).cpu().numpy()  # [11, 7]
+                    # Check if using separate features model (check first GPU's model)
+                    is_separate_model = hasattr(vio_models[0], 'visual_projection')
+                    
+                    if is_separate_model:
+                        # Separate model outputs 10 predictions (transitions between 11 frames)
+                        pred_rotation = predictions['rotation'][i].cpu().numpy()  # [10, 4]
+                        pred_translation = predictions['translation'][i].cpu().numpy()  # [10, 3]
+                        
+                        # Add identity pose at the beginning
+                        identity_pose = np.array([[0, 0, 0, 0, 0, 0, 1]])  # [x, y, z, qx, qy, qz, qw]
+                        pred_poses = np.vstack([
+                            identity_pose,
+                            np.concatenate([pred_translation, pred_rotation], axis=1)
+                        ])  # [11, 7]
+                    else:
+                        pred_poses = torch.cat([
+                            predictions['translation'][i],  # [11, 3]
+                            predictions['rotation'][i]      # [11, 4]
+                        ], dim=1).cpu().numpy()  # [11, 7]
                     
                     start_idx = all_start_indices[gpu_batch_start + i]
                     window_predictions.append(pred_poses)
@@ -614,10 +696,20 @@ def sliding_window_inference_batched(
     gt_absolute = []
     for pose in poses_data:
         t = pose['translation']
-        euler = pose['rotation_euler']
-        r = Rotation.from_euler('xyz', euler)
-        q = r.as_quat()  # [x, y, z, w]
-        gt_absolute.append([t[0], t[1], t[2], q[0], q[1], q[2], q[3]])
+        # Check if we have quaternion data directly
+        if 'quaternion' in pose:
+            # Already have quaternion in XYZW format
+            q = pose['quaternion']
+            gt_absolute.append([t[0], t[1], t[2], q[0], q[1], q[2], q[3]])
+        elif 'rotation_euler' in pose:
+            # Convert Euler to quaternion (backward compatibility)
+            euler = pose['rotation_euler']
+            r = Rotation.from_euler('xyz', euler)
+            q = r.as_quat()  # [x, y, z, w]
+            gt_absolute.append([t[0], t[1], t[2], q[0], q[1], q[2], q[3]])
+        else:
+            # No rotation data - use identity
+            gt_absolute.append([t[0], t[1], t[2], 0, 0, 0, 1])
     gt_absolute = np.array(gt_absolute)
     
     # Convert absolute GT to relative poses
@@ -810,7 +902,20 @@ def main():
     # Load models
     console.print("\n[bold]Loading models...[/bold]")
     encoder_model = load_pretrained_encoder(args.encoder_path)
-    vio_model = MultiHeadVIOModel.load_from_checkpoint(args.checkpoint)
+    
+    # Load checkpoint to check model type
+    checkpoint = torch.load(args.checkpoint, map_location='cpu')
+    
+    # Check if this is a separate features model based on state dict keys
+    state_dict_keys = list(checkpoint['state_dict'].keys())
+    is_separate_model = any('visual_projection' in key for key in state_dict_keys)
+    
+    if is_separate_model:
+        console.print("Detected separate visual/IMU features model")
+        vio_model = MultiHeadVIOModelSeparate.load_from_checkpoint(args.checkpoint)
+    else:
+        console.print("Detected concatenated features model")
+        vio_model = MultiHeadVIOModel.load_from_checkpoint(args.checkpoint)
     
     # Determine which sequences to run
     if args.sequence_id.lower() == 'all':

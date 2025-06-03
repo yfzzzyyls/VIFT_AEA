@@ -152,17 +152,22 @@ python generate_all_pretrained_latents_fixed.py \
 
 This script:
 
-- Extracts 768-dim features (512 visual + 256 IMU)
-- Computes relative poses between frames
-- Splits data into train/val/test sets (70/10/20)
+- Extracts separate visual (512-dim) and IMU (256-dim) features
+- Computes relative poses between frames (10 transitions from 11 frames)
+- Splits data into train/val sets (70/10 split)
+- **Skips test set by default** (use real-time encoding during inference)
 - **NEW**: Processes quaternions directly without Euler conversion
 
 ### Step 2: Train the Model
 
-Train the relative pose prediction model:
+Train the model with separate visual and IMU features:
 
 ```bash
-python train_pretrained_relative.py
+# Train with separate features (RECOMMENDED)
+python train_separate_features.py \
+    --data_dir aria_latent_data_pretrained \
+    --batch_size 32 \
+    --epochs 100
 
 # Monitor training progress
 tensorboard --logdir logs/
@@ -170,11 +175,13 @@ tensorboard --logdir logs/
 
 Training configuration:
 
-- **Epochs**: 50
+- **Epochs**: 100
 - **Batch Size**: 32
 - **Learning Rate**: 5e-4 with cosine annealing
 - **Loss**: MSE for translation + Geodesic for rotation
-- **Architecture**: Shared MLP with separate pose heads
+- **Architecture**: Multi-modal transformer with separate visual/IMU processing
+- **Features**: 512-dim visual + 256-dim IMU (actual encoded features)
+- **Output**: 10 transition predictions from 11 input frames
 
 ### Step 3: Monitor Training
 

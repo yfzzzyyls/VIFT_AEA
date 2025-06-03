@@ -25,7 +25,7 @@ from scipy.spatial.transform import Rotation
 # Add src to path
 sys.path.append('src')
 
-from src.models.multihead_vio import MultiHeadVIOModel
+from src.models.multihead_vio_separate import MultiHeadVIOModelSeparate
 
 console = Console()
 
@@ -132,29 +132,20 @@ class RelativePoseDataset(Dataset):
     def __getitem__(self, idx):
         sample_id = self.samples[idx]
         
-        # Load features
-        features = np.load(os.path.join(self.data_dir, f"{sample_id}.npy"))
-        features = torch.from_numpy(features).float()  # [11, 768]
+        # Load separate visual and IMU features
+        visual_path = os.path.join(self.data_dir, f"{sample_id}_visual.npy")
+        imu_path = os.path.join(self.data_dir, f"{sample_id}_imu.npy")
         
-        # Load ground truth poses (already in relative format if using fixed data)
+        visual_features = np.load(visual_path)  # [10, 512]
+        imu_features = np.load(imu_path)        # [10, 256]
+        visual_features = torch.from_numpy(visual_features).float()
+        imu_features = torch.from_numpy(imu_features).float()
+        
+        # Load ground truth poses
         relative_poses = np.load(os.path.join(self.data_dir, f"{sample_id}_gt.npy"))
-        
-        # Check if we need to convert (old data) or if already relative (fixed data)
-        # If first pose is not at origin, it's absolute poses that need conversion
-        if np.linalg.norm(relative_poses[0, :3]) > 1e-6 or np.linalg.norm(relative_poses[0, 3:] - [0, 0, 0, 1]) > 1e-6:
-            # Old format - convert to relative
-            relative_poses = convert_absolute_to_relative(relative_poses)
-            # Scale translation from meters to centimeters
-            relative_poses[:, :3] *= self.pose_scale
-        # else: already in relative format with correct scale
-        
-        # Convert to tensor
         relative_poses = torch.from_numpy(relative_poses).float()
         
-        # Create IMU placeholder
-        imus = torch.zeros(11, 6)
-        
-        return features, imus, relative_poses
+        return visual_features, imu_features, relative_poses
 
 
 class FirstBatchLogger(Callback):
@@ -164,20 +155,16 @@ class FirstBatchLogger(Callback):
         if trainer.current_epoch == 0 and batch_idx == 0:
             console.print("\n[bold cyan]First Batch Analysis:[/bold cyan]")
             console.print(f"  Batch keys: {batch.keys()}")
-            console.print(f"  Images shape: {batch['images'].shape}")
+            console.print(f"  Visual features shape: {batch['visual_features'].shape}")
+            console.print(f"  IMU features shape: {batch['imu_features'].shape}")
             console.print(f"  Poses shape: {batch['poses'].shape}")
             
             # Check pose statistics
             poses = batch['poses']
-            console.print(f"\n  Pose statistics:")
-            console.print(f"    First frame (should be origin):")
-            console.print(f"      Translation: {poses[0, 0, :3].cpu().numpy()}")
-            console.print(f"      Rotation: {poses[0, 0, 3:].cpu().numpy()}")
-            
-            console.print(f"\n    Frame-to-frame translations:")
-            for i in range(1, min(4, poses.shape[1])):
-                trans = poses[0, i, :3].cpu().numpy()
-                console.print(f"      Frame {i}: {trans} (norm: {np.linalg.norm(trans):.4f} cm)")
+            console.print(f"\n  Pose statistics (all transitions):")
+            console.print(f"    Transition 0: Translation norm = {torch.norm(poses[0, 0, :3]).item():.4f} cm")
+            console.print(f"    Transition 1: Translation norm = {torch.norm(poses[0, 1, :3]).item():.4f} cm")
+            console.print(f"    Transition 2: Translation norm = {torch.norm(poses[0, 2, :3]).item():.4f} cm")
     
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         if trainer.current_epoch == 0 and batch_idx == 0:
@@ -212,17 +199,18 @@ def train_with_relative_poses(
     # Set seed
     L.seed_everything(42, workers=True)
     
-    # Create model
-    model = MultiHeadVIOModel(
-        feature_dim=768,
-        hidden_dim=128,         
-        num_shared_layers=2,    
-        num_specialized_layers=2, 
-        num_heads=4,
+    # Create model with separate visual and IMU processing
+    model = MultiHeadVIOModelSeparate(
+        visual_dim=512,
+        imu_dim=256,
+        hidden_dim=256,         
+        num_shared_layers=4,    
+        num_specialized_layers=3, 
+        num_heads=8,
         dropout=0.1,
         learning_rate=learning_rate,
         weight_decay=1e-5,
-        sequence_length=11
+        sequence_length=10  # 10 transition features
     )
     
     # Create datasets
@@ -241,10 +229,10 @@ def train_with_relative_poses(
     
     # Create dataloaders
     def collate_fn(batch):
-        features, imus, poses = zip(*batch)
+        visual_features, imu_features, poses = zip(*batch)
         return {
-            'images': torch.stack(features),
-            'imus': torch.stack(imus),
+            'visual_features': torch.stack(visual_features),
+            'imu_features': torch.stack(imu_features),
             'poses': torch.stack(poses)
         }
     
