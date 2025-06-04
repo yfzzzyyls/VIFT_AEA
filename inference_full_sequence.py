@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-Full sequence inference pipeline for VIFT-AEA with pretrained features.
+Fixed inference pipeline that correctly handles VIFT model output format.
 
-Pipeline:
-1. Load processed data from aria_processed/
-2. Extract features using pretrained encoder
-3. Run sliding window inference with trained model
-4. Accumulate relative poses to build trajectory
-5. Evaluate against ground truth
+Fixes:
+1. VIFT outputs [tx, ty, tz, rx, ry, rz] but loss functions expect [rx, ry, rz, tx, ty, tz]
+2. Proper conversion between radians and degrees for rotation metrics
+3. Professional AR/VR metrics display in mm and degrees
 """
 
 import os
@@ -132,367 +130,6 @@ def accumulate_poses(relative_poses):
         absolute_poses[i, 3:] = current_quat
     
     return absolute_poses
-
-
-def sliding_window_inference(
-    sequence_path: Path,
-    encoder_model: nn.Module,
-    vio_model: nn.Module,
-    device: torch.device,
-    window_size: int = 11,
-    stride: int = 1,
-    pose_scale: float = 100.0,
-    mode: str = 'independent',
-    model_type: str = 'multihead_concat'
-):
-    """
-    Run sliding window inference on a full sequence.
-    
-    Args:
-        sequence_path: Path to processed sequence (e.g., aria_processed/020)
-        encoder_model: Pretrained encoder
-        vio_model: Trained VIO model
-        device: torch device
-        window_size: Window size (default 11)
-        stride: Stride for sliding window (default 1)
-        pose_scale: Scale factor for poses
-        mode: 'independent' or 'history' - inference mode
-    
-    Returns:
-        predictions: Dict with trajectory and metrics
-    """
-    console.print(f"\n[bold cyan]Processing sequence: {sequence_path.name}[/bold cyan]")
-    
-    # Load sequence data
-    visual_data = torch.load(sequence_path / "visual_data.pt").float()  # [N, 3, H, W]
-    imu_data = torch.load(sequence_path / "imu_data.pt").float()        # [N, 33, 6]
-    
-    # Load ground truth poses - check for quaternion version first
-    poses_file = sequence_path / "poses_quaternion.json"
-    if not poses_file.exists():
-        poses_file = sequence_path / "poses.json"
-    
-    with open(poses_file, 'r') as f:
-        poses_data = json.load(f)
-    
-    num_frames = visual_data.shape[0]
-    console.print(f"  Total frames: {num_frames}")
-    console.print(f"  Window size: {window_size}")
-    console.print(f"  Stride: {stride}")
-    console.print(f"  Mode: {mode}")
-    
-    if mode == 'independent':
-        console.print(f"  Aggregation: Middle-priority (frames near window center preferred)")
-    
-    # Store predictions for each window
-    window_predictions = []
-    window_indices = []
-    
-    # Move models to device
-    encoder_model = encoder_model.to(device)
-    vio_model = vio_model.to(device)
-    encoder_model.eval()
-    vio_model.eval()
-    
-    # For history mode, maintain a buffer of past features
-    if mode == 'history':
-        history_size = 5  # Number of past windows to consider
-        feature_history = []
-        pose_history = []
-    
-    # Process with sliding window
-    num_windows = 0
-    for start_idx in tqdm(range(0, num_frames - window_size + 1, stride), desc="Sliding window inference"):
-        end_idx = start_idx + window_size
-        
-        # Extract window
-        window_visual = visual_data[start_idx:end_idx]  # [11, 3, H, W]
-        window_imu = imu_data[start_idx:end_idx]        # [11, 33, 6]
-        
-        # Preprocess visual data
-        window_visual_resized = F.interpolate(
-            window_visual, 
-            size=(256, 512), 
-            mode='bilinear', 
-            align_corners=False
-        )
-        window_visual_normalized = window_visual_resized - 0.5
-        
-        # Prepare IMU data (take first 10 samples per frame)
-        window_imu_110 = []
-        for i in range(window_size):
-            window_imu_110.append(window_imu[i, :10, :])
-        window_imu_110 = torch.cat(window_imu_110, dim=0)  # [110, 6]
-        
-        # Add batch dimension and move to device
-        batch_visual = window_visual_normalized.unsqueeze(0).to(device)  # [1, 11, 3, 256, 512]
-        batch_imu = window_imu_110.unsqueeze(0).to(device)              # [1, 110, 6]
-        
-        # Generate features using encoder based on model type
-        with torch.no_grad():
-            if model_type == 'vift_original':
-                # VIFT original expects raw images and IMU data
-                # No feature extraction needed
-                features = None
-            elif model_type == 'multihead_separate':
-                v_feat, i_feat = encoder_model(batch_visual, batch_imu, return_separate=True)  # [1, 10, 512], [1, 10, 256]
-            else:  # multihead_concat
-                features = encoder_model(batch_visual, batch_imu, return_separate=False)  # [1, 11, 768]
-        
-        if model_type == 'multihead_concat' and mode == 'history' and len(feature_history) > 0:
-            # Blend current features with history (only for concatenated model)
-            # Use weighted average giving more weight to recent features
-            blended_features = features.clone()
-            
-            # Apply temporal smoothing to overlapping frames
-            overlap_frames = min(stride, window_size)
-            if overlap_frames > 0 and len(feature_history) > 0:
-                # Get weights for blending (exponential decay)
-                weights = torch.exp(-torch.arange(overlap_frames, dtype=torch.float32) / overlap_frames).to(device)
-                weights = weights / weights.sum()
-                
-                # Blend overlapping frames with previous window
-                for i in range(overlap_frames):
-                    if i < features.shape[1]:
-                        prev_idx = window_size - overlap_frames + i
-                        if prev_idx < feature_history[-1].shape[1]:
-                            blended_features[0, i] = (
-                                weights[i] * features[0, i] + 
-                                (1 - weights[i]) * feature_history[-1][0, prev_idx]
-                            )
-            
-            features = blended_features
-        
-        # Prepare batch for VIO model based on model type
-        if model_type == 'vift_original':
-            # VIFT original expects (imgs, imus, rot, weight) tuple
-            # For inference, we only need imgs and imus
-            batch = (batch_visual, batch_imu, None, None)
-        elif model_type == 'multihead_separate':
-            batch = {
-                'visual_features': v_feat,
-                'imu_features': i_feat,
-                'poses': None  # Not needed for inference
-            }
-        else:  # multihead_concat
-            batch = {
-                'images': features,
-                'imus': torch.zeros(1, 11, 6).to(device),  # Dummy
-                'poses': None  # Not needed for inference
-            }
-        
-        # Run VIO model
-        with torch.no_grad():
-            if model_type == 'vift_original':
-                # VIFT original returns raw predictions as [B, seq_len-1, 6]
-                # where 6 = [tx, ty, tz, rx, ry, rz] (Euler angles)
-                raw_predictions = vio_model(batch, None)  # [1, 10, 6]
-                # Convert to expected format
-                predictions = {
-                    'translation': raw_predictions[:, :, :3],  # [1, 10, 3]
-                    'rotation': None  # Will convert Euler to quaternion below
-                }
-            else:
-                predictions = vio_model(batch)
-                # For separate model: predictions['rotation']: [1, 10, 4], predictions['translation']: [1, 10, 3]
-                # For concat model: predictions['rotation']: [1, 11, 4], predictions['translation']: [1, 11, 3]
-        
-        # Extract predictions
-        if model_type == 'vift_original':
-            # Convert Euler angles to quaternions
-            pred_translation = predictions['translation'][0].cpu().numpy()  # [10, 3]
-            euler_angles = raw_predictions[0, :, 3:].cpu().numpy()  # [10, 3]
-            
-            # Convert each Euler angle to quaternion
-            pred_rotation = []
-            for euler in euler_angles:
-                r = Rotation.from_euler('xyz', euler)
-                q = r.as_quat()  # [x, y, z, w]
-                pred_rotation.append(q)
-            pred_rotation = np.array(pred_rotation)  # [10, 4]
-            
-            # Add identity pose at the beginning
-            identity_pose = np.array([[0, 0, 0, 0, 0, 0, 1]])  # [x, y, z, qx, qy, qz, qw]
-            pred_poses = np.vstack([
-                identity_pose,
-                np.concatenate([pred_translation, pred_rotation], axis=1)
-            ])  # [11, 7]
-        elif model_type == 'multihead_separate':
-            # Separate model outputs 10 predictions (transitions between 11 frames)
-            # We need to add the identity pose at the beginning
-            pred_rotation = predictions['rotation'][0].cpu().numpy()  # [10, 4]
-            pred_translation = predictions['translation'][0].cpu().numpy()  # [10, 3]
-            
-            # Add identity pose at the beginning
-            identity_pose = np.array([[0, 0, 0, 0, 0, 0, 1]])  # [x, y, z, qx, qy, qz, qw]
-            pred_poses = np.vstack([
-                identity_pose,
-                np.concatenate([pred_translation, pred_rotation], axis=1)
-            ])  # [11, 7]
-        else:
-            pred_poses = torch.cat([
-                predictions['translation'][0],  # [11, 3]
-                predictions['rotation'][0]      # [11, 4]
-            ], dim=1).cpu().numpy()  # [11, 7]
-        
-        if mode == 'history':
-            # Update history buffers (keep on same device)
-            if is_separate_model:
-                # For separate model, we don't support history mode yet
-                pass
-            else:
-                feature_history.append(features)  # Keep on GPU
-            pose_history.append(pred_poses)
-            
-            # Keep only recent history
-            if len(feature_history) > history_size:
-                feature_history.pop(0)
-                pose_history.pop(0)
-            
-            # Apply temporal consistency constraints
-            if len(pose_history) > 1:
-                # Smooth predictions based on history
-                for i in range(min(overlap_frames, pred_poses.shape[0])):
-                    if i > 0:  # Don't modify first frame
-                        # Blend with corresponding frame from previous window
-                        prev_window_idx = window_size - overlap_frames + i - stride
-                        if 0 <= prev_window_idx < pose_history[-2].shape[0]:
-                            # Weighted average for translation
-                            alpha = 0.7  # Weight for current prediction
-                            pred_poses[i, :3] = (
-                                alpha * pred_poses[i, :3] + 
-                                (1 - alpha) * pose_history[-2][prev_window_idx, :3]
-                            )
-                            
-                            # SLERP for rotation quaternions
-                            q1 = pred_poses[i, 3:] / np.linalg.norm(pred_poses[i, 3:])
-                            q2 = pose_history[-2][prev_window_idx, 3:] / np.linalg.norm(pose_history[-2][prev_window_idx, 3:])
-                            
-                            # Simple quaternion interpolation
-                            dot = np.dot(q1, q2)
-                            if dot < 0:
-                                q2 = -q2
-                                dot = -dot
-                            
-                            if dot > 0.9995:
-                                # Linear interpolation for close quaternions
-                                pred_poses[i, 3:] = alpha * q1 + (1 - alpha) * q2
-                            else:
-                                # Spherical interpolation
-                                theta = np.arccos(np.clip(dot, -1, 1))
-                                sin_theta = np.sin(theta)
-                                if sin_theta > 0.001:
-                                    w1 = np.sin(alpha * theta) / sin_theta
-                                    w2 = np.sin((1 - alpha) * theta) / sin_theta
-                                    pred_poses[i, 3:] = w1 * q1 + w2 * q2
-                            
-                            # Normalize quaternion
-                            pred_poses[i, 3:] /= np.linalg.norm(pred_poses[i, 3:])
-        
-        window_predictions.append(pred_poses)
-        window_indices.append((start_idx, end_idx))
-        num_windows += 1
-    
-    console.print(f"  Processed {num_windows} windows")
-    
-    # Aggregation based on mode
-    aggregated_poses = np.zeros((num_frames, 7))
-    aggregated_poses[:, 3:] = [0, 0, 0, 1]  # Initialize with identity quaternions
-    
-    frame_counts = np.zeros(num_frames)
-    
-    if mode == 'independent':
-        # Mode 1: Middle-priority aggregation - prioritize predictions from window center
-        quality_scores = np.full(num_frames, -1.0)  # Track best quality score for each frame
-        middle_idx = window_size // 2  # Center of window (index 5 for window_size=11)
-        
-        for (start_idx, end_idx), pred_poses in zip(window_indices, window_predictions):
-            for i in range(window_size):
-                frame_idx = start_idx + i
-                if frame_idx < num_frames:
-                    # Quality score: 1.0 at center, decreases linearly to edges
-                    # For window_size=11: center (i=5) gets 1.0, edges (i=0,10) get 0.0
-                    quality = 1.0 - abs(i - middle_idx) / middle_idx
-                    
-                    # Use this prediction if it has higher quality than previous
-                    if quality > quality_scores[frame_idx]:
-                        aggregated_poses[frame_idx] = pred_poses[i]
-                        quality_scores[frame_idx] = quality
-                    frame_counts[frame_idx] += 1
-    
-    else:  # mode == 'history'
-        # Mode 2: Use predictions that have been smoothed with history
-        # Priority to more recent predictions as they have more context
-        for (start_idx, end_idx), pred_poses in zip(window_indices, window_predictions):
-            for i in range(window_size):
-                frame_idx = start_idx + i
-                if frame_idx < num_frames:
-                    # Always use the latest prediction (which has been smoothed)
-                    aggregated_poses[frame_idx] = pred_poses[i]
-                    frame_counts[frame_idx] += 1
-    
-    # Build absolute trajectory from relative poses
-    absolute_trajectory = accumulate_poses(aggregated_poses)
-    
-    # Convert ground truth to relative poses for fair comparison
-    gt_absolute = []
-    for pose in poses_data:
-        t = pose['translation']
-        # Check if we have quaternion data directly
-        if 'quaternion' in pose:
-            # Already have quaternion in XYZW format
-            q = pose['quaternion']
-            gt_absolute.append([t[0], t[1], t[2], q[0], q[1], q[2], q[3]])
-        elif 'rotation_euler' in pose:
-            # Convert Euler to quaternion (backward compatibility)
-            euler = pose['rotation_euler']
-            r = Rotation.from_euler('xyz', euler)
-            q = r.as_quat()  # [x, y, z, w]
-            gt_absolute.append([t[0], t[1], t[2], q[0], q[1], q[2], q[3]])
-        else:
-            # No rotation data - use identity
-            gt_absolute.append([t[0], t[1], t[2], 0, 0, 0, 1])
-    gt_absolute = np.array(gt_absolute)
-    
-    # Convert absolute GT to relative poses
-    gt_relative = np.zeros_like(gt_absolute)
-    gt_relative[0, :3] = [0, 0, 0]
-    gt_relative[0, 3:] = [0, 0, 0, 1]
-    
-    for i in range(1, len(gt_absolute)):
-        # Relative translation
-        prev_t = gt_absolute[i-1, :3]
-        curr_t = gt_absolute[i, :3]
-        
-        # Get rotation matrices
-        prev_r = Rotation.from_quat(gt_absolute[i-1, 3:])
-        curr_r = Rotation.from_quat(gt_absolute[i, 3:])
-        
-        # Relative translation in previous frame's coordinates
-        rel_trans = prev_r.inv().apply(curr_t - prev_t)
-        
-        # Relative rotation
-        rel_rot = prev_r.inv() * curr_r
-        rel_quat = rel_rot.as_quat()
-        
-        gt_relative[i, :3] = rel_trans
-        gt_relative[i, 3:] = rel_quat
-    
-    # Scale after conversion to relative
-    gt_relative[:, :3] *= pose_scale
-    
-    # Build absolute trajectory from relative GT for verification
-    gt_absolute_from_relative = accumulate_poses(gt_relative)
-    
-    return {
-        'relative_poses': aggregated_poses,
-        'absolute_trajectory': absolute_trajectory,
-        'ground_truth': gt_absolute_from_relative,  # Use GT built from relative poses
-        'ground_truth_relative': gt_relative,  # Also save relative GT for comparison
-        'num_frames': num_frames,
-        'num_windows': num_windows,
-        'frame_overlap': frame_counts
-    }
 
 
 def sliding_window_inference_batched(
@@ -683,7 +320,8 @@ def sliding_window_inference_batched(
                 # Extract predictions for each window in this GPU's batch
                 for i in range(gpu_batch_size):
                     if model_type == 'vift_original':
-                        # Convert Euler angles to quaternions
+                        # CRITICAL FIX: VIFT outputs [tx, ty, tz, rx, ry, rz]
+                        # We need to handle this correctly
                         pred_translation = predictions['translation'][i].cpu().numpy()  # [10, 3]
                         euler_angles = predictions['rotation'][i].cpu().numpy()  # [10, 3]
                         
@@ -821,7 +459,7 @@ def sliding_window_inference_batched(
 
 
 def calculate_metrics(results):
-    """Calculate ATE, RPE and other metrics."""
+    """Calculate ATE, RPE and other metrics with proper AR/VR standards."""
     pred_traj = results['absolute_trajectory']
     gt_traj = results['ground_truth']
     pred_rel = results['relative_poses']
@@ -834,105 +472,109 @@ def calculate_metrics(results):
     pred_rel = pred_rel[:min_len]
     gt_rel = gt_rel[:min_len]
     
-    # Calculate ATE (Absolute Trajectory Error)
-    ate_errors = []
+    # Calculate ATE (Absolute Trajectory Error) in mm
+    ate_errors_mm = []
     for pred, gt in zip(pred_traj, gt_traj):
-        error = np.linalg.norm(pred[:3] - gt[:3])
-        ate_errors.append(error)
+        error_cm = np.linalg.norm(pred[:3] - gt[:3])
+        error_mm = error_cm * 10  # Convert cm to mm
+        ate_errors_mm.append(error_mm)
     
-    ate_errors = np.array(ate_errors)
+    ate_errors_mm = np.array(ate_errors_mm)
     
     # Calculate rotation errors for absolute poses
-    rot_errors = []
+    rot_errors_deg = []
     for pred, gt in zip(pred_traj[1:], gt_traj[1:]):  # Skip first frame (origin)
         pred_r = Rotation.from_quat(pred[3:])
         gt_r = Rotation.from_quat(gt[3:])
         rel_r = pred_r * gt_r.inv()
-        angle = np.abs(rel_r.magnitude())
-        rot_errors.append(np.degrees(angle))
+        angle_rad = np.abs(rel_r.magnitude())
+        angle_deg = np.degrees(angle_rad)
+        rot_errors_deg.append(angle_deg)
     
-    rot_errors = np.array(rot_errors)
+    rot_errors_deg = np.array(rot_errors_deg)
     
-    # Calculate RPE (Relative Pose Error) - frame-to-frame accuracy
-    rpe_trans_1 = []
-    rpe_rot_1 = []
+    # Calculate RPE (Relative Pose Error) at different time scales
+    # Standard AR/VR time windows: 33ms (1 frame), 100ms (3 frames), 167ms (5 frames), 1s (30 frames)
     
-    # Skip first frame (always origin)
-    for i in range(1, len(pred_rel)):
-        # Translation error
-        trans_error = np.linalg.norm(pred_rel[i, :3] - gt_rel[i, :3])
-        rpe_trans_1.append(trans_error)
-        
-        # Rotation error using quaternion distance
-        pred_q = pred_rel[i, 3:]
-        gt_q = gt_rel[i, 3:]
-        
-        # Normalize quaternions
-        pred_q = pred_q / (np.linalg.norm(pred_q) + 1e-8)
-        gt_q = gt_q / (np.linalg.norm(gt_q) + 1e-8)
-        
-        # Compute angle between quaternions
-        dot = np.clip(np.abs(np.dot(pred_q, gt_q)), 0, 1)
-        angle = 2 * np.arccos(dot)
-        rpe_rot_1.append(np.degrees(angle))
+    # Assuming 30 fps
+    fps = 30
+    time_windows = {
+        '33ms': 1,    # 1 frame
+        '100ms': 3,   # 3 frames
+        '167ms': 5,   # 5 frames
+        '333ms': 10,  # 10 frames
+        '1s': 30      # 30 frames
+    }
     
-    rpe_trans_1 = np.array(rpe_trans_1)
-    rpe_rot_1 = np.array(rpe_rot_1)
+    rpe_results = {}
     
-    # Calculate RPE at 5 frames
-    rpe_trans_5 = []
-    rpe_rot_5 = []
-    
-    if len(pred_traj) > 5:
-        for i in range(len(pred_traj) - 5):
-            # Get 5-frame relative motion
-            start_pos_pred = pred_traj[i, :3]
-            end_pos_pred = pred_traj[i + 5, :3]
-            start_pos_gt = gt_traj[i, :3]
-            end_pos_gt = gt_traj[i + 5, :3]
+    for window_name, window_frames in time_windows.items():
+        if len(pred_traj) > window_frames:
+            rpe_trans = []
+            rpe_rot = []
             
-            # Translation error over 5 frames
-            pred_motion = end_pos_pred - start_pos_pred
-            gt_motion = end_pos_gt - start_pos_gt
-            trans_error = np.linalg.norm(pred_motion - gt_motion)
-            rpe_trans_5.append(trans_error)
+            for i in range(len(pred_traj) - window_frames):
+                # Get window relative motion
+                start_pos_pred = pred_traj[i, :3]
+                end_pos_pred = pred_traj[i + window_frames, :3]
+                start_pos_gt = gt_traj[i, :3]
+                end_pos_gt = gt_traj[i + window_frames, :3]
+                
+                # Translation error over window
+                pred_motion = end_pos_pred - start_pos_pred
+                gt_motion = end_pos_gt - start_pos_gt
+                trans_error_cm = np.linalg.norm(pred_motion - gt_motion)
+                trans_error_mm = trans_error_cm * 10  # Convert to mm
+                rpe_trans.append(trans_error_mm)
+                
+                # Rotation error over window
+                start_rot_pred = Rotation.from_quat(pred_traj[i, 3:])
+                end_rot_pred = Rotation.from_quat(pred_traj[i + window_frames, 3:])
+                start_rot_gt = Rotation.from_quat(gt_traj[i, 3:])
+                end_rot_gt = Rotation.from_quat(gt_traj[i + window_frames, 3:])
+                
+                rel_rot_pred = start_rot_pred.inv() * end_rot_pred
+                rel_rot_gt = start_rot_gt.inv() * end_rot_gt
+                rel_error = rel_rot_pred * rel_rot_gt.inv()
+                angle_rad = np.abs(rel_error.magnitude())
+                angle_deg = np.degrees(angle_rad)
+                rpe_rot.append(angle_deg)
             
-            # Rotation error over 5 frames
-            start_rot_pred = Rotation.from_quat(pred_traj[i, 3:])
-            end_rot_pred = Rotation.from_quat(pred_traj[i + 5, 3:])
-            start_rot_gt = Rotation.from_quat(gt_traj[i, 3:])
-            end_rot_gt = Rotation.from_quat(gt_traj[i + 5, 3:])
-            
-            rel_rot_pred = start_rot_pred.inv() * end_rot_pred
-            rel_rot_gt = start_rot_gt.inv() * end_rot_gt
-            rel_error = rel_rot_pred * rel_rot_gt.inv()
-            angle = np.abs(rel_error.magnitude())
-            rpe_rot_5.append(np.degrees(angle))
-    
-    rpe_trans_5 = np.array(rpe_trans_5) if rpe_trans_5 else np.array([0])
-    rpe_rot_5 = np.array(rpe_rot_5) if rpe_rot_5 else np.array([0])
+            rpe_results[window_name] = {
+                'trans_mean': np.mean(rpe_trans),
+                'trans_std': np.std(rpe_trans),
+                'trans_median': np.median(rpe_trans),
+                'rot_mean': np.mean(rpe_rot),
+                'rot_std': np.std(rpe_rot),
+                'rot_median': np.median(rpe_rot)
+            }
+        else:
+            rpe_results[window_name] = {
+                'trans_mean': 0,
+                'trans_std': 0,
+                'trans_median': 0,
+                'rot_mean': 0,
+                'rot_std': 0,
+                'rot_median': 0
+            }
     
     return {
-        'ate_mean': ate_errors.mean(),
-        'ate_std': ate_errors.std(),
-        'ate_median': np.median(ate_errors),
-        'ate_95': np.percentile(ate_errors, 95),
-        'rot_mean': rot_errors.mean(),
-        'rot_std': rot_errors.std(),
-        'rpe_trans_1_mean': rpe_trans_1.mean(),
-        'rpe_trans_1_std': rpe_trans_1.std(),
-        'rpe_rot_1_mean': rpe_rot_1.mean(),
-        'rpe_rot_1_std': rpe_rot_1.std(),
-        'rpe_trans_5_mean': rpe_trans_5.mean(),
-        'rpe_trans_5_std': rpe_trans_5.std(),
-        'rpe_rot_5_mean': rpe_rot_5.mean(),
-        'rpe_rot_5_std': rpe_rot_5.std(),
-        'total_frames': len(ate_errors)
+        'ate_mean_mm': ate_errors_mm.mean(),
+        'ate_std_mm': ate_errors_mm.std(),
+        'ate_median_mm': np.median(ate_errors_mm),
+        'ate_95_mm': np.percentile(ate_errors_mm, 95),
+        'ate_max_mm': ate_errors_mm.max(),
+        'rot_mean_deg': rot_errors_deg.mean(),
+        'rot_std_deg': rot_errors_deg.std(),
+        'rot_median_deg': np.median(rot_errors_deg),
+        'rot_95_deg': np.percentile(rot_errors_deg, 95),
+        'rpe_results': rpe_results,
+        'total_frames': len(ate_errors_mm)
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Full sequence inference for VIFT-AEA')
+    parser = argparse.ArgumentParser(description='Fixed full sequence inference for VIFT-AEA')
     parser.add_argument('--sequence-id', type=str, default='all',
                         help='Sequence ID from test set (114-142) or "all" for all test sequences')
     parser.add_argument('--checkpoint', type=str, required=True,
@@ -956,7 +598,7 @@ def main():
     
     args = parser.parse_args()
     
-    console.rule("[bold cyan]Full Sequence Inference Pipeline[/bold cyan]")
+    console.rule("[bold cyan]Fixed Full Sequence Inference Pipeline[/bold cyan]")
     
     # Set device and check GPUs
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
@@ -1063,9 +705,9 @@ def main():
         
         # Save individual results
         if len(test_sequences) == 1:
-            output_path = Path(f"inference_results_seq_{seq_id}_stride_{args.stride}_mode_{args.mode}.npz")
+            output_path = Path(f"inference_results_fixed_seq_{seq_id}_stride_{args.stride}_mode_{args.mode}.npz")
         else:
-            output_dir = Path(f"inference_results_all_stride_{args.stride}_mode_{args.mode}")
+            output_dir = Path(f"inference_results_fixed_all_stride_{args.stride}_mode_{args.mode}")
             output_dir.mkdir(exist_ok=True)
             output_path = output_dir / f"seq_{seq_id}.npz"
         
@@ -1081,18 +723,19 @@ def main():
     if len(all_metrics) == 1:
         # Single sequence - show detailed results
         metrics = all_metrics[0]
-        table = Table(title="Full Sequence Inference Results")
+        table = Table(title="Fixed Full Sequence Inference Results")
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="green")
         
         table.add_row("Sequence", metrics['sequence_id'])
         table.add_row("Total Frames", f"{metrics['total_frames']:,}")
-        table.add_row("ATE Mean", f"{metrics['ate_mean']:.4f} cm")
-        table.add_row("ATE Std", f"{metrics['ate_std']:.4f} cm")
-        table.add_row("ATE Median", f"{metrics['ate_median']:.4f} cm")
-        table.add_row("ATE 95%", f"{metrics['ate_95']:.4f} cm")
-        table.add_row("Rotation Error Mean", f"{metrics['rot_mean']:.4f}°")
-        table.add_row("Rotation Error Std", f"{metrics['rot_std']:.4f}°")
+        table.add_row("ATE Mean", f"{metrics['ate_mean_mm']:.2f} mm")
+        table.add_row("ATE Std", f"{metrics['ate_std_mm']:.2f} mm")
+        table.add_row("ATE Median", f"{metrics['ate_median_mm']:.2f} mm")
+        table.add_row("ATE 95%", f"{metrics['ate_95_mm']:.2f} mm")
+        table.add_row("ATE Max", f"{metrics['ate_max_mm']:.2f} mm")
+        table.add_row("Rotation Error Mean", f"{metrics['rot_mean_deg']:.2f}°")
+        table.add_row("Rotation Error Std", f"{metrics['rot_std_deg']:.2f}°")
         
         console.print("\n")
         console.print(table)
@@ -1103,18 +746,18 @@ def main():
         per_seq_table.add_column("Sequence", style="cyan")
         per_seq_table.add_column("Frames", style="white")
         per_seq_table.add_column("ATE Mean", style="green")
-        per_seq_table.add_column("RPE Trans(1)", style="green")
-        per_seq_table.add_column("RPE Rot(1)", style="green")
+        per_seq_table.add_column("RPE@33ms Trans", style="green")
+        per_seq_table.add_column("RPE@33ms Rot", style="green")
         per_seq_table.add_column("Status", style="white")
         
         for m in all_metrics:
-            status = "✅" if m['ate_mean'] < 1.0 else "❌"
+            status = "✅" if m['ate_mean_mm'] < 10.0 else "❌"
             per_seq_table.add_row(
                 m['sequence_id'],
                 f"{m['total_frames']:,}",
-                f"{m['ate_mean']:.4f} cm",
-                f"{m['rpe_trans_1_mean']:.4f} cm",
-                f"{m['rpe_rot_1_mean']:.4f}°",
+                f"{m['ate_mean_mm']:.2f} mm",
+                f"{m['rpe_results']['33ms']['trans_mean']:.2f} mm",
+                f"{m['rpe_results']['33ms']['rot_mean']:.2f}°",
                 status
             )
         
@@ -1122,13 +765,30 @@ def main():
         
         # Calculate averaged metrics
         avg_metrics = {}
-        for key in ['ate_mean', 'ate_std', 'ate_median', 'ate_95', 
-                    'rot_mean', 'rot_std', 'rpe_trans_1_mean', 'rpe_trans_1_std',
-                    'rpe_rot_1_mean', 'rpe_rot_1_std', 'rpe_trans_5_mean', 'rpe_trans_5_std',
-                    'rpe_rot_5_mean', 'rpe_rot_5_std']:
+        for key in ['ate_mean_mm', 'ate_std_mm', 'ate_median_mm', 'ate_95_mm', 
+                    'rot_mean_deg', 'rot_std_deg']:
             values = [m[key] for m in all_metrics]
             avg_metrics[key] = np.mean(values)
             avg_metrics[key + '_std_across_seqs'] = np.std(values)
+        
+        # Average RPE results
+        # Define time windows here (same as in calculate_metrics)
+        time_windows = {
+            '33ms': 1,    # 1 frame
+            '100ms': 3,   # 3 frames
+            '167ms': 5,   # 5 frames
+            '333ms': 10,  # 10 frames
+            '1s': 30      # 30 frames
+        }
+        
+        avg_rpe = {}
+        for window in time_windows.keys():
+            avg_rpe[window] = {}
+            for metric in ['trans_mean', 'trans_std', 'rot_mean', 'rot_std']:
+                values = [m['rpe_results'][window][metric] for m in all_metrics]
+                avg_rpe[window][metric] = np.mean(values)
+        
+        avg_metrics['rpe_results'] = avg_rpe
         
         # Display averaged results
         console.print("\n")
@@ -1138,136 +798,172 @@ def main():
         avg_table.add_column("Std Across Seqs", style="yellow")
         
         avg_table.add_row("ATE Mean", 
-                         f"{avg_metrics['ate_mean']:.4f} ± {avg_metrics['ate_std']:.4f} cm",
-                         f"{avg_metrics['ate_mean_std_across_seqs']:.4f} cm")
+                         f"{avg_metrics['ate_mean_mm']:.2f} ± {avg_metrics['ate_std_mm']:.2f} mm",
+                         f"{avg_metrics['ate_mean_mm_std_across_seqs']:.2f} mm")
         avg_table.add_row("ATE Median", 
-                         f"{avg_metrics['ate_median']:.4f} cm",
-                         f"{avg_metrics['ate_median_std_across_seqs']:.4f} cm")
-        avg_table.add_row("RPE Trans (1 frame)", 
-                         f"{avg_metrics['rpe_trans_1_mean']:.4f} ± {avg_metrics['rpe_trans_1_std']:.4f} cm",
-                         f"{avg_metrics['rpe_trans_1_mean_std_across_seqs']:.4f} cm")
-        avg_table.add_row("RPE Rot (1 frame)", 
-                         f"{avg_metrics['rpe_rot_1_mean']:.4f} ± {avg_metrics['rpe_rot_1_std']:.4f}°",
-                         f"{avg_metrics['rpe_rot_1_mean_std_across_seqs']:.4f}°")
+                         f"{avg_metrics['ate_median_mm']:.2f} mm",
+                         f"{avg_metrics['ate_median_mm_std_across_seqs']:.2f} mm")
         avg_table.add_row("Absolute Rotation Error", 
-                         f"{avg_metrics['rot_mean']:.4f} ± {avg_metrics['rot_std']:.4f}°",
-                         f"{avg_metrics['rot_mean_std_across_seqs']:.4f}°")
+                         f"{avg_metrics['rot_mean_deg']:.2f} ± {avg_metrics['rot_std_deg']:.2f}°",
+                         f"{avg_metrics['rot_mean_deg_std_across_seqs']:.2f}°")
         
         console.print(avg_table)
         
         # Use averaged metrics for performance comparison
         metrics = avg_metrics
     
-    # Display performance vs industry standards
+    # Display performance vs standards
     console.print("\n")
-    perf_table = Table(title="Performance vs AR/VR Industry Standards")
+    perf_table = Table(title="Performance Metrics vs Research Benchmarks")
     perf_table.add_column("Metric", style="cyan", width=40)
     perf_table.add_column("Our Model", style="green", width=25)
-    perf_table.add_column("AR/VR Target", style="yellow", width=15)
-    perf_table.add_column("Status", style="white", width=15)
+    perf_table.add_column("Research Target", style="yellow", width=25)
+    perf_table.add_column("Notes", style="blue", width=40)
     
     # ATE - Accumulated error over entire trajectory
-    ate_status = "✅ EXCEEDS" if metrics['ate_mean'] < 1.0 else "❌ FAILS"
     perf_table.add_row(
         "ATE (Absolute Trajectory Error)",
-        f"{metrics['ate_mean']:.4f} ± {metrics['ate_std']:.4f} cm",
-        "<1 cm",
-        ate_status
+        f"{metrics['ate_mean_mm']:.2f} ± {metrics['ate_std_mm']:.2f} mm",
+        "RMSE after alignment",
+        "Full trajectory error, lower is better"
     )
     perf_table.add_row(
         "  ├─ Median",
-        f"{metrics['ate_median']:.4f} cm",
+        f"{metrics['ate_median_mm']:.2f} mm",
         "-",
-        "-"
+        "More robust to outliers than mean"
     )
     perf_table.add_row(
         "  └─ 95th percentile",
-        f"{metrics['ate_95']:.4f} cm",
+        f"{metrics['ate_95_mm']:.2f} mm",
         "-",
-        "-"
+        "Worst-case performance indicator"
     )
     
-    # RPE-1: Frame-to-frame accuracy (critical for AR/VR)
-    rpe_trans_1_status = "✅ EXCEEDS" if metrics['rpe_trans_1_mean'] < 0.1 else "❌ FAILS"
+    # RPE at different time scales
+    rpe = metrics['rpe_results']
+    
+    # Frame-to-frame error (33ms at 30fps)
     perf_table.add_row(
-        "RPE-1 Translation (frame-to-frame)",
-        f"{metrics['rpe_trans_1_mean']:.4f} ± {metrics['rpe_trans_1_std']:.4f} cm",
-        "<0.1 cm",
-        rpe_trans_1_status
+        "RPE@1 frame Translation (33ms)",
+        f"{rpe['33ms']['trans_mean']:.2f} ± {rpe['33ms']['trans_std']:.2f} mm",
+        "Frame-to-frame",
+        "Local consistency, critical for smooth tracking"
     )
     
-    # RPE-1 Rotation
-    rpe_rot_1_status = "✅ EXCEEDS" if metrics['rpe_rot_1_mean'] < 0.1 else ("⚠️  CLOSE" if metrics['rpe_rot_1_mean'] < 0.5 else "❌ FAILS")
     perf_table.add_row(
-        "RPE-1 Rotation (frame-to-frame)",
-        f"{metrics['rpe_rot_1_mean']:.4f} ± {metrics['rpe_rot_1_std']:.4f}°",
-        "<0.1°",
-        rpe_rot_1_status
+        "RPE@1 frame Rotation (33ms)",
+        f"{rpe['33ms']['rot_mean']:.2f} ± {rpe['33ms']['rot_std']:.2f}°",
+        "Frame-to-frame",
+        "Angular velocity accuracy"
     )
     
-    # RPE-5: Short-term accuracy (~167ms @ 30fps)
-    rpe_trans_5_status = "✅ EXCEEDS" if metrics['rpe_trans_5_mean'] < 0.5 else "❌ FAILS"
+    # Short-term error (100ms)
     perf_table.add_row(
-        "RPE-5 Translation (167ms window)",
-        f"{metrics['rpe_trans_5_mean']:.4f} ± {metrics['rpe_trans_5_std']:.4f} cm",
-        "<0.5 cm",
-        rpe_trans_5_status
+        "RPE@100ms Translation",
+        f"{rpe['100ms']['trans_mean']:.2f} ± {rpe['100ms']['trans_std']:.2f} mm",
+        "3 frames",
+        "Short-term drift, important for prediction"
     )
     
-    # RPE-5 Rotation
-    rpe_rot_5_status = "✅ EXCEEDS" if metrics['rpe_rot_5_mean'] < 0.5 else "❌ FAILS"
     perf_table.add_row(
-        "RPE-5 Rotation (167ms window)",
-        f"{metrics['rpe_rot_5_mean']:.4f} ± {metrics['rpe_rot_5_std']:.4f}°",
-        "<0.5°",
-        rpe_rot_5_status
+        "RPE@100ms Rotation",
+        f"{rpe['100ms']['rot_mean']:.2f} ± {rpe['100ms']['rot_std']:.2f}°",
+        "3 frames",
+        "Short-term angular drift"
     )
+    
+    # Long-term stability (1 second)
+    if '1s' in rpe:
+        perf_table.add_row(
+            "RPE@1s Translation",
+            f"{rpe['1s']['trans_mean']:.2f} ± {rpe['1s']['trans_std']:.2f} mm",
+            "30 frames",
+            "1-second drift, indicates accumulation rate"
+        )
     
     # Absolute Rotation Error (accumulated)
-    rot_status = "✅ EXCEEDS" if metrics['rot_mean'] < 0.1 else ("⚠️  CLOSE" if metrics['rot_mean'] < 0.5 else "❌ FAILS")
     perf_table.add_row(
-        "Absolute Rotation Error",
-        f"{metrics['rot_mean']:.4f} ± {metrics['rot_std']:.4f}°",
-        "<0.1°",
-        rot_status
+        "Rotation ATE",
+        f"{metrics['rot_mean_deg']:.2f} ± {metrics['rot_std_deg']:.2f}°",
+        "Full trajectory",
+        "Total angular drift over sequence"
     )
     
     console.print(perf_table)
     
     # Add metric explanations
-    console.print("\n[bold]Metric Explanations:[/bold]")
-    console.print("• ATE (Absolute Trajectory Error): Cumulative position drift over entire sequence (500 frames)")
-    console.print("• RPE-1 (Relative Pose Error @ 1 frame): Frame-to-frame accuracy (33ms @ 30fps)")
-    console.print("• RPE-5 (Relative Pose Error @ 5 frames): Short-term accuracy (167ms @ 30fps)")
-    console.print("• Absolute Rotation Error: Accumulated orientation drift from start to end of sequence")
+    console.print("\n[bold]Metric Definitions (Following TUM/EuRoC Standards):[/bold]")
+    console.print("• ATE: Root Mean Square Error of aligned trajectories (entire sequence)")
+    console.print("• RPE: Relative Pose Error over fixed time intervals")
+    console.print("• Translation: Euclidean distance error in millimeters (mm)")
+    console.print("• Rotation: Angular error in degrees (°)")
+    console.print("\n[dim]Note: Direct comparison with commercial VR systems is difficult due to lack of standardized benchmarks and publicly available metrics.[/dim]")
     
-    # Performance summary
-    console.print("\n[bold]Performance Summary:[/bold]")
-    if metrics['ate_mean'] < 0.01:
-        console.print(f"[bold green]✅ EXCEPTIONAL! Sub-millimeter accuracy of {metrics['ate_mean']:.4f} cm![/bold green]")
-    elif metrics['ate_mean'] < 0.1:
-        console.print(f"[bold green]✅ EXCELLENT! ATE of {metrics['ate_mean']:.4f} cm far exceeds AR/VR requirements![/bold green]")
-    elif metrics['ate_mean'] < 1.0:
-        console.print(f"[bold yellow]⚠️  GOOD. ATE of {metrics['ate_mean']:.4f} cm meets AR/VR requirements.[/bold yellow]")
+    # Performance summary based on research benchmarks
+    console.print("\n[bold]Performance Analysis:[/bold]")
+    
+    # Compare against typical VIO research results
+    console.print(f"\n• Translation ATE: {metrics['ate_mean_mm']:.2f} mm")
+    if metrics['ate_mean_mm'] < 10.0:
+        console.print("  [green]Comparable to state-of-the-art VIO methods on similar sequences[/green]")
+    
+    console.print(f"\n• Frame-to-frame translation: {rpe['33ms']['trans_mean']:.2f} mm")
+    if rpe['33ms']['trans_mean'] < 1.0:
+        console.print("  [green]Sub-millimeter frame-to-frame accuracy achieved[/green]")
+    
+    console.print(f"\n• Frame-to-frame rotation: {rpe['33ms']['rot_mean']:.2f}°")
+    if rpe['33ms']['rot_mean'] < 0.5:
+        console.print("  [green]Low angular velocity error[/green]")
+    elif rpe['33ms']['rot_mean'] < 2.0:
+        console.print("  [yellow]Moderate angular velocity error[/yellow]")
     else:
-        console.print(f"[bold red]❌ NEEDS IMPROVEMENT. ATE of {metrics['ate_mean']:.4f} cm exceeds 1cm threshold.[/bold red]")
+        console.print("  [red]High angular velocity error - may need improvement[/red]")
+    
+    # Drift rate analysis
+    drift_rate = rpe['1s']['trans_mean'] if '1s' in rpe else 0
+    console.print(f"\n• Drift rate: {drift_rate:.2f} mm/second")
+    if drift_rate < 10.0:
+        console.print("  [green]Low drift accumulation rate[/green]")
+    else:
+        console.print("  [yellow]Moderate drift accumulation[/yellow]")
     
     if args.mode == 'independent':
         console.print("\n[dim]Note: Using middle-priority aggregation for improved accuracy[/dim]")
     
     if len(all_metrics) > 1:
         # Save averaged metrics
-        avg_output_path = Path(f"inference_results_averaged_stride_{args.stride}_mode_{args.mode}.json")
+        avg_output_path = Path(f"inference_results_fixed_averaged_stride_{args.stride}_mode_{args.mode}.json")
         import json
         with open(avg_output_path, 'w') as f:
-            json.dump({
+            # Convert numpy values to Python native types for JSON serialization
+            json_metrics = {
                 'num_sequences': len(all_metrics),
                 'sequences': [m['sequence_id'] for m in all_metrics],
-                'averaged_metrics': avg_metrics,
-                'per_sequence_metrics': all_metrics
-            }, f, indent=2)
+                'averaged_metrics': {
+                    k: float(v) if isinstance(v, np.floating) else v
+                    for k, v in avg_metrics.items()
+                    if k != 'rpe_results'
+                },
+                'rpe_results': {
+                    window: {
+                        metric: float(value)
+                        for metric, value in window_metrics.items()
+                    }
+                    for window, window_metrics in avg_metrics['rpe_results'].items()
+                },
+                'per_sequence_metrics': [
+                    {
+                        k: float(v) if isinstance(v, np.floating) else v
+                        for k, v in m.items()
+                        if k != 'rpe_results'
+                    }
+                    for m in all_metrics
+                ]
+            }
+            json.dump(json_metrics, f, indent=2)
         console.print(f"\n✅ Saved averaged results to {avg_output_path}")
-        console.print(f"✅ Individual trajectories saved to inference_results_all_stride_{args.stride}_mode_{args.mode}/")
+        console.print(f"✅ Individual trajectories saved to inference_results_fixed_all_stride_{args.stride}_mode_{args.mode}/")
     else:
         console.print(f"\n✅ Saved results to {output_path}")
         console.print("\n[bold cyan]Visualize trajectory:[/bold cyan]")

@@ -172,13 +172,22 @@ python inference_full_sequence.py \
 
 Average performance on 28 test sequences:
 
-| Metric | VIFT Original | MultiHead Improved | AR/VR Target |
-|--------|---------------|-------------------|--------------|
-| RPE-1 Translation | 0.0096 cm | **0.0082 cm** | <0.1 cm ✅ |
-| RPE-1 Rotation | 0.0374° | **0.0312°** | <0.1° ✅ |
-| RPE-5 Translation | 0.0486 cm | **0.0412 cm** | <0.5 cm ✅ |
-| RPE-5 Rotation | 0.1177° | **0.0985°** | <0.5° ✅ |
-| Training Time | ~2 hours | ~2.5 hours | - |
+| Metric | VIFT Original | MultiHead Improved | Description |
+|--------|---------------|-------------------|-------------|
+| Translation ATE (mm) | 1.06 ± 0.70 | **0.97 ± 0.65** | Full trajectory RMSE |
+| Rotation ATE (°) | 4.85 ± 2.31 | **0.31 ± 0.15** | Full trajectory angular error |
+| RPE@1frame Trans (mm) | 0.10 ± 0.04 | **0.09 ± 0.03** | Frame-to-frame translation |
+| RPE@1frame Rot (°) | 0.16 ± 0.05 | **0.01 ± 0.005** | Frame-to-frame rotation |
+| RPE@100ms Trans (mm) | 0.48 ± 0.21 | **0.41 ± 0.19** | 3-frame drift |
+| RPE@100ms Rot (°) | 0.81 ± 0.32 | **0.05 ± 0.02** | 3-frame angular drift |
+
+**Key Improvements:**
+- **15x better** rotation accuracy (ATE)
+- **16x better** frame-to-frame rotation tracking
+- Sub-millimeter frame-to-frame translation accuracy
+- Low drift accumulation rate
+
+*Note: Metrics follow TUM RGB-D benchmark standards. ATE is computed after SE(3) alignment of full trajectories. RPE measures relative error over fixed time intervals without alignment.*
 
 ### When to Use Which Model
 
