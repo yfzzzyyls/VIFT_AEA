@@ -31,6 +31,8 @@ sys.path.append('src')
 from src.models.components.vsvio import Encoder
 from src.models.multihead_vio import MultiHeadVIOModel
 from src.models.multihead_vio_separate import MultiHeadVIOModelSeparate
+from src.models.vio_module import VIOLitModule
+from src.models.components.pose_transformer import PoseTransformer
 
 console = Console()
 
@@ -140,7 +142,8 @@ def sliding_window_inference(
     window_size: int = 11,
     stride: int = 1,
     pose_scale: float = 100.0,
-    mode: str = 'independent'
+    mode: str = 'independent',
+    model_type: str = 'multihead_concat'
 ):
     """
     Run sliding window inference on a full sequence.
@@ -225,17 +228,18 @@ def sliding_window_inference(
         batch_visual = window_visual_normalized.unsqueeze(0).to(device)  # [1, 11, 3, 256, 512]
         batch_imu = window_imu_110.unsqueeze(0).to(device)              # [1, 110, 6]
         
-        # Check if using separate features model
-        is_separate_model = hasattr(vio_model, 'visual_projection')
-        
-        # Generate features using encoder
+        # Generate features using encoder based on model type
         with torch.no_grad():
-            if is_separate_model:
+            if model_type == 'vift_original':
+                # VIFT original expects raw images and IMU data
+                # No feature extraction needed
+                features = None
+            elif model_type == 'multihead_separate':
                 v_feat, i_feat = encoder_model(batch_visual, batch_imu, return_separate=True)  # [1, 10, 512], [1, 10, 256]
-            else:
+            else:  # multihead_concat
                 features = encoder_model(batch_visual, batch_imu, return_separate=False)  # [1, 11, 768]
         
-        if not is_separate_model and mode == 'history' and len(feature_history) > 0:
+        if model_type == 'multihead_concat' and mode == 'history' and len(feature_history) > 0:
             # Blend current features with history (only for concatenated model)
             # Use weighted average giving more weight to recent features
             blended_features = features.clone()
@@ -259,14 +263,18 @@ def sliding_window_inference(
             
             features = blended_features
         
-        # Prepare batch for VIO model
-        if is_separate_model:
+        # Prepare batch for VIO model based on model type
+        if model_type == 'vift_original':
+            # VIFT original expects (imgs, imus, rot, weight) tuple
+            # For inference, we only need imgs and imus
+            batch = (batch_visual, batch_imu, None, None)
+        elif model_type == 'multihead_separate':
             batch = {
                 'visual_features': v_feat,
                 'imu_features': i_feat,
                 'poses': None  # Not needed for inference
             }
-        else:
+        else:  # multihead_concat
             batch = {
                 'images': features,
                 'imus': torch.zeros(1, 11, 6).to(device),  # Dummy
@@ -275,12 +283,41 @@ def sliding_window_inference(
         
         # Run VIO model
         with torch.no_grad():
-            predictions = vio_model(batch)
-            # For separate model: predictions['rotation']: [1, 10, 4], predictions['translation']: [1, 10, 3]
-            # For concat model: predictions['rotation']: [1, 11, 4], predictions['translation']: [1, 11, 3]
+            if model_type == 'vift_original':
+                # VIFT original returns raw predictions as [B, seq_len-1, 6]
+                # where 6 = [tx, ty, tz, rx, ry, rz] (Euler angles)
+                raw_predictions = vio_model(batch, None)  # [1, 10, 6]
+                # Convert to expected format
+                predictions = {
+                    'translation': raw_predictions[:, :, :3],  # [1, 10, 3]
+                    'rotation': None  # Will convert Euler to quaternion below
+                }
+            else:
+                predictions = vio_model(batch)
+                # For separate model: predictions['rotation']: [1, 10, 4], predictions['translation']: [1, 10, 3]
+                # For concat model: predictions['rotation']: [1, 11, 4], predictions['translation']: [1, 11, 3]
         
         # Extract predictions
-        if is_separate_model:
+        if model_type == 'vift_original':
+            # Convert Euler angles to quaternions
+            pred_translation = predictions['translation'][0].cpu().numpy()  # [10, 3]
+            euler_angles = raw_predictions[0, :, 3:].cpu().numpy()  # [10, 3]
+            
+            # Convert each Euler angle to quaternion
+            pred_rotation = []
+            for euler in euler_angles:
+                r = Rotation.from_euler('xyz', euler)
+                q = r.as_quat()  # [x, y, z, w]
+                pred_rotation.append(q)
+            pred_rotation = np.array(pred_rotation)  # [10, 4]
+            
+            # Add identity pose at the beginning
+            identity_pose = np.array([[0, 0, 0, 0, 0, 0, 1]])  # [x, y, z, qx, qy, qz, qw]
+            pred_poses = np.vstack([
+                identity_pose,
+                np.concatenate([pred_translation, pred_rotation], axis=1)
+            ])  # [11, 7]
+        elif model_type == 'multihead_separate':
             # Separate model outputs 10 predictions (transitions between 11 frames)
             # We need to add the identity pose at the beginning
             pred_rotation = predictions['rotation'][0].cpu().numpy()  # [10, 4]
@@ -468,7 +505,8 @@ def sliding_window_inference_batched(
     pose_scale: float = 100.0,
     mode: str = 'independent',
     batch_size: int = 32,
-    num_gpus: int = 4
+    num_gpus: int = 4,
+    model_type: str = 'multihead_concat'
 ):
     """
     Run sliding window inference on a full sequence with batched processing.
@@ -598,23 +636,26 @@ def sliding_window_inference_batched(
                 batch_visual = torch.stack(all_windows_visual[gpu_batch_start:gpu_batch_end]).to(gpu_device).float()
                 batch_imu = torch.stack(all_windows_imu[gpu_batch_start:gpu_batch_end]).to(gpu_device).float()
                 
-                # Check if using separate features model
-                is_separate_model = hasattr(vio_models[gpu_id], 'visual_projection')
-                
-                # Generate features using encoder on this GPU
-                if is_separate_model:
+                # Generate features using encoder on this GPU based on model type
+                if model_type == 'vift_original':
+                    # VIFT original also needs features extraction
+                    features = encoder_models[gpu_id](batch_visual, batch_imu, return_separate=False)  # [B, 11, 768]
+                elif model_type == 'multihead_separate':
                     v_feat, i_feat = encoder_models[gpu_id](batch_visual, batch_imu, return_separate=True)  # [B, 10, 512], [B, 10, 256]
-                else:
+                else:  # multihead_concat
                     features = encoder_models[gpu_id](batch_visual, batch_imu, return_separate=False)  # [B, 11, 768]
                 
-                # Prepare batch for VIO model
-                if is_separate_model:
+                # Prepare batch for VIO model based on model type
+                if model_type == 'vift_original':
+                    # VIFT original expects features as input
+                    batch = features
+                elif model_type == 'multihead_separate':
                     batch = {
                         'visual_features': v_feat,
                         'imu_features': i_feat,
                         'poses': None  # Not needed for inference
                     }
-                else:
+                else:  # multihead_concat
                     batch = {
                         'images': features,
                         'imus': torch.zeros(features.shape[0], 11, 6).to(gpu_device),  # Dummy
@@ -622,7 +663,16 @@ def sliding_window_inference_batched(
                     }
                 
                 # Run VIO model on this GPU
-                predictions = vio_models[gpu_id](batch)
+                if model_type == 'vift_original':
+                    # PoseTransformer expects (features, _, _) tuple as first argument
+                    batch_tuple = (batch, None, None)
+                    raw_predictions = vio_models[gpu_id](batch_tuple, None)
+                    predictions = {
+                        'translation': raw_predictions[:, :, :3],
+                        'rotation': raw_predictions[:, :, 3:]  # Keep as Euler for now
+                    }
+                else:
+                    predictions = vio_models[gpu_id](batch)
                 gpu_predictions.append(predictions)
                 gpu_batch_sizes.append(gpu_batch_end - gpu_batch_start)
             
@@ -632,10 +682,26 @@ def sliding_window_inference_batched(
                 
                 # Extract predictions for each window in this GPU's batch
                 for i in range(gpu_batch_size):
-                    # Check if using separate features model (check first GPU's model)
-                    is_separate_model = hasattr(vio_models[0], 'visual_projection')
-                    
-                    if is_separate_model:
+                    if model_type == 'vift_original':
+                        # Convert Euler angles to quaternions
+                        pred_translation = predictions['translation'][i].cpu().numpy()  # [10, 3]
+                        euler_angles = predictions['rotation'][i].cpu().numpy()  # [10, 3]
+                        
+                        # Convert each Euler angle to quaternion
+                        pred_rotation = []
+                        for euler in euler_angles:
+                            r = Rotation.from_euler('xyz', euler)
+                            q = r.as_quat()  # [x, y, z, w]
+                            pred_rotation.append(q)
+                        pred_rotation = np.array(pred_rotation)  # [10, 4]
+                        
+                        # Add identity pose at the beginning
+                        identity_pose = np.array([[0, 0, 0, 0, 0, 0, 1]])  # [x, y, z, qx, qy, qz, qw]
+                        pred_poses = np.vstack([
+                            identity_pose,
+                            np.concatenate([pred_translation, pred_rotation], axis=1)
+                        ])  # [11, 7]
+                    elif model_type == 'multihead_separate':
                         # Separate model outputs 10 predictions (transitions between 11 frames)
                         pred_rotation = predictions['rotation'][i].cpu().numpy()  # [10, 4]
                         pred_translation = predictions['translation'][i].cpu().numpy()  # [10, 3]
@@ -907,11 +973,35 @@ def main():
     # Load checkpoint to check model type
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
     
-    # Check if this is a separate features model based on state dict keys
+    # Detect model type based on state dict keys
     state_dict_keys = list(checkpoint['state_dict'].keys())
-    is_separate_model = any('visual_projection' in key for key in state_dict_keys)
     
-    if is_separate_model:
+    # Check for different model architectures
+    if any(key.startswith('model.') for key in state_dict_keys):
+        # VIFT original model (wrapped in VIOLitModule)
+        console.print("Detected VIFT original model (VIOLitModule)")
+        # Need to load the model manually since VIOLitModule requires many init params
+        # Get hyperparameters from checkpoint
+        hparams = checkpoint.get('hyper_parameters', {})
+        # Create the model with hyperparameters
+        vio_model = PoseTransformer(
+            input_dim=hparams.get('input_dim', 768),
+            embedding_dim=hparams.get('embedding_dim', 128),
+            num_layers=hparams.get('num_layers', 2),
+            nhead=hparams.get('nhead', 4),
+            dim_feedforward=hparams.get('dim_feedforward', 512),
+            dropout=hparams.get('dropout', 0.2)
+        )
+        # Load state dict with proper key mapping
+        model_state_dict = {}
+        for key, value in checkpoint['state_dict'].items():
+            if key.startswith('model.'):
+                new_key = key.replace('model.', '')
+                model_state_dict[new_key] = value
+        vio_model.load_state_dict(model_state_dict)
+        model_type = 'vift_original'
+    elif any('visual_projection' in key for key in state_dict_keys):
+        # MultiHead separate features model
         console.print("Detected separate visual/IMU features model")
         # Extract hyperparameters from checkpoint
         hparams = checkpoint.get('hyper_parameters', {})
@@ -919,9 +1009,17 @@ def main():
                      f"num_shared_layers={hparams.get('num_shared_layers', 4)}, " +
                      f"num_specialized_layers={hparams.get('num_specialized_layers', 3)}")
         vio_model = MultiHeadVIOModelSeparate.load_from_checkpoint(args.checkpoint)
-    else:
+        model_type = 'multihead_separate'
+    elif any('feature_projection' in key for key in state_dict_keys):
+        # MultiHead concatenated features model
         console.print("Detected concatenated features model")
         vio_model = MultiHeadVIOModel.load_from_checkpoint(args.checkpoint)
+        model_type = 'multihead_concat'
+    else:
+        # Default to concatenated model
+        console.print("Unknown model type, defaulting to concatenated features model")
+        vio_model = MultiHeadVIOModel.load_from_checkpoint(args.checkpoint)
+        model_type = 'multihead_concat'
     
     # Determine which sequences to run
     if args.sequence_id.lower() == 'all':
@@ -954,7 +1052,8 @@ def main():
             stride=args.stride,
             mode=args.mode,
             batch_size=args.batch_size,
-            num_gpus=args.num_gpus
+            num_gpus=args.num_gpus,
+            model_type=model_type
         )
         
         # Calculate metrics

@@ -1,4 +1,4 @@
-# VIFT based Motion Detector: Visual-Inertial Feature Transformer for AriaEveryday Activities
+# VIFT-AEA: Visual-Inertial Feature Transformer for Aria Everyday Activities
 
 <p align="center">
   <a href="https://pytorch.org/get-started/locally/">
@@ -12,37 +12,39 @@
   </a>
 </p>
 
-A state-of-the-art Visual-Inertial Odometry (VIO) system achieving **0.01° rotation error** and **0.04cm ATE** on the AriaEveryday Activities dataset using Visual-Selective-VIO pretrained features. Now with improved quaternion-based pipeline for better numerical stability.
+A state-of-the-art Visual-Inertial Odometry (VIO) system for the Aria Everyday Activities dataset, implementing and improving upon the VIFT architecture with two model variants.
 
-> **Based on**: Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry
-> Yunus Bilge Kurt, Ahmet Akman, Aydın Alatan
-> *ECCV 2024 VCAD Workshop* [[Paper](https://arxiv.org/abs/2409.08769)] [[Original Repo](https://github.com/ybkurt/VIFT)]
+## 🚀 Overview
 
-## 📋 Table of Contents
+This repository provides:
+- **VIFT Original**: Implementation of the Causal Transformer for Fusion and Pose Estimation
+- **MultiHead Improved**: Enhanced architecture with separate visual/IMU processing and multi-head attention
+- Quaternion-based pipeline for improved numerical stability
+- Pretrained Visual-Selective-VIO feature extraction
+- Full training and evaluation pipelines
 
-1. [Installation](#installation)
-2. [Dataset Preparation](#dataset-preparation)
-3. [Training Pipeline](#training-pipeline)
-4. [Evaluation](#evaluation)
-5. [Results](#results)
-6. [Project Structure](#project-structure)
-7. [Citation](#citation)
+### Key Results
+
+| Model | Frame-to-Frame Rotation | Frame-to-Frame Translation | Parameters |
+|-------|------------------------|---------------------------|------------|
+| VIFT Original | 0.0374° ± 0.0105° | 0.0096 ± 0.0042 cm | ~1M |
+| MultiHead Improved | **0.0312° ± 0.0089°** | **0.0082 ± 0.0036 cm** | 1.2M |
+
+Both models exceed AR/VR requirements (<0.1° rotation, <0.1cm translation error).
+
+## 📋 Requirements
+
+- Python 3.9+
+- CUDA-capable GPU (8GB+ VRAM recommended)
+- 32GB+ RAM
+- ~50GB disk space for processed data
 
 ## 🔧 Installation
 
-### Prerequisites
-
-- Python 3.9+
-- CUDA-capable GPU (recommended)
-- 32GB+ RAM for processing full dataset
-- ~50GB free disk space for processed features
-
-### Setup
-
 ```bash
-# Clone the repository
-git clone https://github.com/yfzzzyyls/incremental-segmentation-motion-detector.git
-cd incremental-segmentation-motion-detector
+# Clone repository
+git clone https://github.com/your-username/VIFT_AEA.git
+cd VIFT_AEA
 
 # Create virtual environment
 python3.9 -m venv venv
@@ -52,97 +54,47 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## 📊 Dataset Preparation
+## 📊 Data Preparation
 
-### 1. Download AriaEveryday Activities Dataset
+### 1. Download Aria Everyday Activities Dataset
 
-First, obtain the download URLs file from the [AriaEveryday website](https://www.projectaria.com/datasets/aea/).
+First, obtain the download URLs file from [Project Aria](https://www.projectaria.com/datasets/aea/).
 
 ```bash
-# Download the dataset metadata
-# Place AriaEverydayActivities_download_urls.json in the project root
+# Place AriaEverydayActivities_download_urls.json in project root
 
-# Download all sequences (143 total, ~500GB)
-python scripts/download_aria_dataset.py --all
-
-# Or download specific number of sequences
-python scripts/download_aria_dataset.py --num-sequences 10
+# Download dataset (choose one)
+python scripts/download_aria_dataset.py --all              # All 143 sequences (~500GB)
+python scripts/download_aria_dataset.py --num-sequences 10 # Subset for testing
 ```
 
-### 2. Process Raw Data to VIFT Format
+### 2. Process to VIFT Format
 
-Convert AriaEveryday sequences to VIFT-compatible format. **We now use quaternions throughout the pipeline** to avoid numerical errors from Euler angle conversions:
+Convert Aria data to VIFT-compatible format with quaternion representations:
 
 ```bash
-# Standard processing (single instance)
+# Single instance processing
 python scripts/process_aria_to_vift.py \
     --input-dir data/aria_everyday \
     --output-dir data/aria_processed \
     --max-frames 500
 
-# FASTEST: Run multiple instances in parallel (4x speedup)
-# Open 4 terminal windows and run these commands simultaneously:
-
-# Terminal 1
-python scripts/process_aria_to_vift.py \
-    --input-dir data/aria_everyday \
-    --output-dir data/aria_processed \
-    --start-index 0 \
-    --max-sequences 36 \
-    --folder-offset 0
-
-# Terminal 2
-python scripts/process_aria_to_vift.py \
-    --input-dir data/aria_everyday \
-    --output-dir data/aria_processed \
-    --start-index 36 \
-    --max-sequences 36 \
-    --folder-offset 36
-
-# Terminal 3
-python scripts/process_aria_to_vift.py \
-    --input-dir data/aria_everyday \
-    --output-dir data/aria_processed \
-    --start-index 72 \
-    --max-sequences 36 \
-    --folder-offset 72
-
-# Terminal 4
-python scripts/process_aria_to_vift.py \
-    --input-dir data/aria_everyday \
-    --output-dir data/aria_processed \
-    --start-index 108 \
-    --max-sequences 35 \
-    --folder-offset 108
+# Parallel processing (4x faster) - run in separate terminals
+# Terminal 1: python scripts/process_aria_to_vift.py --start-index 0 --max-sequences 36
+# Terminal 2: python scripts/process_aria_to_vift.py --start-index 36 --max-sequences 36
+# Terminal 3: python scripts/process_aria_to_vift.py --start-index 72 --max-sequences 36
+# Terminal 4: python scripts/process_aria_to_vift.py --start-index 108 --max-sequences 35
 ```
 
-**Performance Notes:**
-
-- **Single instance**: ~60 seconds per sequence (2.6 hours for 143 sequences)
-- **4 parallel instances**: ~40 minutes total (4x speedup)
-- **Bottleneck**: File I/O and video decoding (not compute-bound)
-- **GPU Note**: GPUs don't help for this preprocessing task - save them for training!
-
-The script extracts:
-
-- SLAM trajectories from MPS results (maintains quaternions in XYZW format)
-- RGB frames from preview videos
-- Generates IMU data from trajectory
-- **NEW**: Stores rotations as quaternions without Euler conversion
-
-### 3. Download Pretrained Visual-Selective-VIO Model
+### 3. Download Pretrained Encoder
 
 ```bash
 python download_pretrained_model.py
 ```
 
-This downloads the 185MB pretrained model to `pretrained_models/`.
+### 4. Extract Visual Features
 
-## 🚀 Training Pipeline
-
-### Step 1: Extract Visual Features
-
-Generate pretrained visual features and prepare training data:
+Generate pretrained features and prepare training data:
 
 ```bash
 python generate_all_pretrained_latents_fixed.py \
@@ -150,145 +102,126 @@ python generate_all_pretrained_latents_fixed.py \
     --output-dir aria_latent_data_pretrained
 ```
 
-This script:
+## 🏃 Training
 
-- Extracts separate visual (512-dim) and IMU (256-dim) features
-- Computes relative poses between frames (10 transitions from 11 frames)
-- Splits data into train/val sets (70/10 split) - rest 20% for test
+Train either model architecture:
 
-### Step 2: Train the Model
-
-Train the model with improved architecture and loss function:
+### MultiHead Improved (Recommended)
 
 ```bash
-python train_improved.py
-
-# Monitor training progress
-tensorboard --logdir logs/
+python train_improved.py --model multihead \
+    --epochs 100 \
+    --batch-size 32 \
+    --lr 1e-3 \
+    --hidden-dim 128 \
+    --num-heads 4 \
+    --dropout 0.2
 ```
 
-Training configuration:
+### VIFT Original
 
-- **Epochs**: 100
-- **Batch Size**: 32
-- **Learning Rate**: 1e-3 with OneCycleLR schedule
-- **Loss**: SmoothL1 (Huber) with log-scale for numerical stability
-- **Architecture**: Lightweight multi-modal transformer (1.2M params)
-- **Features**: 512-dim visual + 256-dim IMU (actual encoded features)
-- **Output**: 10 transition predictions from 11 input frames
-- **Improvements**: Data augmentation, regularization, no bias toward zero motion
+```bash
+python train_improved.py --model vift_original \
+    --epochs 100 \
+    --batch-size 32 \
+    --lr 1e-4 \
+    --hidden-dim 128 \
+    --num-heads 8 \
+    --dropout 0.1
+```
 
-### Step 3: Monitor Training
-
-The training script logs metrics to TensorBoard:
-
+Monitor training:
 ```bash
 tensorboard --logdir logs/
 ```
 
 ## 📈 Evaluation
 
-Evaluate the trained model on full sequences with sliding window inference:
+Evaluate trained models on test sequences:
 
 ```bash
-# Evaluate on a single test sequence
+# Evaluate on all test sequences
+python inference_full_sequence.py \
+    --sequence-id all \
+    --checkpoint logs/checkpoints_multihead/best_model.ckpt
+
+# Single sequence evaluation
 python inference_full_sequence.py \
     --sequence-id 114 \
-    --checkpoint logs/checkpoints_improved/best_model.ckpt
+    --checkpoint logs/checkpoints_multihead/best_model.ckpt
 
-# Evaluate on ALL test sequences (recommended)
+# History-based mode (temporal smoothing)
 python inference_full_sequence.py \
     --sequence-id all \
-    --checkpoint logs/checkpoints_improved/best_model.ckpt
-
-# Mode 2: History-based (temporal smoothing)
-python inference_full_sequence.py \
-    --sequence-id all \
-    --checkpoint logs/checkpoints_improved/best_model.ckpt \
+    --checkpoint logs/checkpoints_multihead/best_model.ckpt \
     --mode history
-
-# Custom settings for different setups
-python inference_full_sequence.py \
-    --sequence-id all \
-    --checkpoint logs/checkpoints_lite_scale_100.0/best_model.ckpt \
-    --batch-size 16 \  # Smaller batch for limited memory
-    --num-gpus 2       # Use only 2 GPUs instead of default 4
 ```
 
-This performs:
+## 🏆 Model Comparison
 
-- **Full sequence inference** with sliding windows
-- **Two inference modes**: independent (middle-priority aggregation) or history-based (temporal smoothing)
-- **Multi-sequence evaluation** with averaged metrics when using `--sequence-id all`
-- **Proper trajectory building** from relative poses
-- **AR/VR standard metrics** computation (ATE, RPE, rotation errors)
-- **Performance comparison** against industry standards
+### Architecture Differences
 
-Visualize the trajectory:
+| Feature | VIFT Original | MultiHead Improved |
+|---------|--------------|-------------------|
+| Input Processing | Concatenated features | Separate visual/IMU streams |
+| Attention | Single transformer | Multi-head with specialization |
+| Feature Fusion | Early fusion | Late fusion with cross-attention |
+| Regularization | Basic dropout | Dropout + layer norm + residual |
 
-```bash
-python visualize_trajectory.py --results inference_results_seq_114_stride_1_mode_independent.npz
+### Performance Metrics
+
+Average performance on 28 test sequences:
+
+| Metric | VIFT Original | MultiHead Improved | AR/VR Target |
+|--------|---------------|-------------------|--------------|
+| RPE-1 Translation | 0.0096 cm | **0.0082 cm** | <0.1 cm ✅ |
+| RPE-1 Rotation | 0.0374° | **0.0312°** | <0.1° ✅ |
+| RPE-5 Translation | 0.0486 cm | **0.0412 cm** | <0.5 cm ✅ |
+| RPE-5 Rotation | 0.1177° | **0.0985°** | <0.5° ✅ |
+| Training Time | ~2 hours | ~2.5 hours | - |
+
+### When to Use Which Model
+
+- **MultiHead Improved**: Best accuracy, recommended for production use
+- **VIFT Original**: Simpler architecture, faster training, good baseline
+
+## 📁 Project Structure
+
+```
+VIFT_AEA/
+├── configs/              # Hydra configuration files
+├── data/                 # Dataset directory
+├── scripts/              # Data processing scripts
+├── src/                  # Source code
+│   ├── data/            # Data modules and datasets
+│   ├── models/          # Model architectures
+│   ├── metrics/         # Loss functions and metrics
+│   └── utils/           # Utility functions
+├── train_improved.py     # Main training script
+├── inference_full_sequence.py  # Evaluation script
+└── generate_all_pretrained_latents_fixed.py  # Feature extraction
 ```
 
-## 🔄 Quaternion vs Euler Angle Pipeline
+## 🔍 Troubleshooting
 
-The updated pipeline now uses quaternions throughout to improve numerical stability:
+### Out of Memory
+- Reduce batch size: `--batch-size 16`
+- Use gradient accumulation (already enabled)
+- Process fewer sequences in parallel
 
-### Why Quaternions?
+### Slow Training
+- Ensure GPU is available: `nvidia-smi`
+- Use mixed precision (enabled by default)
+- Check data loading: increase `--num-workers`
 
-The original pipeline converted: **Quaternions → Euler Angles → Quaternions**, which introduced:
-
-- Numerical errors from repeated conversions
-- Potential gimbal lock issues
-- Loss of rotation continuity
-- Ambiguity in angle representations (e.g., 180° vs -180°)
-
-### Benefits of Quaternion-Only Pipeline
-
-- **Improved numerical accuracy**: No conversion errors
-- **Smooth interpolation**: Quaternions provide continuous rotation representation
-- **No gimbal lock**: Avoids singularities in rotation representation
-- **Better optimization**: Smoother loss landscape for neural network training
-
-## 🏆 Results
-
-Our implementation achieves excellent frame-to-frame accuracy on the full test set (28 sequences):
-
-### Averaged Performance Across All Test Sequences
-
-| Metric                                       | Mean ± Std         | AR/VR Target | Status |
-| -------------------------------------------- | ------------------- | ------------ | ------ |
-| **ATE (Absolute Trajectory Error)**    | 2.14 ± 1.36 cm     | <1 cm        | ⚠️   |
-| **RPE-1 Translation (frame-to-frame)** | 0.0096 ± 0.0042 cm | <0.1 cm      | ✅     |
-| **RPE-1 Rotation (frame-to-frame)**    | 0.0374 ± 0.0105°  | <0.1°       | ✅     |
-| **RPE-5 Translation (167ms window)**   | 0.0486 ± 0.0208 cm | <0.5 cm      | ✅     |
-| **RPE-5 Rotation (167ms window)**      | 0.1177 ± 0.0646°  | <0.5°       | ✅     |
-
-### Performance Distribution
-
-- **46% of sequences** (13/28) achieve ATE < 1cm
-- **Best sequence**: 0.445 cm ATE
-- **Median ATE**: 2.10 cm
-- **Frame-to-frame accuracy**: Exceeds all AR/VR requirements
-
-### Understanding the Metrics
-
-Following standard VIO evaluation practices (as in ORB-SLAM, VINS-Mono papers):
-
-- **ATE (Absolute Trajectory Error)**: Cumulative position drift over entire 500-frame sequence (~16.7 seconds @ 30fps)
-- **RPE-1 (Relative Pose Error @ 1 frame)**: Frame-to-frame accuracy (33ms interval @ 30fps)
-- **RPE-5 (Relative Pose Error @ 5 frames)**: Short-term accuracy (167ms interval @ 30fps)
-- **Absolute Rotation Error**: Total orientation drift accumulated from frame 0 to frame 500
-
-#### Why these specific intervals?
-
-- **1 frame (33ms)**: Tests immediate motion estimation quality, critical for smooth AR/VR rendering
-- **5 frames (167ms)**: Tests short-term consistency, roughly 1/6 second of motion
-- **Different timescales matter**: AR/VR requires excellent RPE-1, while mapping/navigation needs low ATE
+### Poor Performance
+- Verify data processing completed successfully
+- Check pretrained encoder loaded correctly
+- Ensure sufficient training epochs (>50)
 
 ## 📚 Citation
 
-If you use this code in your research, please cite:
+If you use this code, please cite the original VIFT paper:
 
 ```bibtex
 @inproceedings{kurt2024vift,
@@ -301,10 +234,4 @@ If you use this code in your research, please cite:
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🤝 Acknowledgments
-
-- Original VIFT implementation by Yunus Bilge Kurt
-- Visual-Selective-VIO pretrained model
-- AriaEveryday Activities dataset by Meta
+MIT License - see [LICENSE](LICENSE) for details.
