@@ -21,6 +21,7 @@ from scipy.spatial.transform import Rotation
 from rich.console import Console
 from rich.table import Table
 import argparse
+from scipy.linalg import svd
 
 # Add src to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -130,6 +131,83 @@ def accumulate_poses(relative_poses):
         absolute_poses[i, 3:] = current_quat
     
     return absolute_poses
+
+
+def align_trajectory_se3(estimated_traj, ground_truth_traj, align_orientation=False):
+    """
+    Align estimated trajectory to ground truth using Umeyama algorithm.
+    
+    This implements the standard SE(3) trajectory alignment used in TUM RGB-D benchmark
+    and other visual odometry evaluation tools.
+    
+    Args:
+        estimated_traj: [N, 7] array of poses (x, y, z, qx, qy, qz, qw)
+        ground_truth_traj: [N, 7] array of poses (x, y, z, qx, qy, qz, qw)
+        align_orientation: If True, align both position and orientation.
+                          If False, only align position (default behavior for most benchmarks)
+    
+    Returns:
+        aligned_traj: [N, 7] aligned trajectory
+        transform_params: dict with rotation matrix R, translation t, and scale s
+    """
+    assert len(estimated_traj) == len(ground_truth_traj), "Trajectories must have same length"
+    
+    # Extract positions
+    est_positions = estimated_traj[:, :3]
+    gt_positions = ground_truth_traj[:, :3]
+    
+    # Center the trajectories
+    est_mean = np.mean(est_positions, axis=0)
+    gt_mean = np.mean(gt_positions, axis=0)
+    
+    est_centered = est_positions - est_mean
+    gt_centered = gt_positions - gt_mean
+    
+    # Compute scale using Umeyama's method
+    est_var = np.sum(est_centered ** 2) / len(est_centered)
+    
+    # Compute cross-covariance matrix
+    W = np.dot(gt_centered.T, est_centered) / len(est_centered)
+    
+    # SVD
+    U, S, Vt = svd(W)
+    
+    # Compute rotation
+    R = np.dot(U, Vt)
+    
+    # Ensure proper rotation (det(R) = 1)
+    if np.linalg.det(R) < 0:
+        Vt[-1, :] *= -1
+        R = np.dot(U, Vt)
+    
+    # Compute scale
+    scale = np.trace(np.dot(R, W.T)) / est_var
+    
+    # Compute translation
+    translation = gt_mean - scale * np.dot(R, est_mean)
+    
+    # Apply transformation to estimated trajectory
+    aligned_positions = scale * np.dot(est_positions, R.T) + translation
+    
+    # Build aligned trajectory
+    aligned_traj = estimated_traj.copy()
+    aligned_traj[:, :3] = aligned_positions
+    
+    if align_orientation:
+        # Also align orientations by applying the rotation
+        for i in range(len(aligned_traj)):
+            q_est = estimated_traj[i, 3:]
+            r_est = Rotation.from_quat(q_est)
+            r_aligned = Rotation.from_matrix(R) * r_est
+            aligned_traj[i, 3:] = r_aligned.as_quat()
+    
+    transform_params = {
+        'rotation': R,
+        'translation': translation,
+        'scale': scale
+    }
+    
+    return aligned_traj, transform_params
 
 
 def sliding_window_inference_batched(
@@ -458,8 +536,16 @@ def sliding_window_inference_batched(
     }
 
 
-def calculate_metrics(results):
-    """Calculate ATE, RPE and other metrics with proper AR/VR standards."""
+def calculate_metrics(results, no_alignment=False):
+    """Calculate ATE, RPE and other metrics with proper AR/VR standards.
+    
+    Args:
+        results: Dictionary with trajectory results
+        no_alignment: If True, skip trajectory alignment (default: False)
+    
+    Returns:
+        metrics: Dictionary with both aligned and unaligned metrics
+    """
     pred_traj = results['absolute_trajectory']
     gt_traj = results['ground_truth']
     pred_rel = results['relative_poses']
@@ -472,18 +558,37 @@ def calculate_metrics(results):
     pred_rel = pred_rel[:min_len]
     gt_rel = gt_rel[:min_len]
     
-    # Calculate ATE (Absolute Trajectory Error) in mm
-    ate_errors_mm = []
+    # Calculate unaligned (raw) ATE first
+    ate_errors_raw_mm = []
     for pred, gt in zip(pred_traj, gt_traj):
         error_cm = np.linalg.norm(pred[:3] - gt[:3])
         error_mm = error_cm * 10  # Convert cm to mm
-        ate_errors_mm.append(error_mm)
+        ate_errors_raw_mm.append(error_mm)
     
-    ate_errors_mm = np.array(ate_errors_mm)
+    ate_errors_raw_mm = np.array(ate_errors_raw_mm)
     
-    # Calculate rotation errors for absolute poses
+    # Calculate aligned ATE if not disabled
+    if not no_alignment:
+        # Align trajectories using Umeyama algorithm
+        aligned_pred_traj, transform_params = align_trajectory_se3(pred_traj, gt_traj, align_orientation=False)
+        
+        # Calculate aligned ATE
+        ate_errors_aligned_mm = []
+        for pred, gt in zip(aligned_pred_traj, gt_traj):
+            error_cm = np.linalg.norm(pred[:3] - gt[:3])
+            error_mm = error_cm * 10  # Convert cm to mm
+            ate_errors_aligned_mm.append(error_mm)
+        
+        ate_errors_aligned_mm = np.array(ate_errors_aligned_mm)
+    else:
+        # If alignment is disabled, aligned metrics are same as raw
+        ate_errors_aligned_mm = ate_errors_raw_mm
+        aligned_pred_traj = pred_traj
+        transform_params = None
+    
+    # Use aligned trajectory for rotation errors (following standard practice)
     rot_errors_deg = []
-    for pred, gt in zip(pred_traj[1:], gt_traj[1:]):  # Skip first frame (origin)
+    for pred, gt in zip(aligned_pred_traj[1:], gt_traj[1:]):  # Skip first frame (origin)
         pred_r = Rotation.from_quat(pred[3:])
         gt_r = Rotation.from_quat(gt[3:])
         rel_r = pred_r * gt_r.inv()
@@ -558,18 +663,47 @@ def calculate_metrics(results):
                 'rot_median': 0
             }
     
+    # Calculate RMSE for both aligned and raw ATE (this is the standard metric)
+    ate_rmse_aligned_mm = np.sqrt(np.mean(np.square(ate_errors_aligned_mm)))
+    ate_rmse_raw_mm = np.sqrt(np.mean(np.square(ate_errors_raw_mm)))
+    
+    # Store transform parameters if alignment was performed
+    alignment_info = {}
+    if transform_params is not None:
+        alignment_info = {
+            'scale': transform_params['scale'],
+            'rotation_angle_deg': np.degrees(Rotation.from_matrix(transform_params['rotation']).magnitude()),
+            'translation_magnitude_mm': np.linalg.norm(transform_params['translation']) * 10  # Convert to mm
+        }
+    
     return {
-        'ate_mean_mm': ate_errors_mm.mean(),
-        'ate_std_mm': ate_errors_mm.std(),
-        'ate_median_mm': np.median(ate_errors_mm),
-        'ate_95_mm': np.percentile(ate_errors_mm, 95),
-        'ate_max_mm': ate_errors_mm.max(),
+        # Aligned metrics (for research comparison)
+        'ate_mean_mm': ate_errors_aligned_mm.mean(),  # Keep for backward compatibility
+        'ate_rmse_mm': ate_rmse_aligned_mm,  # This is the standard ATE metric
+        'ate_std_mm': ate_errors_aligned_mm.std(),
+        'ate_median_mm': np.median(ate_errors_aligned_mm),
+        'ate_95_mm': np.percentile(ate_errors_aligned_mm, 95),
+        'ate_max_mm': ate_errors_aligned_mm.max(),
+        
+        # Raw/unaligned metrics (for deployment evaluation)
+        'ate_mean_raw_mm': ate_errors_raw_mm.mean(),
+        'ate_rmse_raw_mm': ate_rmse_raw_mm,
+        'ate_std_raw_mm': ate_errors_raw_mm.std(),
+        'ate_median_raw_mm': np.median(ate_errors_raw_mm),
+        'ate_95_raw_mm': np.percentile(ate_errors_raw_mm, 95),
+        'ate_max_raw_mm': ate_errors_raw_mm.max(),
+        
+        # Rotation metrics (from aligned trajectory)
         'rot_mean_deg': rot_errors_deg.mean(),
         'rot_std_deg': rot_errors_deg.std(),
         'rot_median_deg': np.median(rot_errors_deg),
         'rot_95_deg': np.percentile(rot_errors_deg, 95),
+        
+        # Other metrics
         'rpe_results': rpe_results,
-        'total_frames': len(ate_errors_mm)
+        'total_frames': len(ate_errors_aligned_mm),
+        'alignment_disabled': no_alignment,
+        'alignment_info': alignment_info
     }
 
 
@@ -595,6 +729,8 @@ def main():
                         help='Batch size for inference (default: 32)')
     parser.add_argument('--num-gpus', type=int, default=4,
                         help='Number of GPUs to use (default: 4)')
+    parser.add_argument('--no-alignment', action='store_true',
+                        help='Disable trajectory alignment (show raw ATE only)')
     
     args = parser.parse_args()
     
@@ -699,7 +835,7 @@ def main():
         )
         
         # Calculate metrics
-        metrics = calculate_metrics(results)
+        metrics = calculate_metrics(results, no_alignment=args.no_alignment)
         metrics['sequence_id'] = seq_id
         all_metrics.append(metrics)
         
@@ -729,11 +865,44 @@ def main():
         
         table.add_row("Sequence", metrics['sequence_id'])
         table.add_row("Total Frames", f"{metrics['total_frames']:,}")
-        table.add_row("ATE Mean", f"{metrics['ate_mean_mm']:.2f} mm")
-        table.add_row("ATE Std", f"{metrics['ate_std_mm']:.2f} mm")
-        table.add_row("ATE Median", f"{metrics['ate_median_mm']:.2f} mm")
-        table.add_row("ATE 95%", f"{metrics['ate_95_mm']:.2f} mm")
-        table.add_row("ATE Max", f"{metrics['ate_max_mm']:.2f} mm")
+        
+        # Show aligned/raw status
+        alignment_status = "Disabled" if metrics['alignment_disabled'] else "Enabled"
+        table.add_row("Trajectory Alignment", alignment_status)
+        
+        # ATE metrics (aligned or raw based on settings)
+        if not metrics['alignment_disabled']:
+            table.add_row("[bold]ATE (Aligned)[/bold]", "")
+            table.add_row("  ├─ Mean", f"{metrics['ate_mean_mm']:.2f} mm")
+            table.add_row("  ├─ RMSE", f"{metrics['ate_rmse_mm']:.2f} mm")
+            table.add_row("  ├─ Std", f"{metrics['ate_std_mm']:.2f} mm")
+            table.add_row("  ├─ Median", f"{metrics['ate_median_mm']:.2f} mm")
+            table.add_row("  ├─ 95%", f"{metrics['ate_95_mm']:.2f} mm")
+            table.add_row("  └─ Max", f"{metrics['ate_max_mm']:.2f} mm")
+            
+            table.add_row("[bold]ATE (Raw)[/bold]", "")
+            table.add_row("  ├─ Mean", f"{metrics['ate_mean_raw_mm']:.2f} mm")
+            table.add_row("  ├─ RMSE", f"{metrics['ate_rmse_raw_mm']:.2f} mm")
+            table.add_row("  ├─ Std", f"{metrics['ate_std_raw_mm']:.2f} mm")
+            table.add_row("  ├─ Median", f"{metrics['ate_median_raw_mm']:.2f} mm")
+            table.add_row("  ├─ 95%", f"{metrics['ate_95_raw_mm']:.2f} mm")
+            table.add_row("  └─ Max", f"{metrics['ate_max_raw_mm']:.2f} mm")
+            
+            # Show alignment parameters
+            if 'alignment_info' in metrics and metrics['alignment_info']:
+                table.add_row("[bold]Alignment Parameters[/bold]", "")
+                table.add_row("  ├─ Scale", f"{metrics['alignment_info']['scale']:.4f}")
+                table.add_row("  ├─ Rotation", f"{metrics['alignment_info']['rotation_angle_deg']:.2f}°")
+                table.add_row("  └─ Translation", f"{metrics['alignment_info']['translation_magnitude_mm']:.2f} mm")
+        else:
+            table.add_row("[bold]ATE[/bold]", "")
+            table.add_row("  ├─ Mean", f"{metrics['ate_mean_mm']:.2f} mm")
+            table.add_row("  ├─ RMSE", f"{metrics['ate_rmse_mm']:.2f} mm")
+            table.add_row("  ├─ Std", f"{metrics['ate_std_mm']:.2f} mm")
+            table.add_row("  ├─ Median", f"{metrics['ate_median_mm']:.2f} mm")
+            table.add_row("  ├─ 95%", f"{metrics['ate_95_mm']:.2f} mm")
+            table.add_row("  └─ Max", f"{metrics['ate_max_mm']:.2f} mm")
+        
         table.add_row("Rotation Error Mean", f"{metrics['rot_mean_deg']:.2f}°")
         table.add_row("Rotation Error Std", f"{metrics['rot_std_deg']:.2f}°")
         
@@ -745,31 +914,55 @@ def main():
         per_seq_table = Table(title="Per-Sequence Results")
         per_seq_table.add_column("Sequence", style="cyan")
         per_seq_table.add_column("Frames", style="white")
-        per_seq_table.add_column("ATE Mean", style="green")
+        if not args.no_alignment:
+            per_seq_table.add_column("ATE Aligned", style="green")
+            per_seq_table.add_column("ATE Raw", style="yellow")
+        else:
+            per_seq_table.add_column("ATE", style="green")
         per_seq_table.add_column("RPE@33ms Trans", style="green")
         per_seq_table.add_column("RPE@33ms Rot", style="green")
         per_seq_table.add_column("Status", style="white")
         
         for m in all_metrics:
             status = "✅" if m['ate_mean_mm'] < 10.0 else "❌"
-            per_seq_table.add_row(
-                m['sequence_id'],
-                f"{m['total_frames']:,}",
-                f"{m['ate_mean_mm']:.2f} mm",
-                f"{m['rpe_results']['33ms']['trans_mean']:.2f} mm",
-                f"{m['rpe_results']['33ms']['rot_mean']:.2f}°",
-                status
-            )
+            if not args.no_alignment:
+                per_seq_table.add_row(
+                    m['sequence_id'],
+                    f"{m['total_frames']:,}",
+                    f"{m['ate_mean_mm']:.2f} mm",
+                    f"{m['ate_mean_raw_mm']:.2f} mm",
+                    f"{m['rpe_results']['33ms']['trans_mean']:.2f} mm",
+                    f"{m['rpe_results']['33ms']['rot_mean']:.2f}°",
+                    status
+                )
+            else:
+                per_seq_table.add_row(
+                    m['sequence_id'],
+                    f"{m['total_frames']:,}",
+                    f"{m['ate_mean_mm']:.2f} mm",
+                    f"{m['rpe_results']['33ms']['trans_mean']:.2f} mm",
+                    f"{m['rpe_results']['33ms']['rot_mean']:.2f}°",
+                    status
+                )
         
         console.print(per_seq_table)
         
         # Calculate averaged metrics
         avg_metrics = {}
-        for key in ['ate_mean_mm', 'ate_std_mm', 'ate_median_mm', 'ate_95_mm', 
+        # Average aligned metrics
+        for key in ['ate_mean_mm', 'ate_std_mm', 'ate_median_mm', 'ate_95_mm', 'ate_rmse_mm',
                     'rot_mean_deg', 'rot_std_deg']:
             values = [m[key] for m in all_metrics]
             avg_metrics[key] = np.mean(values)
             avg_metrics[key + '_std_across_seqs'] = np.std(values)
+        
+        # Average raw metrics if alignment was used
+        if not args.no_alignment:
+            for key in ['ate_mean_raw_mm', 'ate_std_raw_mm', 'ate_median_raw_mm', 
+                        'ate_95_raw_mm', 'ate_rmse_raw_mm']:
+                values = [m[key] for m in all_metrics]
+                avg_metrics[key] = np.mean(values)
+                avg_metrics[key + '_std_across_seqs'] = np.std(values)
         
         # Average RPE results
         # Define time windows here (same as in calculate_metrics)
@@ -789,6 +982,7 @@ def main():
                 avg_rpe[window][metric] = np.mean(values)
         
         avg_metrics['rpe_results'] = avg_rpe
+        avg_metrics['alignment_disabled'] = args.no_alignment
         
         # Display averaged results
         console.print("\n")
@@ -797,12 +991,40 @@ def main():
         avg_table.add_column("Mean ± Std", style="green")
         avg_table.add_column("Std Across Seqs", style="yellow")
         
-        avg_table.add_row("ATE Mean", 
-                         f"{avg_metrics['ate_mean_mm']:.2f} ± {avg_metrics['ate_std_mm']:.2f} mm",
-                         f"{avg_metrics['ate_mean_mm_std_across_seqs']:.2f} mm")
-        avg_table.add_row("ATE Median", 
-                         f"{avg_metrics['ate_median_mm']:.2f} mm",
-                         f"{avg_metrics['ate_median_mm_std_across_seqs']:.2f} mm")
+        if not args.no_alignment:
+            # Show both aligned and raw metrics
+            avg_table.add_row("[bold]ATE (Aligned)[/bold]", "", "")
+            avg_table.add_row("  ├─ RMSE", 
+                             f"{avg_metrics['ate_rmse_mm']:.2f} mm",
+                             f"{avg_metrics['ate_rmse_mm_std_across_seqs']:.2f} mm")
+            avg_table.add_row("  ├─ Mean", 
+                             f"{avg_metrics['ate_mean_mm']:.2f} ± {avg_metrics['ate_std_mm']:.2f} mm",
+                             f"{avg_metrics['ate_mean_mm_std_across_seqs']:.2f} mm")
+            avg_table.add_row("  └─ Median", 
+                             f"{avg_metrics['ate_median_mm']:.2f} mm",
+                             f"{avg_metrics['ate_median_mm_std_across_seqs']:.2f} mm")
+            
+            avg_table.add_row("[bold]ATE (Raw)[/bold]", "", "")
+            avg_table.add_row("  ├─ RMSE", 
+                             f"{avg_metrics['ate_rmse_raw_mm']:.2f} mm",
+                             f"{avg_metrics['ate_rmse_raw_mm_std_across_seqs']:.2f} mm")
+            avg_table.add_row("  ├─ Mean", 
+                             f"{avg_metrics['ate_mean_raw_mm']:.2f} ± {avg_metrics['ate_std_raw_mm']:.2f} mm",
+                             f"{avg_metrics['ate_mean_raw_mm_std_across_seqs']:.2f} mm")
+            avg_table.add_row("  └─ Median", 
+                             f"{avg_metrics['ate_median_raw_mm']:.2f} mm",
+                             f"{avg_metrics['ate_median_raw_mm_std_across_seqs']:.2f} mm")
+        else:
+            avg_table.add_row("ATE RMSE", 
+                             f"{avg_metrics['ate_rmse_mm']:.2f} mm",
+                             f"{avg_metrics['ate_rmse_mm_std_across_seqs']:.2f} mm")
+            avg_table.add_row("ATE Mean", 
+                             f"{avg_metrics['ate_mean_mm']:.2f} ± {avg_metrics['ate_std_mm']:.2f} mm",
+                             f"{avg_metrics['ate_mean_mm_std_across_seqs']:.2f} mm")
+            avg_table.add_row("ATE Median", 
+                             f"{avg_metrics['ate_median_mm']:.2f} mm",
+                             f"{avg_metrics['ate_median_mm_std_across_seqs']:.2f} mm")
+        
         avg_table.add_row("Absolute Rotation Error", 
                          f"{avg_metrics['rot_mean_deg']:.2f} ± {avg_metrics['rot_std_deg']:.2f}°",
                          f"{avg_metrics['rot_mean_deg_std_across_seqs']:.2f}°")
@@ -821,12 +1043,32 @@ def main():
     perf_table.add_column("Notes", style="blue", width=40)
     
     # ATE - Accumulated error over entire trajectory
-    perf_table.add_row(
-        "ATE (Absolute Trajectory Error)",
-        f"{metrics['ate_mean_mm']:.2f} ± {metrics['ate_std_mm']:.2f} mm",
-        "RMSE after alignment",
-        "Full trajectory error, lower is better"
-    )
+    # Show both aligned and raw if available
+    if not args.no_alignment and 'ate_rmse_raw_mm' in metrics:
+        # Aligned ATE (for research comparison)
+        perf_table.add_row(
+            "ATE (Aligned) - Research Comparison",
+            f"{metrics['ate_rmse_mm']:.2f} ± {metrics['ate_std_mm']:.2f} mm",
+            "RMSE (aligned)",
+            "Standard metric for VIO research papers"
+        )
+        # Raw ATE (for deployment evaluation)
+        perf_table.add_row(
+            "ATE (Raw) - Deployment Metric",
+            f"{metrics['ate_rmse_raw_mm']:.2f} ± {metrics['ate_std_raw_mm']:.2f} mm",
+            "RMSE (no alignment)",
+            "Real-world performance without calibration"
+        )
+    else:
+        # Only one ATE value (either raw only or aligned only)
+        alignment_note = "no alignment" if args.no_alignment else "aligned"
+        ate_value = metrics.get('ate_rmse_mm', metrics['ate_mean_mm'])
+        perf_table.add_row(
+            f"ATE (Absolute Trajectory Error)",
+            f"{ate_value:.2f} ± {metrics['ate_std_mm']:.2f} mm",
+            f"RMSE ({alignment_note})",
+            "Full trajectory error, lower is better"
+        )
     perf_table.add_row(
         "  ├─ Median",
         f"{metrics['ate_median_mm']:.2f} mm",
@@ -894,11 +1136,22 @@ def main():
     
     # Add metric explanations
     console.print("\n[bold]Metric Definitions (Following TUM/EuRoC Standards):[/bold]")
-    console.print("• ATE: Root Mean Square Error of aligned trajectories (entire sequence)")
+    if not args.no_alignment:
+        console.print("• ATE (Aligned): RMSE after SE(3) alignment - standard for research papers")
+        console.print("• ATE (Raw): RMSE without alignment - real deployment performance")
+    else:
+        console.print("• ATE: Root Mean Square Error of trajectories (entire sequence)")
     console.print("• RPE: Relative Pose Error over fixed time intervals")
     console.print("• Translation: Euclidean distance error in millimeters (mm)")
     console.print("• Rotation: Angular error in degrees (°)")
-    console.print("\n[dim]Note: Direct comparison with commercial VR systems is difficult due to lack of standardized benchmarks and publicly available metrics.[/dim]")
+    console.print("\n[bold]Alignment Details:[/bold]")
+    if not args.no_alignment:
+        console.print("• Trajectory alignment uses Umeyama algorithm (SVD-based)")
+        console.print("• Aligns position only (orientation alignment disabled by default)")
+        console.print("• Compensates for initialization differences and global drift")
+    else:
+        console.print("• Alignment disabled - showing raw trajectory errors")
+    console.print("\n[dim]Note: Aligned metrics are standard for research comparison, while raw metrics better reflect real-world deployment performance.[/dim]")
     
     # Performance summary based on research benchmarks
     console.print("\n[bold]Performance Analysis:[/bold]")
@@ -956,7 +1209,7 @@ def main():
                     {
                         k: float(v) if isinstance(v, np.floating) else v
                         for k, v in m.items()
-                        if k != 'rpe_results'
+                        if k not in ['rpe_results', 'alignment_info']
                     }
                     for m in all_metrics
                 ]
