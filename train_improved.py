@@ -136,10 +136,23 @@ class VIFTLightningWrapper(L.LightningModule):
         # We need to convert to quaternions for consistency
         translation = output[:, :, :3]
         
-        # For rotation, we'll use the quaternion from gt as VIFT outputs euler angles
-        # In practice, you'd convert euler to quaternion here
-        # For now, we'll just return the quaternion part from the poses
-        rotation = poses[:, :, 3:7]
+        # Convert VIFT's Euler angles to quaternions
+        euler_angles = output[:, :, 3:6]  # [B, seq_len, 3]
+        B, seq_len, _ = euler_angles.shape
+        
+        # Reshape for batch processing
+        euler_flat = euler_angles.reshape(-1, 3)
+        
+        # Convert Euler to quaternion using scipy
+        from scipy.spatial.transform import Rotation
+        quaternions = []
+        for i in range(euler_flat.shape[0]):
+            r = Rotation.from_euler('xyz', euler_flat[i].detach().cpu().numpy())
+            q = r.as_quat()  # Returns [x, y, z, w]
+            quaternions.append(q)
+        
+        quaternions = torch.tensor(quaternions, device=euler_angles.device, dtype=euler_angles.dtype)
+        rotation = quaternions.reshape(B, seq_len, 4)
         
         return {
             'translation': translation,

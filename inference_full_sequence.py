@@ -870,38 +870,21 @@ def main():
         alignment_status = "Disabled" if metrics['alignment_disabled'] else "Enabled"
         table.add_row("Trajectory Alignment", alignment_status)
         
-        # ATE metrics (aligned or raw based on settings)
-        if not metrics['alignment_disabled']:
-            table.add_row("[bold]ATE (Aligned)[/bold]", "")
-            table.add_row("  ├─ Mean", f"{metrics['ate_mean_mm']:.2f} mm")
-            table.add_row("  ├─ RMSE", f"{metrics['ate_rmse_mm']:.2f} mm")
-            table.add_row("  ├─ Std", f"{metrics['ate_std_mm']:.2f} mm")
-            table.add_row("  ├─ Median", f"{metrics['ate_median_mm']:.2f} mm")
-            table.add_row("  ├─ 95%", f"{metrics['ate_95_mm']:.2f} mm")
-            table.add_row("  └─ Max", f"{metrics['ate_max_mm']:.2f} mm")
-            
-            table.add_row("[bold]ATE (Raw)[/bold]", "")
-            table.add_row("  ├─ Mean", f"{metrics['ate_mean_raw_mm']:.2f} mm")
-            table.add_row("  ├─ RMSE", f"{metrics['ate_rmse_raw_mm']:.2f} mm")
-            table.add_row("  ├─ Std", f"{metrics['ate_std_raw_mm']:.2f} mm")
-            table.add_row("  ├─ Median", f"{metrics['ate_median_raw_mm']:.2f} mm")
-            table.add_row("  ├─ 95%", f"{metrics['ate_95_raw_mm']:.2f} mm")
-            table.add_row("  └─ Max", f"{metrics['ate_max_raw_mm']:.2f} mm")
-            
-            # Show alignment parameters
-            if 'alignment_info' in metrics and metrics['alignment_info']:
-                table.add_row("[bold]Alignment Parameters[/bold]", "")
-                table.add_row("  ├─ Scale", f"{metrics['alignment_info']['scale']:.4f}")
-                table.add_row("  ├─ Rotation", f"{metrics['alignment_info']['rotation_angle_deg']:.2f}°")
-                table.add_row("  └─ Translation", f"{metrics['alignment_info']['translation_magnitude_mm']:.2f} mm")
-        else:
-            table.add_row("[bold]ATE[/bold]", "")
-            table.add_row("  ├─ Mean", f"{metrics['ate_mean_mm']:.2f} mm")
-            table.add_row("  ├─ RMSE", f"{metrics['ate_rmse_mm']:.2f} mm")
-            table.add_row("  ├─ Std", f"{metrics['ate_std_mm']:.2f} mm")
-            table.add_row("  ├─ Median", f"{metrics['ate_median_mm']:.2f} mm")
-            table.add_row("  ├─ 95%", f"{metrics['ate_95_mm']:.2f} mm")
-            table.add_row("  └─ Max", f"{metrics['ate_max_mm']:.2f} mm")
+        # ATE metrics (always show aligned when available)
+        table.add_row("[bold]ATE (Aligned)[/bold]", "")
+        table.add_row("  ├─ Mean", f"{metrics['ate_mean_mm']:.2f} mm")
+        table.add_row("  ├─ RMSE", f"{metrics['ate_rmse_mm']:.2f} mm")
+        table.add_row("  ├─ Std", f"{metrics['ate_std_mm']:.2f} mm")
+        table.add_row("  ├─ Median", f"{metrics['ate_median_mm']:.2f} mm")
+        table.add_row("  ├─ 95%", f"{metrics['ate_95_mm']:.2f} mm")
+        table.add_row("  └─ Max", f"{metrics['ate_max_mm']:.2f} mm")
+        
+        # Show alignment parameters if available
+        if not metrics['alignment_disabled'] and 'alignment_info' in metrics and metrics['alignment_info']:
+            table.add_row("[bold]Alignment Parameters[/bold]", "")
+            table.add_row("  ├─ Scale", f"{metrics['alignment_info']['scale']:.4f}")
+            table.add_row("  ├─ Rotation", f"{metrics['alignment_info']['rotation_angle_deg']:.2f}°")
+            table.add_row("  └─ Translation", f"{metrics['alignment_info']['translation_magnitude_mm']:.2f} mm")
         
         table.add_row("Rotation Error Mean", f"{metrics['rot_mean_deg']:.2f}°")
         table.add_row("Rotation Error Std", f"{metrics['rot_std_deg']:.2f}°")
@@ -914,36 +897,21 @@ def main():
         per_seq_table = Table(title="Per-Sequence Results")
         per_seq_table.add_column("Sequence", style="cyan")
         per_seq_table.add_column("Frames", style="white")
-        if not args.no_alignment:
-            per_seq_table.add_column("ATE Aligned", style="green")
-            per_seq_table.add_column("ATE Raw", style="yellow")
-        else:
-            per_seq_table.add_column("ATE", style="green")
-        per_seq_table.add_column("RPE@33ms Trans", style="green")
-        per_seq_table.add_column("RPE@33ms Rot", style="green")
+        per_seq_table.add_column("ATE (Aligned)", style="green")
+        per_seq_table.add_column("RPE@1frame Trans", style="green")
+        per_seq_table.add_column("RPE@1frame Rot", style="green")
         per_seq_table.add_column("Status", style="white")
         
         for m in all_metrics:
             status = "✅" if m['ate_mean_mm'] < 10.0 else "❌"
-            if not args.no_alignment:
-                per_seq_table.add_row(
-                    m['sequence_id'],
-                    f"{m['total_frames']:,}",
-                    f"{m['ate_mean_mm']:.2f} mm",
-                    f"{m['ate_mean_raw_mm']:.2f} mm",
-                    f"{m['rpe_results']['33ms']['trans_mean']:.2f} mm",
-                    f"{m['rpe_results']['33ms']['rot_mean']:.2f}°",
-                    status
-                )
-            else:
-                per_seq_table.add_row(
-                    m['sequence_id'],
-                    f"{m['total_frames']:,}",
-                    f"{m['ate_mean_mm']:.2f} mm",
-                    f"{m['rpe_results']['33ms']['trans_mean']:.2f} mm",
-                    f"{m['rpe_results']['33ms']['rot_mean']:.2f}°",
-                    status
-                )
+            per_seq_table.add_row(
+                m['sequence_id'],
+                f"{m['total_frames']:,}",
+                f"{m['ate_mean_mm']:.2f} mm",
+                f"{m['rpe_results']['33ms']['trans_mean']:.2f} mm",
+                f"{m['rpe_results']['33ms']['rot_mean']:.2f}°",
+                status
+            )
         
         console.print(per_seq_table)
         
@@ -991,39 +959,17 @@ def main():
         avg_table.add_column("Mean ± Std", style="green")
         avg_table.add_column("Std Across Seqs", style="yellow")
         
-        if not args.no_alignment:
-            # Show both aligned and raw metrics
-            avg_table.add_row("[bold]ATE (Aligned)[/bold]", "", "")
-            avg_table.add_row("  ├─ RMSE", 
-                             f"{avg_metrics['ate_rmse_mm']:.2f} mm",
-                             f"{avg_metrics['ate_rmse_mm_std_across_seqs']:.2f} mm")
-            avg_table.add_row("  ├─ Mean", 
-                             f"{avg_metrics['ate_mean_mm']:.2f} ± {avg_metrics['ate_std_mm']:.2f} mm",
-                             f"{avg_metrics['ate_mean_mm_std_across_seqs']:.2f} mm")
-            avg_table.add_row("  └─ Median", 
-                             f"{avg_metrics['ate_median_mm']:.2f} mm",
-                             f"{avg_metrics['ate_median_mm_std_across_seqs']:.2f} mm")
-            
-            avg_table.add_row("[bold]ATE (Raw)[/bold]", "", "")
-            avg_table.add_row("  ├─ RMSE", 
-                             f"{avg_metrics['ate_rmse_raw_mm']:.2f} mm",
-                             f"{avg_metrics['ate_rmse_raw_mm_std_across_seqs']:.2f} mm")
-            avg_table.add_row("  ├─ Mean", 
-                             f"{avg_metrics['ate_mean_raw_mm']:.2f} ± {avg_metrics['ate_std_raw_mm']:.2f} mm",
-                             f"{avg_metrics['ate_mean_raw_mm_std_across_seqs']:.2f} mm")
-            avg_table.add_row("  └─ Median", 
-                             f"{avg_metrics['ate_median_raw_mm']:.2f} mm",
-                             f"{avg_metrics['ate_median_raw_mm_std_across_seqs']:.2f} mm")
-        else:
-            avg_table.add_row("ATE RMSE", 
-                             f"{avg_metrics['ate_rmse_mm']:.2f} mm",
-                             f"{avg_metrics['ate_rmse_mm_std_across_seqs']:.2f} mm")
-            avg_table.add_row("ATE Mean", 
-                             f"{avg_metrics['ate_mean_mm']:.2f} ± {avg_metrics['ate_std_mm']:.2f} mm",
-                             f"{avg_metrics['ate_mean_mm_std_across_seqs']:.2f} mm")
-            avg_table.add_row("ATE Median", 
-                             f"{avg_metrics['ate_median_mm']:.2f} mm",
-                             f"{avg_metrics['ate_median_mm_std_across_seqs']:.2f} mm")
+        # Always show aligned metrics
+        avg_table.add_row("[bold]ATE (Aligned)[/bold]", "", "")
+        avg_table.add_row("  ├─ RMSE", 
+                         f"{avg_metrics['ate_rmse_mm']:.2f} mm",
+                         f"{avg_metrics['ate_rmse_mm_std_across_seqs']:.2f} mm")
+        avg_table.add_row("  ├─ Mean", 
+                         f"{avg_metrics['ate_mean_mm']:.2f} ± {avg_metrics['ate_std_mm']:.2f} mm",
+                         f"{avg_metrics['ate_mean_mm_std_across_seqs']:.2f} mm")
+        avg_table.add_row("  └─ Median", 
+                         f"{avg_metrics['ate_median_mm']:.2f} mm",
+                         f"{avg_metrics['ate_median_mm_std_across_seqs']:.2f} mm")
         
         avg_table.add_row("Absolute Rotation Error", 
                          f"{avg_metrics['rot_mean_deg']:.2f} ± {avg_metrics['rot_std_deg']:.2f}°",
@@ -1037,112 +983,94 @@ def main():
     # Display performance vs standards
     console.print("\n")
     perf_table = Table(title="Performance Metrics vs Research Benchmarks")
-    perf_table.add_column("Metric", style="cyan", width=40)
-    perf_table.add_column("Our Model", style="green", width=25)
-    perf_table.add_column("Research Target", style="yellow", width=25)
-    perf_table.add_column("Notes", style="blue", width=40)
+    perf_table.add_column("Metric", style="cyan", width=35)
+    perf_table.add_column("Our Model", style="green", width=20)
+    perf_table.add_column("Type", style="yellow", width=15)
+    perf_table.add_column("Notes", style="blue", width=35)
     
-    # ATE - Accumulated error over entire trajectory
-    # Show both aligned and raw if available
-    if not args.no_alignment and 'ate_rmse_raw_mm' in metrics:
-        # Aligned ATE (for research comparison)
-        perf_table.add_row(
-            "ATE (Aligned) - Research Comparison",
-            f"{metrics['ate_rmse_mm']:.2f} ± {metrics['ate_std_mm']:.2f} mm",
-            "RMSE (aligned)",
-            "Standard metric for VIO research papers"
-        )
-        # Raw ATE (for deployment evaluation)
-        perf_table.add_row(
-            "ATE (Raw) - Deployment Metric",
-            f"{metrics['ate_rmse_raw_mm']:.2f} ± {metrics['ate_std_raw_mm']:.2f} mm",
-            "RMSE (no alignment)",
-            "Real-world performance without calibration"
-        )
-    else:
-        # Only one ATE value (either raw only or aligned only)
-        alignment_note = "no alignment" if args.no_alignment else "aligned"
-        ate_value = metrics.get('ate_rmse_mm', metrics['ate_mean_mm'])
-        perf_table.add_row(
-            f"ATE (Absolute Trajectory Error)",
-            f"{ate_value:.2f} ± {metrics['ate_std_mm']:.2f} mm",
-            f"RMSE ({alignment_note})",
-            "Full trajectory error, lower is better"
-        )
+    # Full trajectory metrics (ATE)
     perf_table.add_row(
-        "  ├─ Median",
-        f"{metrics['ate_median_mm']:.2f} mm",
-        "-",
-        "More robust to outliers than mean"
-    )
-    perf_table.add_row(
-        "  └─ 95th percentile",
-        f"{metrics['ate_95_mm']:.2f} mm",
-        "-",
-        "Worst-case performance indicator"
+        "[bold]Full Trajectory Metrics[/bold]",
+        "",
+        "",
+        ""
     )
     
-    # RPE at different time scales
-    rpe = metrics['rpe_results']
-    
-    # Frame-to-frame error (33ms at 30fps)
+    # ATE - Always show aligned version
+    ate_value = metrics.get('ate_rmse_mm', metrics['ate_mean_mm'])
     perf_table.add_row(
-        "RPE@1 frame Translation (33ms)",
-        f"{rpe['33ms']['trans_mean']:.2f} ± {rpe['33ms']['trans_std']:.2f} mm",
-        "Frame-to-frame",
-        "Local consistency, critical for smooth tracking"
+        "ATE (Aligned)",
+        f"{ate_value:.2f} ± {metrics['ate_std_mm']:.2f} mm",
+        "RMSE",
+        "Standard VIO metric"
     )
     
-    perf_table.add_row(
-        "RPE@1 frame Rotation (33ms)",
-        f"{rpe['33ms']['rot_mean']:.2f} ± {rpe['33ms']['rot_std']:.2f}°",
-        "Frame-to-frame",
-        "Angular velocity accuracy"
-    )
-    
-    # Short-term error (100ms)
-    perf_table.add_row(
-        "RPE@100ms Translation",
-        f"{rpe['100ms']['trans_mean']:.2f} ± {rpe['100ms']['trans_std']:.2f} mm",
-        "3 frames",
-        "Short-term drift, important for prediction"
-    )
-    
-    perf_table.add_row(
-        "RPE@100ms Rotation",
-        f"{rpe['100ms']['rot_mean']:.2f} ± {rpe['100ms']['rot_std']:.2f}°",
-        "3 frames",
-        "Short-term angular drift"
-    )
-    
-    # Long-term stability (1 second)
-    if '1s' in rpe:
-        perf_table.add_row(
-            "RPE@1s Translation",
-            f"{rpe['1s']['trans_mean']:.2f} ± {rpe['1s']['trans_std']:.2f} mm",
-            "30 frames",
-            "1-second drift, indicates accumulation rate"
-        )
-    
-    # Absolute Rotation Error (accumulated)
+    # Rotation ATE (moved here as it's also a full trajectory metric)
     perf_table.add_row(
         "Rotation ATE",
         f"{metrics['rot_mean_deg']:.2f} ± {metrics['rot_std_deg']:.2f}°",
-        "Full trajectory",
-        "Total angular drift over sequence"
+        "Mean",
+        "Total angular drift"
     )
+    
+    # Relative Pose Error metrics
+    perf_table.add_row(
+        "[bold]Relative Pose Error (RPE)[/bold]",
+        "",
+        "",
+        ""
+    )
+    
+    rpe = metrics['rpe_results']
+    
+    # Frame-to-frame error (1 frame = 33ms at 30fps)
+    perf_table.add_row(
+        "RPE@1 frame (33ms)",
+        "",
+        "",
+        ""
+    )
+    perf_table.add_row(
+        "  ├─ Translation",
+        f"{rpe['33ms']['trans_mean']:.2f} ± {rpe['33ms']['trans_std']:.2f} mm",
+        "Mean",
+        "Frame-to-frame consistency"
+    )
+    perf_table.add_row(
+        "  └─ Rotation",
+        f"{rpe['33ms']['rot_mean']:.2f} ± {rpe['33ms']['rot_std']:.2f}°",
+        "Mean",
+        "Angular velocity accuracy"
+    )
+    
+    # 1-second error (30 frames at 30fps)
+    if '1s' in rpe:
+        perf_table.add_row(
+            "RPE@1s (30 frames)",
+            "",
+            "",
+            ""
+        )
+        perf_table.add_row(
+            "  ├─ Translation",
+            f"{rpe['1s']['trans_mean']:.2f} ± {rpe['1s']['trans_std']:.2f} mm",
+            "Mean",
+            "1-second drift rate"
+        )
+        perf_table.add_row(
+            "  └─ Rotation",
+            f"{rpe['1s']['rot_mean']:.2f} ± {rpe['1s']['rot_std']:.2f}°",
+            "Mean",
+            "1-second angular drift"
+        )
     
     console.print(perf_table)
     
     # Add metric explanations
     console.print("\n[bold]Metric Definitions (Following TUM/EuRoC Standards):[/bold]")
-    if not args.no_alignment:
-        console.print("• ATE (Aligned): RMSE after SE(3) alignment - standard for research papers")
-        console.print("• ATE (Raw): RMSE without alignment - real deployment performance")
-    else:
-        console.print("• ATE: Root Mean Square Error of trajectories (entire sequence)")
+    console.print("• ATE: Absolute Trajectory Error (RMSE after SE(3) alignment)")
     console.print("• RPE: Relative Pose Error over fixed time intervals")
-    console.print("• Translation: Euclidean distance error in millimeters (mm)")
+    console.print("• Translation: Position error in millimeters (mm)")
     console.print("• Rotation: Angular error in degrees (°)")
     console.print("\n[bold]Alignment Details:[/bold]")
     if not args.no_alignment:
@@ -1151,7 +1079,7 @@ def main():
         console.print("• Compensates for initialization differences and global drift")
     else:
         console.print("• Alignment disabled - showing raw trajectory errors")
-    console.print("\n[dim]Note: Aligned metrics are standard for research comparison, while raw metrics better reflect real-world deployment performance.[/dim]")
+    console.print("\n[dim]Note: These metrics follow standard VIO evaluation protocols for research comparison.[/dim]")
     
     # Performance summary based on research benchmarks
     console.print("\n[bold]Performance Analysis:[/bold]")
