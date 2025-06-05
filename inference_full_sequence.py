@@ -678,7 +678,7 @@ def calculate_metrics(results, no_alignment=False):
     
     return {
         # Aligned metrics (for research comparison)
-        'ate_mean_mm': ate_errors_aligned_mm.mean(),  # Keep for backward compatibility
+        'ate_mean_mm': ate_errors_aligned_mm.mean(),
         'ate_rmse_mm': ate_rmse_aligned_mm,  # This is the standard ATE metric
         'ate_std_mm': ate_errors_aligned_mm.std(),
         'ate_median_mm': np.median(ate_errors_aligned_mm),
