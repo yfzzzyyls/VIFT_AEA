@@ -678,9 +678,11 @@ def calculate_metrics(results, no_alignment=False):
             
             rpe_results[window_name] = {
                 'trans_mean': np.mean(rpe_trans),
+                'trans_rmse': np.sqrt(np.mean(np.square(rpe_trans))),
                 'trans_std': np.std(rpe_trans),
                 'trans_median': np.median(rpe_trans),
                 'rot_mean': np.mean(rpe_rot),
+                'rot_rmse': np.sqrt(np.mean(np.square(rpe_rot))),
                 'rot_std': np.std(rpe_rot),
                 'rot_median': np.median(rpe_rot)
             }
@@ -707,6 +709,9 @@ def calculate_metrics(results, no_alignment=False):
             'translation_magnitude_mm': np.linalg.norm(transform_params['translation']) * 10  # Convert to mm
         }
     
+    # Calculate rotation RMSE
+    rot_rmse_deg = np.sqrt(np.mean(np.square(rot_errors_deg)))
+    
     return {
         # Aligned metrics (for research comparison)
         'ate_mean_mm': ate_errors_aligned_mm.mean(),
@@ -726,6 +731,7 @@ def calculate_metrics(results, no_alignment=False):
         
         # Rotation metrics (from aligned trajectory)
         'rot_mean_deg': rot_errors_deg.mean(),
+        'rot_rmse_deg': rot_rmse_deg,  # Added RMSE for rotation
         'rot_std_deg': rot_errors_deg.std(),
         'rot_median_deg': np.median(rot_errors_deg),
         'rot_95_deg': np.percentile(rot_errors_deg, 95),
@@ -930,13 +936,18 @@ def main():
         per_seq_table.add_column("Status", style="white")
         
         for m in all_metrics:
-            status = "✅" if m['ate_mean_mm'] < 10.0 else "❌"
+            # Use RMSE values when available
+            ate_value = m.get('ate_rmse_mm', m['ate_mean_mm'])
+            trans_rpe = m['rpe_results']['33ms'].get('trans_rmse', m['rpe_results']['33ms']['trans_mean'])
+            rot_rpe = m['rpe_results']['33ms'].get('rot_rmse', m['rpe_results']['33ms']['rot_mean'])
+            
+            status = "✅" if ate_value < 10.0 else "❌"
             per_seq_table.add_row(
                 m['sequence_id'],
                 f"{m['total_frames']:,}",
-                f"{m['ate_mean_mm']:.2f} mm",
-                f"{m['rpe_results']['33ms']['trans_mean']:.2f} mm",
-                f"{m['rpe_results']['33ms']['rot_mean']:.2f}°",
+                f"{ate_value:.2f} mm",
+                f"{trans_rpe:.2f} mm",
+                f"{rot_rpe:.2f}°",
                 status
             )
         
@@ -1033,10 +1044,11 @@ def main():
     )
     
     # Rotation ATE (moved here as it's also a full trajectory metric)
+    rot_ate_value = metrics.get('rot_rmse_deg', metrics['rot_mean_deg'])
     perf_table.add_row(
         "Rotation ATE",
-        f"{metrics['rot_mean_deg']:.2f} ± {metrics['rot_std_deg']:.2f}°",
-        "Mean",
+        f"{rot_ate_value:.2f} ± {metrics['rot_std_deg']:.2f}°",
+        "RMSE",
         "Total angular drift"
     )
     
@@ -1057,16 +1069,18 @@ def main():
         "",
         ""
     )
+    trans_rpe_1frame = rpe['33ms'].get('trans_rmse', rpe['33ms']['trans_mean'])
+    rot_rpe_1frame = rpe['33ms'].get('rot_rmse', rpe['33ms']['rot_mean'])
     perf_table.add_row(
         "  ├─ Translation",
-        f"{rpe['33ms']['trans_mean']:.2f} ± {rpe['33ms']['trans_std']:.2f} mm",
-        "Mean",
+        f"{trans_rpe_1frame:.2f} ± {rpe['33ms']['trans_std']:.2f} mm",
+        "RMSE",
         "Frame-to-frame consistency"
     )
     perf_table.add_row(
         "  └─ Rotation",
-        f"{rpe['33ms']['rot_mean']:.2f} ± {rpe['33ms']['rot_std']:.2f}°",
-        "Mean",
+        f"{rot_rpe_1frame:.2f} ± {rpe['33ms']['rot_std']:.2f}°",
+        "RMSE",
         "Angular velocity accuracy"
     )
     
@@ -1078,16 +1092,18 @@ def main():
             "",
             ""
         )
+        trans_rpe_1s = rpe['1s'].get('trans_rmse', rpe['1s']['trans_mean'])
+        rot_rpe_1s = rpe['1s'].get('rot_rmse', rpe['1s']['rot_mean'])
         perf_table.add_row(
             "  ├─ Translation",
-            f"{rpe['1s']['trans_mean']:.2f} ± {rpe['1s']['trans_std']:.2f} mm",
-            "Mean",
+            f"{trans_rpe_1s:.2f} ± {rpe['1s']['trans_std']:.2f} mm",
+            "RMSE",
             "1-second drift rate"
         )
         perf_table.add_row(
             "  └─ Rotation",
-            f"{rpe['1s']['rot_mean']:.2f} ± {rpe['1s']['rot_std']:.2f}°",
-            "Mean",
+            f"{rot_rpe_1s:.2f} ± {rpe['1s']['rot_std']:.2f}°",
+            "RMSE",
             "1-second angular drift"
         )
     
