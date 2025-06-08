@@ -672,7 +672,9 @@ def calculate_metrics(results, no_alignment=False):
         '150ms': 3,    # 3 frames at 20fps = 150ms
         '250ms': 5,    # 5 frames at 20fps = 250ms
         '500ms': 10,   # 10 frames at 20fps = 500ms
-        '1s': 20       # 20 frames at 20fps = 1 second
+        '1s': 20,      # 20 frames at 20fps = 1 second
+        '5s': 100,     # 100 frames at 20fps = 5 seconds
+        '10s': 200     # 200 frames at 20fps = 10 seconds
     }
     
     rpe_results = {}
@@ -1019,7 +1021,9 @@ def main():
             '150ms': 3,    # 3 frames at 20fps
             '250ms': 5,    # 5 frames at 20fps
             '500ms': 10,   # 10 frames at 20fps
-            '1s': 20       # 20 frames at 20fps = 1 second
+            '1s': 20,      # 20 frames at 20fps = 1 second
+            '5s': 100,     # 100 frames at 20fps = 5 seconds
+            '10s': 200     # 200 frames at 20fps = 10 seconds
         }
         
         avg_rpe = {}
@@ -1147,6 +1151,52 @@ def main():
             f"{rot_rpe_1s:.2f} ± {rpe['1s']['rot_std']:.2f}°",
             "RMSE",
             "1-second angular drift"
+        )
+    
+    # 5-second error (100 frames at 20fps)
+    if '5s' in rpe:
+        perf_table.add_row(
+            "RPE@5s (100 frames)",
+            "",
+            "",
+            ""
+        )
+        trans_rpe_5s = rpe['5s'].get('trans_rmse', rpe['5s']['trans_mean'])
+        rot_rpe_5s = rpe['5s'].get('rot_rmse', rpe['5s']['rot_mean'])
+        perf_table.add_row(
+            "  ├─ Translation",
+            f"{trans_rpe_5s:.2f} ± {rpe['5s']['trans_std']:.2f} mm",
+            "RMSE",
+            "5-second drift rate"
+        )
+        perf_table.add_row(
+            "  └─ Rotation",
+            f"{rot_rpe_5s:.2f} ± {rpe['5s']['rot_std']:.2f}°",
+            "RMSE",
+            "5-second angular drift"
+        )
+    
+    # 10-second error (200 frames at 20fps)
+    if '10s' in rpe:
+        perf_table.add_row(
+            "RPE@10s (200 frames)",
+            "",
+            "",
+            ""
+        )
+        trans_rpe_10s = rpe['10s'].get('trans_rmse', rpe['10s']['trans_mean'])
+        rot_rpe_10s = rpe['10s'].get('rot_rmse', rpe['10s']['rot_mean'])
+        perf_table.add_row(
+            "  ├─ Translation",
+            f"{trans_rpe_10s:.2f} ± {rpe['10s']['trans_std']:.2f} mm",
+            "RMSE",
+            "10-second drift rate"
+        )
+        perf_table.add_row(
+            "  └─ Rotation",
+            f"{rot_rpe_10s:.2f} ± {rpe['10s']['rot_std']:.2f}°",
+            "RMSE",
+            "10-second angular drift"
         )
     
     console.print(perf_table)
