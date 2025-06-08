@@ -72,13 +72,16 @@ python scripts/process_aria_to_vift_quaternion.py \
     --output-dir data/aria_processed \
     --max-frames 10000  # Process full sequences
 
-# Parallel processing (16x faster) - Automated script available
+# Parallel processing (10x faster) - Recommended for full dataset
+# Uses 10 CPU workers for consistent performance
+./process_full_dataset_optimal.sh
+
 # The processing includes:
 # - Extracting SLAM trajectories from MPS results
 # - Converting to quaternion format (no Euler angles)
-# - Extracting RGB frames using GPU/CPU
+# - Extracting RGB frames
 # - Generating IMU data at proper frequency
-# - Creating 60/20/20 train/val/test splits
+# - Creates numbered folders (000, 001, 002, etc.)
 ```
 
 ### 2a. Handle Failed Sequences (if any)
@@ -297,10 +300,14 @@ Each script will print the exact command for the next step. Here's the complete 
 # Download dataset
 python scripts/download_aria_dataset.py --all
 
-# Process to VIFT format
+# Process to VIFT format (parallel - recommended)
+./process_full_dataset_optimal.sh
+
+# Or single-threaded processing
 python scripts/process_aria_to_vift_quaternion.py \
-    --input-dir data/aria_everyday \
-    --output-dir /mnt/ssd_ext/aria_processed
+    --input-dir /mnt/ssd_ext/incSeg-data/aria_everyday \
+    --output-dir data/aria_full/processed \
+    --max-frames 10000
 ```
 
 ### Step 2: Extract Features (~2 hours)
