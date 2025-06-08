@@ -12,18 +12,7 @@
   </a>
 </p>
 
-A state-of-the-art Visual-Inertial Odometry (VIO) system for the Aria Everyday Activities dataset, implementing and improving upon the VIFT architecture with multiple model variants and critical bug fixes.
-
-### Key Results
-
-The MultiHead Fixed model achieves:
-
-- **Translation Error**: 1.34 ± 2.00 mm (after trajectory alignment)
-- **Rotation Error**: 6.88 ± 1.48 degrees (geodesic distance)
-- **Frame-to-Frame Translation**: 0.096 ± 0.018 mm
-- **Frame-to-Frame Rotation**: 0.029 ± 0.004 degrees
-
-All models exceed AR/VR requirements (<0.1° rotation, <0.1cm translation error per frame).
+A state-of-the-art Visual-Inertial Odometry (VIO) system for the Aria Everyday Activities dataset, implementing and improving upon the VIFT architecture with multiple model variants and AR/VR Adaptations.
 
 ## 📋 Requirements
 
@@ -36,12 +25,11 @@ All models exceed AR/VR requirements (<0.1° rotation, <0.1cm translation error 
 
 ```bash
 # Clone repository
-git clone https://github.com/your-username/VIFT_AEA.git
-cd VIFT_AEA
+git clone https://github.com/yfzzzyyls/incremental-segmentation.git
 
 # Create virtual environment
-python3.9 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# python3.9 -m venv venv
+source ~/venv/py39/bin/activate  # On Windows: venv\py39\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -76,20 +64,18 @@ python scripts/process_aria_to_vift_quaternion.py \
 # Uses 10 CPU workers for consistent performance
 ./process_full_dataset_optimal.sh
 
+# Monitor progress while running:
+watch -n 5 'ls -1 data/aria_full/processed | wc -l'  # Shows completed sequences
+tail -f data/aria_full/logs/worker_*.log              # View individual worker logs
+htop                                                   # Monitor CPU usage
+
 # The processing includes:
 # - Extracting SLAM trajectories from MPS results
 # - Converting to quaternion format (no Euler angles)
 # - Extracting RGB frames
 # - Generating IMU data at proper frequency
 # - Creates numbered folders (000, 001, 002, etc.)
-```
-
-### 2a. Handle Failed Sequences (if any)
-
-Some sequences may fail due to CUDA OOM. Reprocess them with CPU:
-
-```bash
-python fix_failed_sequences.py  # Automatically finds and reprocesses failed sequences
+# - Worker distribution: Workers 1-9 process 14 sequences each, Worker 10 processes 17
 ```
 
 ### 3. Download Pretrained Encoder
@@ -107,7 +93,6 @@ python generate_all_pretrained_latents_fixed.py \
     --processed-dir /path/to/aria_processed \
     --output-dir /path/to/aria_latent_data_pretrained \
     --stride 1  # Use all frames
-    --skip-test  # Skip test set (use real-time encoding during inference)
 
 # This will:
 # - Extract 512-dim visual features using pretrained encoder
@@ -135,7 +120,6 @@ python train_improved.py --model multihead_fixed \
     --num-heads 4 \
     --dropout 0.2
 ```
-
 
 Monitor training:
 
@@ -222,39 +206,6 @@ Average performance on 20 test sequences:
 - Removes ReLU activation from quaternion output layer
 - Provides accurate rotation error measurements
 
-### When to Use Which Model
-
-- **MultiHead Fixed**: Most accurate, recommended for production use
-- **MultiHead Improved**: Good for comparison, but rotation metrics need correction
-- **VIFT Original**: Baseline implementation for reference
-
-## 📁 Project Structure
-
-```
-VIFT_AEA/
-├── configs/              # Hydra configuration files
-├── data/                 # Dataset directory
-├── scripts/              # Data processing scripts
-│   ├── download_aria_dataset.py         # Dataset downloader
-│   ├── process_aria_to_vift_quaternion.py  # Quaternion-based processing
-│   └── process_aria_to_vift.py          # Original Euler-based (deprecated)
-├── src/                  # Source code
-│   ├── data/            # Data modules and datasets
-│   ├── models/          # Model architectures
-│   │   ├── components/  # Model components
-│   │   ├── multihead_vio_separate.py         # MultiHead with bug
-│   │   ├── multihead_vio_separate_fixed.py   # Initial fixed version
-│   │   └── multihead_vio.py                  # Final improved version
-│   ├── metrics/         # Loss functions and metrics
-│   └── utils/           # Utility functions
-├── train_improved.py     # Main training script
-├── inference_full_sequence.py  # Evaluation script
-├── generate_all_pretrained_latents_fixed.py  # Feature extraction
-├── fix_failed_sequences.py  # Reprocess failed sequences
-├── auto_monitor_and_train.sh  # Automated training setup
-└── monitor_*.sh         # Various monitoring scripts
-```
-
 ## 🔍 Troubleshooting
 
 ### Out of Memory
@@ -289,74 +240,6 @@ VIFT_AEA/
 - Some sequences may fail with CUDA OOM
 - Run `fix_failed_sequences.py` to reprocess with CPU
 - Check logs in `/mnt/ssd_ext/incSeg-data/parallel_scripts/`
-
-## 🚀 Quick Start Guide
-
-Each script will print the exact command for the next step. Here's the complete workflow:
-
-### Step 1: Download and Process Data (24+ hours)
-
-```bash
-# Download dataset
-python scripts/download_aria_dataset.py --all
-
-# Process to VIFT format (parallel - recommended)
-./process_full_dataset_optimal.sh
-
-# Or single-threaded processing
-python scripts/process_aria_to_vift_quaternion.py \
-    --input-dir /mnt/ssd_ext/incSeg-data/aria_everyday \
-    --output-dir data/aria_full/processed \
-    --max-frames 10000
-```
-
-### Step 2: Extract Features (~2 hours)
-
-```bash
-python generate_all_pretrained_latents_fixed.py \
-    --processed-dir /mnt/ssd_ext/aria_processed \
-    --output-dir /mnt/ssd_ext/aria_latent_data_pretrained \
-    --stride 1 --skip-test
-
-# The script will print the exact training command when complete
-```
-
-### Step 3: Train Model (~4-6 hours)
-
-```bash
-python train_improved.py --model multihead_fixed \
-    --data-dir /mnt/ssd_ext/aria_latent_data_pretrained \
-    --epochs 100 --batch-size 32 --lr 1e-3 \
-    --hidden-dim 128 --num-heads 4 --dropout 0.2
-
-# The script will print the exact inference command when complete
-```
-
-### Step 4: Monitor Training (while training)
-
-```bash
-# In a separate terminal
-tensorboard --logdir logs/
-```
-
-### Step 5: Evaluate Model
-
-```bash
-# The training script will print this exact command with your best checkpoint
-python inference_full_sequence.py \
-    --sequence-id all \
-    --checkpoint logs/checkpoints_multihead_fixed/best_model.ckpt \
-    --processed-dir /mnt/ssd_ext/incSeg-data/aria_processed
-```
-
-**Note**: Each script prints the exact command for the next step, so you don't need to remember the parameters!
-
-## 📊 Monitoring Tools
-
-- **Feature extraction progress**: `./monitor_latent_extraction.sh`
-- **Failed sequences**: `./monitor_failed_sequences.sh`
-- **Training progress**: `tensorboard --logdir logs/`
-- **Automated pipeline**: `./auto_monitor_and_train.sh`
 
 ## 📚 Citation
 
