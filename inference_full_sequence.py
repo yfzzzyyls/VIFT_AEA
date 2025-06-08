@@ -978,8 +978,8 @@ def main():
         for m in all_metrics:
             # Use RMSE values when available
             ate_value = m.get('ate_rmse_mm', m['ate_mean_mm'])
-            trans_rpe = m['rpe_results']['33ms'].get('trans_rmse', m['rpe_results']['33ms']['trans_mean'])
-            rot_rpe = m['rpe_results']['33ms'].get('rot_rmse', m['rpe_results']['33ms']['rot_mean'])
+            trans_rpe = m['rpe_results']['50ms'].get('trans_rmse', m['rpe_results']['50ms']['trans_mean'])
+            rot_rpe = m['rpe_results']['50ms'].get('rot_rmse', m['rpe_results']['50ms']['rot_mean'])
             
             status = "✅" if ate_value < 10.0 else "❌"
             per_seq_table.add_row(
@@ -1012,12 +1012,14 @@ def main():
         
         # Average RPE results
         # Define time windows here (same as in calculate_metrics)
+        # For 20 FPS: 1 frame = 50ms
         time_windows = {
-            '33ms': 1,    # 1 frame
-            '100ms': 3,   # 3 frames
-            '167ms': 5,   # 5 frames
-            '333ms': 10,  # 10 frames
-            '1s': 30      # 30 frames
+            '50ms': 1,     # 1 frame at 20fps
+            '100ms': 2,    # 2 frames at 20fps
+            '150ms': 3,    # 3 frames at 20fps
+            '250ms': 5,    # 5 frames at 20fps
+            '500ms': 10,   # 10 frames at 20fps
+            '1s': 20       # 20 frames at 20fps = 1 second
         }
         
         avg_rpe = {}
