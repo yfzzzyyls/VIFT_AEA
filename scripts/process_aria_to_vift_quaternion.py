@@ -322,7 +322,7 @@ class AriaToVIFTProcessor:
         poses = self.extract_slam_trajectory(sequence_path)
         if not poses:
             print(f"❌ No SLAM trajectory found for {sequence_path.name}")
-            return False
+            return False, 0
         
         # Limit frames
         num_frames = min(len(poses), self.max_frames)
@@ -332,7 +332,7 @@ class AriaToVIFTProcessor:
         visual_data = self.extract_rgb_frames(sequence_path, num_frames)
         if visual_data is None:
             print(f"❌ No visual data extracted for {sequence_path.name}")
-            return False
+            return False, 0
         
         # Ensure matching lengths
         actual_frames = min(len(poses), visual_data.shape[0])
@@ -370,7 +370,7 @@ class AriaToVIFTProcessor:
             json.dump(metadata, f, indent=2)
         
         print(f"✅ Processed {sequence_path.name}: {actual_frames} frames")
-        return True
+        return True, actual_frames
     
     def process_dataset(self, start_index: int = 0, max_sequences: Optional[int] = None, folder_offset: int = 0) -> Dict:
         """Process multiple AriaEveryday sequences"""
@@ -399,13 +399,21 @@ class AriaToVIFTProcessor:
             # Apply folder offset to sequence ID
             sequence_id = f"{folder_offset + i:03d}"  # Format as 000, 001, 002, etc.
             
-            if self.process_sequence(sequence_path, sequence_id):
-                processed_count += 1
-                processed_sequences.append({
-                    'sequence_id': sequence_id,
-                    'sequence_name': sequence_path.name,
-                    'frames': actual_frames
-                })
+            result = self.process_sequence(sequence_path, sequence_id)
+            if result:
+                if isinstance(result, tuple):
+                    success, actual_frames = result
+                else:
+                    success = result
+                    actual_frames = 0
+                
+                if success:
+                    processed_count += 1
+                    processed_sequences.append({
+                        'sequence_id': sequence_id,
+                        'sequence_name': sequence_path.name,
+                        'frames': actual_frames
+                    })
         
         # Save dataset summary
         summary = {

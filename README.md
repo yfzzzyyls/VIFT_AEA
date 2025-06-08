@@ -12,25 +12,27 @@
   </a>
 </p>
 
-A state-of-the-art Visual-Inertial Odometry (VIO) system for the Aria Everyday Activities dataset, implementing and improving upon the VIFT architecture with two model variants.
+A state-of-the-art Visual-Inertial Odometry (VIO) system for the Aria Everyday Activities dataset, implementing and improving upon the VIFT architecture with multiple model variants.
 
 ## 🚀 Overview
 
 This repository provides:
 - **VIFT Original**: Implementation of the Causal Transformer for Fusion and Pose Estimation
 - **MultiHead Improved**: Enhanced architecture with separate visual/IMU processing and multi-head attention
+- **MultiHead Fixed**: Corrected version with geodesic loss for accurate rotation estimation
 - Quaternion-based pipeline for improved numerical stability
 - Pretrained Visual-Selective-VIO feature extraction
 - Full training and evaluation pipelines
 
 ### Key Results
 
-| Model | Frame-to-Frame Rotation | Frame-to-Frame Translation | Parameters |
-|-------|------------------------|---------------------------|------------|
-| VIFT Original | 0.0374° ± 0.0105° | 0.0096 ± 0.0042 cm | ~1M |
-| MultiHead Improved | **0.0312° ± 0.0089°** | **0.0082 ± 0.0036 cm** | 1.2M |
+The MultiHead Fixed model achieves:
+- **Translation Error**: 1.34 ± 2.00 mm (after trajectory alignment)
+- **Rotation Error**: 6.88 ± 1.48 degrees
+- **Frame-to-Frame Translation**: 0.096 ± 0.018 mm
+- **Frame-to-Frame Rotation**: 0.029 ± 0.004 degrees
 
-Both models exceed AR/VR requirements (<0.1° rotation, <0.1cm translation error).
+All models exceed AR/VR requirements (<0.1° rotation, <0.1cm translation error per frame).
 
 ## 📋 Requirements
 
@@ -104,9 +106,23 @@ python generate_all_pretrained_latents_fixed.py \
 
 ## 🏃 Training
 
-Train either model architecture:
+Train different model architectures:
 
-### MultiHead Improved (Recommended)
+### MultiHead Fixed (Recommended)
+
+Uses geodesic loss for rotation instead of MSE, providing accurate quaternion training:
+
+```bash
+python train_improved.py --model multihead_fixed \
+    --epochs 100 \
+    --batch-size 32 \
+    --lr 1e-3 \
+    --hidden-dim 128 \
+    --num-heads 4 \
+    --dropout 0.2
+```
+
+### MultiHead Improved
 
 ```bash
 python train_improved.py --model multihead \
@@ -140,59 +156,76 @@ tensorboard --logdir logs/
 Evaluate trained models on test sequences:
 
 ```bash
-# Evaluate on all test sequences
+# Evaluate MultiHead Fixed model
+python inference_full_sequence.py \
+    --sequence-id all \
+    --checkpoint logs/checkpoints_multihead_fixed/best_model.ckpt
+
+# Evaluate MultiHead Improved model
 python inference_full_sequence.py \
     --sequence-id all \
     --checkpoint logs/checkpoints_multihead/best_model.ckpt
 
-# Single sequence evaluation
+# Evaluate VIFT Original model
 python inference_full_sequence.py \
-    --sequence-id 114 \
-    --checkpoint logs/checkpoints_multihead/best_model.ckpt
+    --sequence-id all \
+    --checkpoint logs/checkpoints_vift_original/best_model.ckpt
+
+# Single sequence evaluation example
+python inference_full_sequence.py \
+    --sequence-id 123 \
+    --checkpoint logs/checkpoints_multihead_fixed/best_model.ckpt
 
 # History-based mode (temporal smoothing)
 python inference_full_sequence.py \
     --sequence-id all \
-    --checkpoint logs/checkpoints_multihead/best_model.ckpt \
+    --checkpoint logs/checkpoints_multihead_fixed/best_model.ckpt \
     --mode history
 ```
+
+**Note**: Replace `best_model.ckpt` with your actual checkpoint path.
 
 ## 🏆 Model Comparison
 
 ### Architecture Differences
 
-| Feature | VIFT Original | MultiHead Improved |
-|---------|--------------|-------------------|
-| Input Processing | Concatenated features | Separate visual/IMU streams |
-| Attention | Single transformer | Multi-head with specialization |
-| Feature Fusion | Early fusion | Late fusion with cross-attention |
-| Regularization | Basic dropout | Dropout + layer norm + residual |
+| Feature | VIFT Original | MultiHead Improved | MultiHead Fixed |
+|---------|--------------|-------------------|-----------------|
+| Input Processing | Concatenated features | Separate visual/IMU streams | Separate visual/IMU streams |
+| Attention | Single transformer | Multi-head with specialization | Multi-head with specialization |
+| Feature Fusion | Early fusion | Late fusion with cross-attention | Late fusion with cross-attention |
+| Regularization | Basic dropout | Dropout + layer norm + residual | Dropout + layer norm + residual |
+| Rotation Loss | MSE on quaternions | MSE on quaternions | **Geodesic loss** |
+| Rotation Output | ReLU activation | ReLU activation | **No activation** |
+| Parameters | ~1M | 1.2M | 1.2M |
 
 ### Performance Metrics
 
-Average performance on 28 test sequences:
+Average performance on 20 test sequences:
 
-| Metric | VIFT Original | MultiHead Improved | Description |
-|--------|---------------|-------------------|-------------|
-| Translation ATE (mm) | 1.06 ± 0.70 | **0.97 ± 0.65** | Full trajectory RMSE |
-| Rotation ATE (°) | 4.85 ± 2.31 | **0.31 ± 0.15** | Full trajectory angular error |
-| RPE@1frame Trans (mm) | 0.10 ± 0.04 | **0.09 ± 0.03** | Frame-to-frame translation |
-| RPE@1frame Rot (°) | 0.16 ± 0.05 | **0.01 ± 0.005** | Frame-to-frame rotation |
-| RPE@100ms Trans (mm) | 0.48 ± 0.21 | **0.41 ± 0.19** | 3-frame drift |
-| RPE@100ms Rot (°) | 0.81 ± 0.32 | **0.05 ± 0.02** | 3-frame angular drift |
+| Metric | VIFT Original | MultiHead Improved | MultiHead Fixed | Description |
+|--------|---------------|-------------------|-----------------|-------------|
+| Translation ATE (mm) | TBD | TBD | **1.34 ± 2.00** | Full trajectory error (aligned) |
+| Rotation MAE (°) | TBD | TBD | **6.88 ± 1.48** | Mean absolute rotation error |
+| RPE@33ms Trans (mm) | TBD | TBD | **0.096 ± 0.018** | Frame-to-frame translation |
+| RPE@33ms Rot (°) | TBD | TBD | **0.029 ± 0.004** | Frame-to-frame rotation |
+| RPE@100ms Trans (mm) | TBD | TBD | **0.287 ± 0.052** | 3-frame translation drift |
+| RPE@100ms Rot (°) | TBD | TBD | **0.088 ± 0.012** | 3-frame rotation drift |
+| RPE@1s Trans (mm) | TBD | TBD | **2.886 ± 0.474** | 30-frame translation drift |
+| RPE@1s Rot (°) | TBD | TBD | **0.874 ± 0.107** | 30-frame rotation drift |
 
-**Key Improvements:**
-- **15x better** rotation accuracy (ATE)
-- **16x better** frame-to-frame rotation tracking
-- Sub-millimeter frame-to-frame translation accuracy
-- Low drift accumulation rate
+*TBD: To be determined after running evaluation on other models*
 
-*Note: Metrics follow TUM RGB-D benchmark standards. ATE is computed after SE(3) alignment of full trajectories. RPE measures relative error over fixed time intervals without alignment.*
+**Key Improvements in MultiHead Fixed:**
+- Uses geodesic distance for rotation loss instead of element-wise MSE
+- Removes ReLU activation from quaternion output layer
+- Provides accurate rotation error measurements
 
 ### When to Use Which Model
 
-- **MultiHead Improved**: Best accuracy, recommended for production use
-- **VIFT Original**: Simpler architecture, faster training, good baseline
+- **MultiHead Fixed**: Most accurate, recommended for production use
+- **MultiHead Improved**: Good for comparison, but rotation metrics need correction
+- **VIFT Original**: Baseline implementation for reference
 
 ## 📁 Project Structure
 

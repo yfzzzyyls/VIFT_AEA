@@ -29,7 +29,7 @@ sys.path.append('src')
 
 from src.models.components.vsvio import Encoder
 from src.models.multihead_vio import MultiHeadVIOModel
-from src.models.multihead_vio_separate import MultiHeadVIOModelSeparate
+from src.models.multihead_vio_separate_fixed import MultiHeadVIOModelSeparate
 from src.models.vio_module import VIOLitModule
 from src.models.components.pose_transformer import PoseTransformer
 

@@ -28,6 +28,7 @@ sys.path.append('src')
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from src.models.multihead_vio_separate import MultiHeadVIOModelSeparate
+from src.models.multihead_vio_separate_fixed import MultiHeadVIOModelSeparate as MultiHeadVIOModelSeparateFixed
 from src.models.components.pose_transformer import PoseTransformer
 from src.metrics.arvr_loss_wrapper import ARVRLossWrapper
 from torchmetrics import MeanAbsoluteError
@@ -299,7 +300,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train VIO models with different architectures')
     
     # Model selection
-    parser.add_argument('--model', type=str, choices=['multihead', 'vift_original'], 
+    parser.add_argument('--model', type=str, choices=['multihead', 'multihead_fixed', 'vift_original'], 
                         default='multihead', help='Model architecture to use')
     
     # Training parameters
@@ -350,6 +351,25 @@ def main():
     if args.model == 'multihead':
         console.print("\n[bold]Using MultiHeadVIOModelSeparate[/bold]")
         model = MultiHeadVIOModelSeparate(
+            visual_dim=512,
+            imu_dim=256,
+            hidden_dim=args.hidden_dim,
+            num_shared_layers=2,
+            num_specialized_layers=2,
+            num_heads=args.num_heads,
+            dropout=args.dropout,
+            learning_rate=learning_rate,
+            weight_decay=args.weight_decay,
+            sequence_length=10,
+            rotation_weight=args.rotation_weight,
+            translation_weight=args.translation_weight
+        )
+    elif args.model == 'multihead_fixed':
+        console.print("\n[bold]Using MultiHeadVIOModelSeparate (FIXED)[/bold]")
+        console.print("[green]✓ Fixed rotation head (no ReLU)[/green]")
+        console.print("[green]✓ Proper quaternion initialization[/green]")
+        console.print("[green]✓ Geodesic rotation metric[/green]")
+        model = MultiHeadVIOModelSeparateFixed(
             visual_dim=512,
             imu_dim=256,
             hidden_dim=args.hidden_dim,
