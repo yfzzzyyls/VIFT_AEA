@@ -30,6 +30,7 @@ sys.path.append('src')
 from src.models.components.vsvio import Encoder
 from src.models.multihead_vio import MultiHeadVIOModel
 from src.models.multihead_vio_separate_fixed import MultiHeadVIOModelSeparate
+from src.models.multihead_vio import MultiHeadVIOModel as MultiHeadVIOModelNew
 from src.models.vio_module import VIOLitModule
 from src.models.components.pose_transformer import PoseTransformer
 
@@ -812,7 +813,7 @@ def main():
                 model_state_dict[new_key] = value
         vio_model.load_state_dict(model_state_dict)
         model_type = 'vift_original'
-    elif any('visual_projection' in key for key in state_dict_keys):
+    elif any('visual_projection' in key for key in state_dict_keys) or any('shared_processor.visual_projection' in key for key in state_dict_keys):
         # MultiHead separate features model
         console.print("Detected separate visual/IMU features model")
         # Extract hyperparameters from checkpoint
@@ -820,7 +821,14 @@ def main():
         console.print(f"Model config: hidden_dim={hparams.get('hidden_dim', 256)}, " +
                      f"num_shared_layers={hparams.get('num_shared_layers', 4)}, " +
                      f"num_specialized_layers={hparams.get('num_specialized_layers', 3)}")
-        vio_model = MultiHeadVIOModelSeparate.load_from_checkpoint(args.checkpoint)
+        
+        # Check if it's the new MultiHeadVIOModel with positional_encoding
+        if any('positional_encoding' in key for key in state_dict_keys):
+            console.print("Loading new MultiHeadVIOModel")
+            vio_model = MultiHeadVIOModelNew.load_from_checkpoint(args.checkpoint)
+        else:
+            console.print("Loading legacy MultiHeadVIOModelSeparate")
+            vio_model = MultiHeadVIOModelSeparate.load_from_checkpoint(args.checkpoint)
         model_type = 'multihead_separate'
     elif any('feature_projection' in key for key in state_dict_keys):
         # MultiHead concatenated features model
@@ -1190,10 +1198,27 @@ def main():
             json.dump(json_metrics, f, indent=2)
         console.print(f"\n✅ Saved averaged results to {avg_output_path}")
         console.print(f"✅ Individual trajectories saved to inference_results_realtime_all_stride_{args.stride}/")
+        
+        console.print("\n[bold cyan]Next steps:[/bold cyan]")
+        console.print("1. Analyze detailed metrics:")
+        console.print(f"   cat {avg_output_path} | python -m json.tool")
+        console.print("\n2. Compare with other models:")
+        console.print("   python compare_models.py --results1 inference_results_model1.json --results2 inference_results_model2.json")
+        console.print("\n3. Continue training if needed:")
+        console.print(f"   python train_improved.py --model multihead_fixed \\")
+        console.print(f"       --data-dir /mnt/ssd_ext/incSeg-data/aria_latent_data_pretrained \\")
+        console.print(f"       --epochs 100 --resume {args.checkpoint}")
     else:
         console.print(f"\n✅ Saved results to {output_path}")
         console.print("\n[bold cyan]Visualize trajectory:[/bold cyan]")
         console.print(f"python visualize_trajectory.py --results {output_path}")
+        
+        console.print("\n[bold cyan]Next steps:[/bold cyan]")
+        console.print("1. Run evaluation on all test sequences:")
+        console.print(f"   python inference_full_sequence.py \\")
+        console.print(f"       --sequence-id all \\")
+        console.print(f"       --checkpoint {args.checkpoint} \\")
+        console.print(f"       --processed-dir {args.processed_dir}")
 
 
 if __name__ == "__main__":

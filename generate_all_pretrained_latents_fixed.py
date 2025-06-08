@@ -249,7 +249,7 @@ def process_sequence(seq_dir, model, device, window_size=11, stride=1, pose_scal
     return features_list, poses_list
 
 
-def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100.0, stride=1, split_ratios=(0.7, 0.1, 0.2), skip_test=True):
+def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100.0, stride=1, split_ratios=(0.6, 0.2, 0.2), skip_test=True):
     """Generate train/val/test splits from processed sequences with relative poses."""
     
     # Get all sequence directories (filter out non-numeric directories)
@@ -485,7 +485,12 @@ def main():
         print(f"\n📝 Note: Test set was skipped. During inference, use real-time encoding.")
     
     print(f"\nYou can now train your model using:")
-    print(f"python train_separate_features.py --data_dir {args.output_dir}")
+    print(f"python train_improved.py --model multihead_fixed \\")
+    print(f"    --data-dir {args.output_dir} \\")
+    print(f"    --epochs 100 --batch-size 32 --lr 1e-3 \\")
+    print(f"    --hidden-dim 128 --num-heads 4 --dropout 0.2")
+    print(f"\nOr use the automated monitoring script:")
+    print(f"    ./auto_monitor_and_train.sh")
 
 
 if __name__ == '__main__':

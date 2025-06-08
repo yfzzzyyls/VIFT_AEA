@@ -29,6 +29,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from src.models.multihead_vio_separate import MultiHeadVIOModelSeparate
 from src.models.multihead_vio_separate_fixed import MultiHeadVIOModelSeparate as MultiHeadVIOModelSeparateFixed
+from src.models.multihead_vio import MultiHeadVIOModel
 from src.models.components.pose_transformer import PoseTransformer
 from src.metrics.arvr_loss_wrapper import ARVRLossWrapper
 from torchmetrics import MeanAbsoluteError
@@ -330,6 +331,16 @@ def main():
     
     console.rule(f"[bold cyan]🚀 VIO Training - {args.model.upper()} Model[/bold cyan]")
     
+    # Check if data directory exists
+    if not Path(args.data_dir).exists():
+        console.print(f"[red]Error: Data directory not found: {args.data_dir}[/red]")
+        console.print("\n[yellow]Did you run feature extraction first?[/yellow]")
+        console.print("Run this command first:")
+        console.print(f"   python generate_all_pretrained_latents_fixed.py \\")
+        console.print(f"       --processed-dir /mnt/ssd_ext/incSeg-data/aria_processed \\")
+        console.print(f"       --output-dir {args.data_dir}")
+        return
+    
     # Configuration
     data_dir = args.data_dir
     learning_rate = args.lr
@@ -365,11 +376,12 @@ def main():
             translation_weight=args.translation_weight
         )
     elif args.model == 'multihead_fixed':
-        console.print("\n[bold]Using MultiHeadVIOModelSeparate (FIXED)[/bold]")
+        console.print("\n[bold]Using MultiHeadVIOModel[/bold]")
         console.print("[green]✓ Fixed rotation head (no ReLU)[/green]")
-        console.print("[green]✓ Proper quaternion initialization[/green]")
+        console.print("[green]✓ Proper weight initialization[/green]")
         console.print("[green]✓ Geodesic rotation metric[/green]")
-        model = MultiHeadVIOModelSeparateFixed(
+        console.print("[green]✓ Specialized heads for rotation and translation[/green]")
+        model = MultiHeadVIOModel(
             visual_dim=512,
             imu_dim=256,
             hidden_dim=args.hidden_dim,
@@ -497,9 +509,18 @@ def main():
         console.print("\n[bold cyan]Next steps:[/bold cyan]")
         console.print("1. Check TensorBoard for loss curves:")
         console.print(f"   tensorboard --logdir logs/{args.model}_training")
-        console.print("\n2. Run inference on test set:")
-        console.print(f"   python inference_full_sequence.py --sequence-id all \\")
-        console.print(f"     --checkpoint {best_path}")
+        
+        console.print("\n2. Evaluate on test sequences:")
+        console.print(f"   python inference_full_sequence.py \\")
+        console.print(f"       --sequence-id all \\")
+        console.print(f"       --checkpoint {best_path} \\")
+        console.print(f"       --processed-dir /mnt/ssd_ext/incSeg-data/aria_processed")
+        
+        console.print("\n3. Or evaluate a single sequence:")
+        console.print(f"   python inference_full_sequence.py \\")
+        console.print(f"       --sequence-id 123 \\")
+        console.print(f"       --checkpoint {best_path} \\")
+        console.print(f"       --processed-dir /mnt/ssd_ext/incSeg-data/aria_processed")
 
 
 if __name__ == "__main__":
