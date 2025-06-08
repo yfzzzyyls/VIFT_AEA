@@ -249,8 +249,8 @@ class AriaToVIFTProcessor:
         print(f"📊 Generating IMU data from trajectory")
         
         imu_frequency = 1000.0  # 1kHz IMU
-        camera_frequency = 30.0  # 30Hz camera
-        samples_per_frame = int(imu_frequency / camera_frequency)  # ~33 samples per frame
+        camera_frequency = 20.0  # 20Hz camera (Aria dataset)
+        samples_per_frame = int(imu_frequency / camera_frequency)  # 50 samples per frame
         
         imu_data = []
         

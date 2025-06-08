@@ -462,10 +462,10 @@ def main():
         ),
         EarlyStopping(
             monitor="val/total_loss",
-            patience=3,
+            patience=10,
             mode="min",
             verbose=True,
-            min_delta=0.00001
+            min_delta=0.0001
         ),
         LearningRateMonitor(logging_interval='step'),
         RichProgressBar(refresh_rate=10)

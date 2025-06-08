@@ -131,38 +131,8 @@ python train_improved.py --model multihead_fixed \
     --hidden-dim 128 \
     --num-heads 4 \
     --dropout 0.2
-
-# Key improvements in v3:
-# - No ReLU on quaternion outputs
-# - Xavier initialization for rotation weights (fixes zero gradient issue)
-# - Geodesic distance for rotation loss
-# - Proper quaternion initialization
-# - Gradient clipping for stability
 ```
 
-### MultiHead Improved
-
-```bash
-python train_improved.py --model multihead \
-    --epochs 100 \
-    --batch-size 32 \
-    --lr 1e-3 \
-    --hidden-dim 128 \
-    --num-heads 4 \
-    --dropout 0.2
-```
-
-### VIFT Original
-
-```bash
-python train_improved.py --model vift_original \
-    --epochs 100 \
-    --batch-size 32 \
-    --lr 1e-4 \
-    --hidden-dim 128 \
-    --num-heads 8 \
-    --dropout 0.1
-```
 
 Monitor training:
 
@@ -322,6 +292,7 @@ VIFT_AEA/
 Each script will print the exact command for the next step. Here's the complete workflow:
 
 ### Step 1: Download and Process Data (24+ hours)
+
 ```bash
 # Download dataset
 python scripts/download_aria_dataset.py --all
@@ -333,6 +304,7 @@ python scripts/process_aria_to_vift_quaternion.py \
 ```
 
 ### Step 2: Extract Features (~2 hours)
+
 ```bash
 python generate_all_pretrained_latents_fixed.py \
     --processed-dir /mnt/ssd_ext/aria_processed \
@@ -343,6 +315,7 @@ python generate_all_pretrained_latents_fixed.py \
 ```
 
 ### Step 3: Train Model (~4-6 hours)
+
 ```bash
 python train_improved.py --model multihead_fixed \
     --data-dir /mnt/ssd_ext/aria_latent_data_pretrained \
@@ -353,12 +326,14 @@ python train_improved.py --model multihead_fixed \
 ```
 
 ### Step 4: Monitor Training (while training)
+
 ```bash
 # In a separate terminal
 tensorboard --logdir logs/
 ```
 
 ### Step 5: Evaluate Model
+
 ```bash
 # The training script will print this exact command with your best checkpoint
 python inference_full_sequence.py \

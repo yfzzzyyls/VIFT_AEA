@@ -160,8 +160,8 @@ class RotationSpecializedHead(nn.Module):
         # CRITICAL FIX: Use Xavier initialization instead of zeros!
         nn.init.xavier_uniform_(self.rotation_output.weight, gain=0.1)  # Small gain for stability
         nn.init.zeros_(self.rotation_output.bias)
-        # Bias initialization for near-identity quaternions (WXYZ format)
-        self.rotation_output.bias.data = torch.tensor([1.0, 0.0, 0.0, 0.0])
+        # Bias initialization for identity quaternion in XYZW format (model's output format)
+        self.rotation_output.bias.data = torch.tensor([0.0, 0.0, 0.0, 1.0])
         
         self.angular_velocity_output = nn.Linear(hidden_dim, 3)
         nn.init.xavier_uniform_(self.angular_velocity_output.weight)
@@ -191,17 +191,11 @@ class RotationSpecializedHead(nn.Module):
         rotation_pred = rotation_pred.reshape(B, seq_len, 4)
         angular_velocity_pred = angular_velocity_pred.reshape(B, seq_len, 3)
         
-        # Normalize quaternions
+        # Normalize quaternions (already in XYZW format from output layer)
         rotation_pred = rotation_pred / (torch.norm(rotation_pred, dim=-1, keepdim=True) + 1e-8)
         
-        # Convert from WXYZ to XYZW format
-        rotation_pred_xyzw = torch.cat([
-            rotation_pred[..., 1:4],  # XYZ
-            rotation_pred[..., 0:1]   # W
-        ], dim=-1)
-        
         return {
-            'rotation': rotation_pred_xyzw,
+            'rotation': rotation_pred,  # Already in XYZW format
             'angular_velocity': angular_velocity_pred,
             'rotation_features': attended_features
         }
