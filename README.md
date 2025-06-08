@@ -104,9 +104,34 @@ python generate_all_pretrained_latents_fixed.py \
 
 ## 🏃 Training
 
-Train different model architectures:
+### Using Lightning CLI with Hydra Configs (Recommended)
 
-### MultiHead Fixed
+The project uses Hydra for configuration management. Train models with different configurations:
+
+```bash
+# Train with weighted loss (best for VIO tasks)
+python src/train.py experiment=latent_kitti_vio_weighted_tf \
+    data.data_dir=/path/to/aria_latent_data_pretrained \
+    data.batch_size=64 \
+    trainer.max_epochs=200
+
+# Train with MSE loss
+python src/train.py experiment=latent_kitti_vio_paper_mse \
+    data.data_dir=/path/to/aria_latent_data_pretrained
+
+# Custom configuration
+python src/train.py \
+    experiment=latent_kitti_vio_weighted_tf \
+    data.batch_size=32 \
+    model.lr=0.0001 \
+    trainer.devices=2
+```
+
+### Using Simplified Training Script
+
+Train different model architectures with the simplified interface:
+
+#### MultiHead Fixed (Recommended)
 
 Uses geodesic loss for rotation with proper weight initialization:
 
@@ -120,6 +145,34 @@ python train_improved.py --model multihead_fixed \
     --num-heads 4 \
     --dropout 0.2
 ```
+
+  
+
+#### VIFT Original
+
+```bash
+python train_improved.py --model vift_original \
+    --data-dir /path/to/aria_latent_data_pretrained \
+    --epochs 100 \
+    --batch-size 32 \
+    --lr 1e-4 \
+    --hidden-dim 128 \
+    --num-heads 8 \
+    --dropout 0.1
+```
+
+### Configuration Options
+
+Key parameters for training:
+
+- `--batch-size`: Batch size (default: 32, use 16 for limited GPU memory)
+- `--lr`: Learning rate (default: 1e-3)
+- `--epochs`: Number of training epochs (default: 100)
+- `--hidden-dim`: Hidden dimension size (default: 128)
+- `--num-heads`: Number of attention heads (default: 4)
+- `--dropout`: Dropout rate (default: 0.2)
+- `--gradient-clip`: Gradient clipping value (default: 1.0)
+- `--accumulate-grad-batches`: Gradient accumulation steps (default: 4)
 
 Monitor training:
 
@@ -154,12 +207,6 @@ python inference_full_sequence.py \
     --model-type multihead_fixed \
     --mode history
 
-# Evaluate other models for comparison
-python inference_full_sequence.py \
-    --sequence-id all \
-    --checkpoint logs/checkpoints_multihead/best_model.ckpt \
-    --model-type multihead
-
 python inference_full_sequence.py \
     --sequence-id all \
     --checkpoint logs/checkpoints_vift_original/best_model.ckpt \
@@ -183,30 +230,7 @@ python inference_full_sequence.py \
 | Initialization   | Standard              | Standard                         | **Identity quaternion**    |
 | Parameters       | ~1M                   | 1.2M                             | 1.2M                             |
 
-### Performance Metrics
-
-Average performance on 20 test sequences:
-
-| Metric               | VIFT Original | MultiHead Improved | MultiHead Fixed          | Description                     |
-| -------------------- | ------------- | ------------------ | ------------------------ | ------------------------------- |
-| Translation ATE (mm) | TBD           | TBD                | **1.34 ± 2.00**   | Full trajectory error (aligned) |
-| Rotation MAE (°)    | TBD           | TBD                | **6.88 ± 1.48**   | Mean absolute rotation error    |
-| RPE@33ms Trans (mm)  | TBD           | TBD                | **0.096 ± 0.018** | Frame-to-frame translation      |
-| RPE@33ms Rot (°)    | TBD           | TBD                | **0.029 ± 0.004** | Frame-to-frame rotation         |
-| RPE@100ms Trans (mm) | TBD           | TBD                | **0.287 ± 0.052** | 3-frame translation drift       |
-| RPE@100ms Rot (°)   | TBD           | TBD                | **0.088 ± 0.012** | 3-frame rotation drift          |
-| RPE@1s Trans (mm)    | TBD           | TBD                | **2.886 ± 0.474** | 30-frame translation drift      |
-| RPE@1s Rot (°)      | TBD           | TBD                | **0.874 ± 0.107** | 30-frame rotation drift         |
-
-*TBD: To be determined after running evaluation on other models*
-
-**Key Improvements in MultiHead Fixed:**
-
-- Uses geodesic distance for rotation loss instead of element-wise MSE
-- Removes ReLU activation from quaternion output layer
-- Provides accurate rotation error measurements
-
-## 🔍 Troubleshooting
+### 🔍 Troubleshooting
 
 ### Out of Memory
 
