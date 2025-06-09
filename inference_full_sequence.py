@@ -951,19 +951,19 @@ def main():
         
         # ATE metrics (always show aligned when available)
         table.add_row("[bold]ATE (Aligned)[/bold]", "")
-        table.add_row("  ├─ Mean", f"{metrics['ate_mean_cm']:.4f} m")
-        table.add_row("  ├─ RMSE", f"{metrics['ate_rmse_cm']:.4f} m")
-        table.add_row("  ├─ Std", f"{metrics['ate_std_cm']:.4f} m")
-        table.add_row("  ├─ Median", f"{metrics['ate_median_cm']:.4f} m")
-        table.add_row("  ├─ 95%", f"{metrics['ate_95_cm']:.4f} m")
-        table.add_row("  └─ Max", f"{metrics['ate_max_cm']:.4f} m")
+        table.add_row("  ├─ Mean", f"{metrics['ate_mean_cm']:.6f} m")
+        table.add_row("  ├─ RMSE", f"{metrics['ate_rmse_cm']:.6f} m")
+        table.add_row("  ├─ Std", f"{metrics['ate_std_cm']:.6f} m")
+        table.add_row("  ├─ Median", f"{metrics['ate_median_cm']:.6f} m")
+        table.add_row("  ├─ 95%", f"{metrics['ate_95_cm']:.6f} m")
+        table.add_row("  └─ Max", f"{metrics['ate_max_cm']:.6f} m")
         
         # Show alignment parameters if available
         if not metrics['alignment_disabled'] and 'alignment_info' in metrics and metrics['alignment_info']:
             table.add_row("[bold]Alignment Parameters[/bold]", "")
             table.add_row("  ├─ Scale", f"{metrics['alignment_info']['scale']:.4f}")
             table.add_row("  ├─ Rotation", f"{metrics['alignment_info']['rotation_angle_deg']:.2f}°")
-            table.add_row("  └─ Translation", f"{metrics['alignment_info']['translation_magnitude_cm']:.2f} cm")
+            table.add_row("  └─ Translation", f"{metrics['alignment_info']['translation_magnitude_cm']:.6f} m")
         
         table.add_row("Rotation Error Mean", f"{metrics['rot_mean_deg']:.2f}°")
         table.add_row("Rotation Error Std", f"{metrics['rot_std_deg']:.2f}°")
@@ -991,8 +991,8 @@ def main():
             per_seq_table.add_row(
                 m['sequence_id'],
                 f"{m['total_frames']:,}",
-                f"{ate_value:.2f} cm",
-                f"{trans_rpe:.2f} cm",
+                f"{ate_value:.6f} m",
+                f"{trans_rpe:.6f} m",
                 f"{rot_rpe:.2f}°",
                 status
             )
@@ -1050,14 +1050,14 @@ def main():
         # Always show aligned metrics
         avg_table.add_row("[bold]ATE (Aligned)[/bold]", "", "")
         avg_table.add_row("  ├─ RMSE", 
-                         f"{avg_metrics['ate_rmse_cm']:.2f} cm",
-                         f"{avg_metrics['ate_rmse_cm_std_across_seqs']:.2f} cm")
+                         f"{avg_metrics['ate_rmse_cm']:.6f} m",
+                         f"{avg_metrics['ate_rmse_cm_std_across_seqs']:.6f} m")
         avg_table.add_row("  ├─ Mean", 
-                         f"{avg_metrics['ate_mean_cm']:.2f} ± {avg_metrics['ate_std_cm']:.2f} cm",
-                         f"{avg_metrics['ate_mean_cm_std_across_seqs']:.2f} cm")
+                         f"{avg_metrics['ate_mean_cm']:.6f} ± {avg_metrics['ate_std_cm']:.6f} m",
+                         f"{avg_metrics['ate_mean_cm_std_across_seqs']:.6f} m")
         avg_table.add_row("  └─ Median", 
-                         f"{avg_metrics['ate_median_cm']:.2f} cm",
-                         f"{avg_metrics['ate_median_cm_std_across_seqs']:.2f} cm")
+                         f"{avg_metrics['ate_median_cm']:.6f} m",
+                         f"{avg_metrics['ate_median_cm_std_across_seqs']:.6f} m")
         
         avg_table.add_row("Absolute Rotation Error", 
                          f"{avg_metrics['rot_mean_deg']:.2f} ± {avg_metrics['rot_std_deg']:.2f}°",
@@ -1088,7 +1088,7 @@ def main():
     ate_value = metrics.get('ate_rmse_cm', metrics['ate_mean_cm'])
     perf_table.add_row(
         "ATE (Aligned)",
-        f"{ate_value:.2f} ± {metrics['ate_std_cm']:.2f} cm",
+        f"{ate_value:.6f} ± {metrics['ate_std_cm']:.6f} m",
         "RMSE",
         "Standard VIO metric"
     )
@@ -1123,7 +1123,7 @@ def main():
     rot_rpe_1frame = rpe['50ms'].get('rot_rmse', rpe['50ms']['rot_mean'])
     perf_table.add_row(
         "  ├─ Translation",
-        f"{trans_rpe_1frame:.2f} ± {rpe['50ms']['trans_std']:.2f} cm",
+        f"{trans_rpe_1frame:.6f} ± {rpe['50ms']['trans_std']:.6f} m",
         "RMSE",
         "Frame-to-frame consistency"
     )
@@ -1146,7 +1146,7 @@ def main():
         rot_rpe_1s = rpe['1s'].get('rot_rmse', rpe['1s']['rot_mean'])
         perf_table.add_row(
             "  ├─ Translation",
-            f"{trans_rpe_1s:.2f} ± {rpe['1s']['trans_std']:.2f} cm",
+            f"{trans_rpe_1s:.6f} ± {rpe['1s']['trans_std']:.6f} m",
             "RMSE",
             "1-second drift rate"
         )
@@ -1169,7 +1169,7 @@ def main():
         rot_rpe_5s = rpe['5s'].get('rot_rmse', rpe['5s']['rot_mean'])
         perf_table.add_row(
             "  ├─ Translation",
-            f"{trans_rpe_5s:.2f} ± {rpe['5s']['trans_std']:.2f} cm",
+            f"{trans_rpe_5s:.6f} ± {rpe['5s']['trans_std']:.6f} m",
             "RMSE",
             "5-second drift rate"
         )
@@ -1192,7 +1192,7 @@ def main():
         rot_rpe_10s = rpe['10s'].get('rot_rmse', rpe['10s']['rot_mean'])
         perf_table.add_row(
             "  ├─ Translation",
-            f"{trans_rpe_10s:.2f} ± {rpe['10s']['trans_std']:.2f} cm",
+            f"{trans_rpe_10s:.6f} ± {rpe['10s']['trans_std']:.6f} m",
             "RMSE",
             "10-second drift rate"
         )

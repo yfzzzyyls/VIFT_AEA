@@ -103,48 +103,11 @@ python generate_all_pretrained_latents_fixed.py \
 
 ## 🏃 Training
 
-### Using Lightning CLI with Hydra Configs (Advanced)
-
-The project uses Hydra for configuration management. Train models with different configurations:
-
-```bash
-# Train with weighted loss (best for VIO tasks)
-python src/train.py experiment=latent_kitti_vio_weighted_tf \
-    data.data_dir=/path/to/aria_latent_data_pretrained \
-    data.batch_size=64 \
-    trainer.max_epochs=200
-
-# Train with MSE loss
-python src/train.py experiment=latent_kitti_vio_paper_mse \
-    data.data_dir=/path/to/aria_latent_data_pretrained
-
-# Custom configuration
-python src/train.py \
-    experiment=latent_kitti_vio_weighted_tf \
-    data.batch_size=32 \
-    model.lr=0.0001 \
-    trainer.devices=2
-```
-
-### Using Simplified Training Script (Recommended)
-
-Train different model architectures with the simplified interface:
-
-#### MultiHead Fixed (Best Performance)
+#### MultiHead Fixed
 
 Uses geodesic loss for rotation with proper weight initialization:
 
 ```bash
-# Standard training configuration
-python train_improved.py --model multihead_fixed \
-    --data-dir /path/to/aria_latent_data_pretrained \
-    --epochs 100 \
-    --batch-size 32 \
-    --lr 1e-3 \
-    --hidden-dim 128 \
-    --num-heads 4 \
-    --dropout 0.2
-
 # Optimized configuration with 4 GPUs
 python train_improved.py \
     --model multihead_fixed \
@@ -234,6 +197,7 @@ python inference_full_sequence.py \
 ```
 
 **Output**:
+
 - Metrics displayed in meters
 - Trajectory plots saved to `trajectory_plots_all_stride_{stride}/`
 - Results JSON saved to `inference_results_realtime_averaged_stride_{stride}.json`
