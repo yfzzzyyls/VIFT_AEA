@@ -89,7 +89,8 @@ class AriaDataset(Dataset):
         poses = torch.zeros(self.seq_len, 7)  # [tx, ty, tz, qx, qy, qz, qw]
         
         for i, pose in enumerate(poses_list):
-            poses[i, :3] = torch.tensor(pose['translation'])
+            # Convert translation from meters to centimeters
+            poses[i, :3] = torch.tensor(pose['translation']) * 100.0
             poses[i, 3:] = torch.tensor(pose['rotation'])
         
         # Create VIFT-compatible visual-inertial features
@@ -282,7 +283,8 @@ class AriaLatentDataset(Dataset):
         poses = torch.zeros(self.seq_len, 7)  # [tx, ty, tz, qx, qy, qz, qw]
         
         for i, pose in enumerate(poses_list):
-            poses[i, :3] = torch.tensor(pose['translation'])
+            # Convert translation from meters to centimeters
+            poses[i, :3] = torch.tensor(pose['translation']) * 100.0
             poses[i, 3:] = torch.tensor(pose['rotation'])
         
         # Average IMU data per frame

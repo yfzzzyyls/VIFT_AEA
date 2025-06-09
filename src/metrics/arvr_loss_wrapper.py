@@ -66,8 +66,8 @@ class ARVRLossWrapper(nn.Module):
         Args:
             pred_rotation: [B*seq_len, 4] quaternions
             target_rotation: [B*seq_len, 4] quaternions
-            pred_translation: [B*seq_len, 3] translations
-            target_translation: [B*seq_len, 3] translations
+            pred_translation: [B*seq_len, 3] translations (in centimeters)
+            target_translation: [B*seq_len, 3] translations (in centimeters)
         
         Returns:
             Dictionary with loss components
@@ -81,23 +81,26 @@ class ARVRLossWrapper(nn.Module):
         
         # Optional: use log-scale to prevent underflow with very small values
         if self.use_log_scale:
-            # Add 1 to prevent log(0), multiply by 100 to scale up small cm values
-            trans_loss = torch.log1p(trans_loss * 100.0)
-            rot_loss = torch.log1p(rot_loss * 100.0)
+            # Add 1 to prevent log(0)
+            # FIXED: Removed 100x multiplier for translation - data is in meters not cm
+            trans_loss = torch.log1p(trans_loss)
+            rot_loss = torch.log1p(rot_loss)
         
         # Scale losses to similar magnitudes
-        # Translation is in cm, rotation is unitless [0,1]
-        rot_loss = rot_loss * 10.0
+        # Translation is in meters, rotation is unitless [0,1]
+        # FIXED: Removed 10x multiplier that was causing scale issues
+        # rot_loss = rot_loss * 10.0  # This was causing 100x scale issue!
         
         if self.use_weighted_loss:
             # Compute scale-aware weights based on motion magnitude
             with torch.no_grad():
-                # Translation magnitude
+                # Translation magnitude (in centimeters)
                 trans_magnitude = torch.norm(target_translation, dim=-1)
                 trans_weight = torch.ones_like(trans_magnitude)
                 # Reduced weighting to avoid bias toward zero motion
-                trans_weight[trans_magnitude < 0.01] = 1.5  # Was 3.0
-                trans_weight[trans_magnitude > 0.05] = 0.8  # Was 0.5
+                # Using centimeter scale thresholds
+                trans_weight[trans_magnitude < 0.1] = 1.5   # < 1mm (0.1cm)
+                trans_weight[trans_magnitude > 1.0] = 0.8   # > 1cm
                 
                 # Rotation magnitude (quaternion angle)
                 quat_dot = target_rotation[:, 3]  # w component

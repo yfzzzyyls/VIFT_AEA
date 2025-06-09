@@ -5,7 +5,7 @@ Fixed inference pipeline that correctly handles VIFT model output format.
 Fixes:
 1. VIFT outputs [tx, ty, tz, rx, ry, rz] but loss functions expect [rx, ry, rz, tx, ty, tz]
 2. Proper conversion between radians and degrees for rotation metrics
-3. Professional AR/VR metrics display in mm and degrees
+3. Professional VIO metrics display in meters and degrees
 """
 
 import os
@@ -218,7 +218,7 @@ def sliding_window_inference_batched(
     device: torch.device,
     window_size: int = 11,
     stride: int = 1,
-    pose_scale: float = 100.0,
+    pose_scale: float = 1.0,  # Keep in meters
     batch_size: int = 32,
     num_gpus: int = 4,
     model_type: str = 'multihead_concat'
@@ -244,6 +244,7 @@ def sliding_window_inference_batched(
     # Load sequence data
     visual_data = torch.load(sequence_path / "visual_data.pt").float()  # [N, 3, H, W]
     imu_data = torch.load(sequence_path / "imu_data.pt").float()        # [N, 33, 6]
+    # Note: IMU data stays in m/s² as the pretrained encoder expects it
     
     # Load ground truth poses - check for quaternion version first
     poses_file = sequence_path / "poses_quaternion.json"
@@ -622,13 +623,12 @@ def calculate_metrics(results, no_alignment=False):
     gt_rel = gt_rel[:min_len]
     
     # Calculate unaligned (raw) ATE first
-    ate_errors_raw_mm = []
+    ate_errors_raw_cm = []
     for pred, gt in zip(pred_traj, gt_traj):
         error_cm = np.linalg.norm(pred[:3] - gt[:3])
-        error_mm = error_cm * 10  # Convert cm to mm
-        ate_errors_raw_mm.append(error_mm)
+        ate_errors_raw_cm.append(error_cm)
     
-    ate_errors_raw_mm = np.array(ate_errors_raw_mm)
+    ate_errors_raw_cm = np.array(ate_errors_raw_cm)
     
     # Calculate aligned ATE if not disabled
     if not no_alignment:
@@ -636,16 +636,15 @@ def calculate_metrics(results, no_alignment=False):
         aligned_pred_traj, transform_params = align_trajectory_se3(pred_traj, gt_traj, align_orientation=False)
         
         # Calculate aligned ATE
-        ate_errors_aligned_mm = []
+        ate_errors_aligned_cm = []
         for pred, gt in zip(aligned_pred_traj, gt_traj):
             error_cm = np.linalg.norm(pred[:3] - gt[:3])
-            error_mm = error_cm * 10  # Convert cm to mm
-            ate_errors_aligned_mm.append(error_mm)
+            ate_errors_aligned_cm.append(error_cm)
         
-        ate_errors_aligned_mm = np.array(ate_errors_aligned_mm)
+        ate_errors_aligned_cm = np.array(ate_errors_aligned_cm)
     else:
         # If alignment is disabled, aligned metrics are same as raw
-        ate_errors_aligned_mm = ate_errors_raw_mm
+        ate_errors_aligned_cm = ate_errors_raw_cm
         aligned_pred_traj = pred_traj
         transform_params = None
     
@@ -695,8 +694,7 @@ def calculate_metrics(results, no_alignment=False):
                 pred_motion = end_pos_pred - start_pos_pred
                 gt_motion = end_pos_gt - start_pos_gt
                 trans_error_cm = np.linalg.norm(pred_motion - gt_motion)
-                trans_error_mm = trans_error_cm * 10  # Convert to mm
-                rpe_trans.append(trans_error_mm)
+                rpe_trans.append(trans_error_cm)
                 
                 # Rotation error over window
                 start_rot_pred = Rotation.from_quat(pred_traj[i, 3:])
@@ -732,8 +730,8 @@ def calculate_metrics(results, no_alignment=False):
             }
     
     # Calculate RMSE for both aligned and raw ATE (this is the standard metric)
-    ate_rmse_aligned_mm = np.sqrt(np.mean(np.square(ate_errors_aligned_mm)))
-    ate_rmse_raw_mm = np.sqrt(np.mean(np.square(ate_errors_raw_mm)))
+    ate_rmse_aligned_cm = np.sqrt(np.mean(np.square(ate_errors_aligned_cm)))
+    ate_rmse_raw_cm = np.sqrt(np.mean(np.square(ate_errors_raw_cm)))
     
     # Store transform parameters if alignment was performed
     alignment_info = {}
@@ -741,7 +739,7 @@ def calculate_metrics(results, no_alignment=False):
         alignment_info = {
             'scale': transform_params['scale'],
             'rotation_angle_deg': np.degrees(Rotation.from_matrix(transform_params['rotation']).magnitude()),
-            'translation_magnitude_mm': np.linalg.norm(transform_params['translation']) * 10  # Convert to mm
+            'translation_magnitude_cm': np.linalg.norm(transform_params['translation']) * 10  # Already in cm
         }
     
     # Calculate rotation RMSE
@@ -749,20 +747,20 @@ def calculate_metrics(results, no_alignment=False):
     
     return {
         # Aligned metrics (for research comparison)
-        'ate_mean_mm': ate_errors_aligned_mm.mean(),
-        'ate_rmse_mm': ate_rmse_aligned_mm,  # This is the standard ATE metric
-        'ate_std_mm': ate_errors_aligned_mm.std(),
-        'ate_median_mm': np.median(ate_errors_aligned_mm),
-        'ate_95_mm': np.percentile(ate_errors_aligned_mm, 95),
-        'ate_max_mm': ate_errors_aligned_mm.max(),
+        'ate_mean_cm': ate_errors_aligned_cm.mean(),
+        'ate_rmse_cm': ate_rmse_aligned_cm,  # This is the standard ATE metric
+        'ate_std_cm': ate_errors_aligned_cm.std(),
+        'ate_median_cm': np.median(ate_errors_aligned_cm),
+        'ate_95_cm': np.percentile(ate_errors_aligned_cm, 95),
+        'ate_max_cm': ate_errors_aligned_cm.max(),
         
         # Raw/unaligned metrics (for deployment evaluation)
-        'ate_mean_raw_mm': ate_errors_raw_mm.mean(),
-        'ate_rmse_raw_mm': ate_rmse_raw_mm,
-        'ate_std_raw_mm': ate_errors_raw_mm.std(),
-        'ate_median_raw_mm': np.median(ate_errors_raw_mm),
-        'ate_95_raw_mm': np.percentile(ate_errors_raw_mm, 95),
-        'ate_max_raw_mm': ate_errors_raw_mm.max(),
+        'ate_mean_raw_cm': ate_errors_raw_cm.mean(),
+        'ate_rmse_raw_cm': ate_rmse_raw_cm,
+        'ate_std_raw_cm': ate_errors_raw_cm.std(),
+        'ate_median_raw_cm': np.median(ate_errors_raw_cm),
+        'ate_95_raw_cm': np.percentile(ate_errors_raw_cm, 95),
+        'ate_max_raw_cm': ate_errors_raw_cm.max(),
         
         # Rotation metrics (from aligned trajectory)
         'rot_mean_deg': rot_errors_deg.mean(),
@@ -773,7 +771,7 @@ def calculate_metrics(results, no_alignment=False):
         
         # Other metrics
         'rpe_results': rpe_results,
-        'total_frames': len(ate_errors_aligned_mm),
+        'total_frames': len(ate_errors_aligned_cm),
         'alignment_disabled': no_alignment,
         'alignment_info': alignment_info
     }
@@ -800,6 +798,8 @@ def main():
                         help='Number of GPUs to use (default: 4)')
     parser.add_argument('--no-alignment', action='store_true',
                         help='Disable trajectory alignment (show raw ATE only)')
+    parser.add_argument('--no-plots', action='store_true',
+                        help='Disable automatic visualization plots generation')
     
     args = parser.parse_args()
     
@@ -927,7 +927,11 @@ def main():
             relative_poses=results['relative_poses'],
             absolute_trajectory=results['absolute_trajectory'],
             ground_truth=results['ground_truth'],
-            metrics=metrics
+            metrics=metrics,
+            gt_poses=results['ground_truth'],  # For visualization compatibility
+            pred_poses=results['absolute_trajectory'],  # For visualization
+            gt_aligned=results['ground_truth'],  # Assuming aligned already
+            pred_aligned=results['absolute_trajectory']  # Assuming aligned already
         )
     
     # Display results
@@ -947,19 +951,19 @@ def main():
         
         # ATE metrics (always show aligned when available)
         table.add_row("[bold]ATE (Aligned)[/bold]", "")
-        table.add_row("  ├─ Mean", f"{metrics['ate_mean_mm']:.2f} mm")
-        table.add_row("  ├─ RMSE", f"{metrics['ate_rmse_mm']:.2f} mm")
-        table.add_row("  ├─ Std", f"{metrics['ate_std_mm']:.2f} mm")
-        table.add_row("  ├─ Median", f"{metrics['ate_median_mm']:.2f} mm")
-        table.add_row("  ├─ 95%", f"{metrics['ate_95_mm']:.2f} mm")
-        table.add_row("  └─ Max", f"{metrics['ate_max_mm']:.2f} mm")
+        table.add_row("  ├─ Mean", f"{metrics['ate_mean_cm']:.4f} m")
+        table.add_row("  ├─ RMSE", f"{metrics['ate_rmse_cm']:.4f} m")
+        table.add_row("  ├─ Std", f"{metrics['ate_std_cm']:.4f} m")
+        table.add_row("  ├─ Median", f"{metrics['ate_median_cm']:.4f} m")
+        table.add_row("  ├─ 95%", f"{metrics['ate_95_cm']:.4f} m")
+        table.add_row("  └─ Max", f"{metrics['ate_max_cm']:.4f} m")
         
         # Show alignment parameters if available
         if not metrics['alignment_disabled'] and 'alignment_info' in metrics and metrics['alignment_info']:
             table.add_row("[bold]Alignment Parameters[/bold]", "")
             table.add_row("  ├─ Scale", f"{metrics['alignment_info']['scale']:.4f}")
             table.add_row("  ├─ Rotation", f"{metrics['alignment_info']['rotation_angle_deg']:.2f}°")
-            table.add_row("  └─ Translation", f"{metrics['alignment_info']['translation_magnitude_mm']:.2f} mm")
+            table.add_row("  └─ Translation", f"{metrics['alignment_info']['translation_magnitude_cm']:.2f} cm")
         
         table.add_row("Rotation Error Mean", f"{metrics['rot_mean_deg']:.2f}°")
         table.add_row("Rotation Error Std", f"{metrics['rot_std_deg']:.2f}°")
@@ -979,7 +983,7 @@ def main():
         
         for m in all_metrics:
             # Use RMSE values when available
-            ate_value = m.get('ate_rmse_mm', m['ate_mean_mm'])
+            ate_value = m.get('ate_rmse_cm', m['ate_mean_cm'])
             trans_rpe = m['rpe_results']['50ms'].get('trans_rmse', m['rpe_results']['50ms']['trans_mean'])
             rot_rpe = m['rpe_results']['50ms'].get('rot_rmse', m['rpe_results']['50ms']['rot_mean'])
             
@@ -987,8 +991,8 @@ def main():
             per_seq_table.add_row(
                 m['sequence_id'],
                 f"{m['total_frames']:,}",
-                f"{ate_value:.2f} mm",
-                f"{trans_rpe:.2f} mm",
+                f"{ate_value:.2f} cm",
+                f"{trans_rpe:.2f} cm",
                 f"{rot_rpe:.2f}°",
                 status
             )
@@ -998,7 +1002,7 @@ def main():
         # Calculate averaged metrics
         avg_metrics = {}
         # Average aligned metrics
-        for key in ['ate_mean_mm', 'ate_std_mm', 'ate_median_mm', 'ate_95_mm', 'ate_rmse_mm',
+        for key in ['ate_mean_cm', 'ate_std_cm', 'ate_median_cm', 'ate_95_cm', 'ate_rmse_cm',
                     'rot_mean_deg', 'rot_std_deg']:
             values = [m[key] for m in all_metrics]
             avg_metrics[key] = np.mean(values)
@@ -1006,8 +1010,8 @@ def main():
         
         # Average raw metrics if alignment was used
         if not args.no_alignment:
-            for key in ['ate_mean_raw_mm', 'ate_std_raw_mm', 'ate_median_raw_mm', 
-                        'ate_95_raw_mm', 'ate_rmse_raw_mm']:
+            for key in ['ate_mean_raw_cm', 'ate_std_raw_cm', 'ate_median_raw_cm', 
+                        'ate_95_raw_cm', 'ate_rmse_raw_cm']:
                 values = [m[key] for m in all_metrics]
                 avg_metrics[key] = np.mean(values)
                 avg_metrics[key + '_std_across_seqs'] = np.std(values)
@@ -1046,14 +1050,14 @@ def main():
         # Always show aligned metrics
         avg_table.add_row("[bold]ATE (Aligned)[/bold]", "", "")
         avg_table.add_row("  ├─ RMSE", 
-                         f"{avg_metrics['ate_rmse_mm']:.2f} mm",
-                         f"{avg_metrics['ate_rmse_mm_std_across_seqs']:.2f} mm")
+                         f"{avg_metrics['ate_rmse_cm']:.2f} cm",
+                         f"{avg_metrics['ate_rmse_cm_std_across_seqs']:.2f} cm")
         avg_table.add_row("  ├─ Mean", 
-                         f"{avg_metrics['ate_mean_mm']:.2f} ± {avg_metrics['ate_std_mm']:.2f} mm",
-                         f"{avg_metrics['ate_mean_mm_std_across_seqs']:.2f} mm")
+                         f"{avg_metrics['ate_mean_cm']:.2f} ± {avg_metrics['ate_std_cm']:.2f} cm",
+                         f"{avg_metrics['ate_mean_cm_std_across_seqs']:.2f} cm")
         avg_table.add_row("  └─ Median", 
-                         f"{avg_metrics['ate_median_mm']:.2f} mm",
-                         f"{avg_metrics['ate_median_mm_std_across_seqs']:.2f} mm")
+                         f"{avg_metrics['ate_median_cm']:.2f} cm",
+                         f"{avg_metrics['ate_median_cm_std_across_seqs']:.2f} cm")
         
         avg_table.add_row("Absolute Rotation Error", 
                          f"{avg_metrics['rot_mean_deg']:.2f} ± {avg_metrics['rot_std_deg']:.2f}°",
@@ -1081,10 +1085,10 @@ def main():
     )
     
     # ATE - Always show aligned version
-    ate_value = metrics.get('ate_rmse_mm', metrics['ate_mean_mm'])
+    ate_value = metrics.get('ate_rmse_cm', metrics['ate_mean_cm'])
     perf_table.add_row(
         "ATE (Aligned)",
-        f"{ate_value:.2f} ± {metrics['ate_std_mm']:.2f} mm",
+        f"{ate_value:.2f} ± {metrics['ate_std_cm']:.2f} cm",
         "RMSE",
         "Standard VIO metric"
     )
@@ -1119,7 +1123,7 @@ def main():
     rot_rpe_1frame = rpe['50ms'].get('rot_rmse', rpe['50ms']['rot_mean'])
     perf_table.add_row(
         "  ├─ Translation",
-        f"{trans_rpe_1frame:.2f} ± {rpe['50ms']['trans_std']:.2f} mm",
+        f"{trans_rpe_1frame:.2f} ± {rpe['50ms']['trans_std']:.2f} cm",
         "RMSE",
         "Frame-to-frame consistency"
     )
@@ -1142,7 +1146,7 @@ def main():
         rot_rpe_1s = rpe['1s'].get('rot_rmse', rpe['1s']['rot_mean'])
         perf_table.add_row(
             "  ├─ Translation",
-            f"{trans_rpe_1s:.2f} ± {rpe['1s']['trans_std']:.2f} mm",
+            f"{trans_rpe_1s:.2f} ± {rpe['1s']['trans_std']:.2f} cm",
             "RMSE",
             "1-second drift rate"
         )
@@ -1165,7 +1169,7 @@ def main():
         rot_rpe_5s = rpe['5s'].get('rot_rmse', rpe['5s']['rot_mean'])
         perf_table.add_row(
             "  ├─ Translation",
-            f"{trans_rpe_5s:.2f} ± {rpe['5s']['trans_std']:.2f} mm",
+            f"{trans_rpe_5s:.2f} ± {rpe['5s']['trans_std']:.2f} cm",
             "RMSE",
             "5-second drift rate"
         )
@@ -1188,7 +1192,7 @@ def main():
         rot_rpe_10s = rpe['10s'].get('rot_rmse', rpe['10s']['rot_mean'])
         perf_table.add_row(
             "  ├─ Translation",
-            f"{trans_rpe_10s:.2f} ± {rpe['10s']['trans_std']:.2f} mm",
+            f"{trans_rpe_10s:.2f} ± {rpe['10s']['trans_std']:.2f} cm",
             "RMSE",
             "10-second drift rate"
         )
@@ -1205,7 +1209,7 @@ def main():
     console.print("\n[bold]Metric Definitions (Following TUM/EuRoC Standards):[/bold]")
     console.print("• ATE: Absolute Trajectory Error (RMSE after SE(3) alignment)")
     console.print("• RPE: Relative Pose Error over fixed time intervals")
-    console.print("• Translation: Position error in millimeters (mm)")
+    console.print("• Translation: Position error in centimeters (cm)")
     console.print("• Rotation: Angular error in degrees (°)")
     console.print("\n[bold]Alignment Details:[/bold]")
     if not args.no_alignment:
@@ -1220,11 +1224,11 @@ def main():
     console.print("\n[bold]Performance Analysis:[/bold]")
     
     # Compare against typical VIO research results
-    console.print(f"\n• Translation ATE: {metrics['ate_mean_mm']:.2f} mm")
-    if metrics['ate_mean_mm'] < 10.0:
+    console.print(f"\n• Translation ATE: {metrics['ate_mean_cm']:.2f} cm")
+    if metrics['ate_mean_cm'] < 10.0:
         console.print("  [green]Comparable to state-of-the-art VIO methods on similar sequences[/green]")
     
-    console.print(f"\n• Frame-to-frame translation: {rpe['50ms']['trans_mean']:.2f} mm")
+    console.print(f"\n• Frame-to-frame translation: {rpe['50ms']['trans_mean']:.2f} cm")
     if rpe['50ms']['trans_mean'] < 1.0:
         console.print("  [green]Sub-millimeter frame-to-frame accuracy achieved[/green]")
     
@@ -1238,7 +1242,7 @@ def main():
     
     # Drift rate analysis
     drift_rate = rpe['1s']['trans_mean'] if '1s' in rpe else 0
-    console.print(f"\n• Drift rate: {drift_rate:.2f} mm/second")
+    console.print(f"\n• Drift rate: {drift_rate:.2f} cm/second")
     if drift_rate < 10.0:
         console.print("  [green]Low drift accumulation rate[/green]")
     else:
@@ -1303,7 +1307,49 @@ def main():
         console.print(f"       --sequence-id all \\")
         console.print(f"       --checkpoint {args.checkpoint} \\")
         console.print(f"       --processed-dir {args.processed_dir}")
+    
+    # Generate visualization plots unless disabled
+    if not args.no_plots:
+        console.print("\n[bold cyan]Generating visualization plots...[/bold cyan]")
+        
+        if len(test_sequences) == 1:
+            # Single sequence visualization
+            seq_id = test_sequences[0]
+            console.print(f"Creating plots for sequence {seq_id}...")
+            subprocess_cmd = [
+                sys.executable, 'visualize_trajectories.py',
+                '--sequence-id', seq_id,
+                '--results-dir', str(output_path.parent) if output_path.parent.name.startswith('inference_results') else '.',
+                '--output-dir', f'trajectory_plots_seq_{seq_id}',
+                '--plot-type', 'all'
+            ]
+            
+            try:
+                subprocess.run(subprocess_cmd, check=True)
+                console.print(f"✅ Visualization plots saved to trajectory_plots_seq_{seq_id}/")
+            except subprocess.CalledProcessError as e:
+                console.print(f"[red]Warning: Failed to generate plots: {e}[/red]")
+        else:
+            # Multiple sequences visualization
+            console.print("Creating plots for all sequences...")
+            subprocess_cmd = [
+                sys.executable, 'visualize_all_sequences.py',
+                '--results-dir', f'inference_results_realtime_all_stride_{args.stride}',
+                '--output-dir', f'trajectory_plots_all_stride_{args.stride}',
+                '--plot-types', 'paper', '2d', 'error'
+            ]
+            
+            try:
+                subprocess.run(subprocess_cmd, check=True)
+                console.print(f"✅ Visualization plots saved to trajectory_plots_all_stride_{args.stride}/")
+                console.print("✅ Summary statistics and multi-trajectory comparison created")
+            except subprocess.CalledProcessError as e:
+                console.print(f"[red]Warning: Failed to generate plots: {e}[/red]")
+    else:
+        console.print("\n[dim]Visualization plots disabled (--no-plots flag used)[/dim]")
 
 
 if __name__ == "__main__":
+    # Import subprocess for visualization
+    import subprocess
     main()

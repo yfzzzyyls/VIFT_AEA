@@ -269,7 +269,10 @@ class MultiHeadVIOModelSeparate(L.LightningModule):
         rotation_weight: float = 1.0,
         translation_weight: float = 1.0,
         velocity_weight: float = 0.3,
-        sequence_length: int = 10
+        sequence_length: int = 10,
+        optimizer_type: str = 'adamw',
+        scheduler_type: str = 'onecycle',
+        warmup_steps: int = 500
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -470,24 +473,60 @@ class MultiHeadVIOModelSeparate(L.LightningModule):
         return total_loss
     
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.hparams.learning_rate,
-            weight_decay=self.hparams.weight_decay,
-            betas=(0.9, 0.999),
-            eps=1e-7  # Slightly higher epsilon for stability
-        )
+        # Select optimizer
+        if self.hparams.optimizer_type == 'adam':
+            optimizer = torch.optim.Adam(
+                self.parameters(),
+                lr=self.hparams.learning_rate,
+                weight_decay=self.hparams.weight_decay,
+                betas=(0.9, 0.999),
+                eps=1e-7
+            )
+        elif self.hparams.optimizer_type == 'sgd':
+            optimizer = torch.optim.SGD(
+                self.parameters(),
+                lr=self.hparams.learning_rate,
+                weight_decay=self.hparams.weight_decay,
+                momentum=0.9
+            )
+        else:  # adamw
+            optimizer = torch.optim.AdamW(
+                self.parameters(),
+                lr=self.hparams.learning_rate,
+                weight_decay=self.hparams.weight_decay,
+                betas=(0.9, 0.999),
+                eps=1e-7
+            )
         
-        # Use OneCycleLR for better training dynamics
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer,
-            max_lr=self.hparams.learning_rate * 10,  # Peak at 10x base LR
-            total_steps=self.trainer.estimated_stepping_batches,
-            pct_start=0.3,  # 30% of training for warmup
-            anneal_strategy='cos',
-            div_factor=10,  # Start at LR/10
-            final_div_factor=100  # End at LR/100
-        )
+        # Select scheduler
+        if self.hparams.scheduler_type == 'cosine':
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=self.trainer.estimated_stepping_batches,
+                eta_min=1e-6
+            )
+        elif self.hparams.scheduler_type == 'linear':
+            scheduler = torch.optim.lr_scheduler.LinearLR(
+                optimizer,
+                start_factor=1.0,
+                end_factor=0.01,
+                total_iters=self.trainer.estimated_stepping_batches
+            )
+        elif self.hparams.scheduler_type == 'constant':
+            scheduler = torch.optim.lr_scheduler.ConstantLR(
+                optimizer,
+                factor=1.0
+            )
+        else:  # onecycle
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=self.hparams.learning_rate * 10,  # Peak at 10x base LR
+                total_steps=self.trainer.estimated_stepping_batches,
+                pct_start=0.3,  # 30% of training for warmup
+                anneal_strategy='cos',
+                div_factor=10,  # Start at LR/10
+                final_div_factor=100  # End at LR/100
+            )
         
         return {
             'optimizer': optimizer,

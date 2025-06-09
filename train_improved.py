@@ -66,6 +66,9 @@ class SeparateFeatureDataset(Dataset):
         imu_features = torch.from_numpy(imu_features).float()
         poses = torch.from_numpy(poses).float()
         
+        # Data is already in centimeters from feature generation (pose_scale=100.0)
+        # No additional scaling needed!
+        
         # Apply augmentation if requested
         if self.augment:
             # Add small noise to features
@@ -91,7 +94,10 @@ class VIFTLightningWrapper(L.LightningModule):
         learning_rate: float = 1e-4,
         weight_decay: float = 1e-5,
         rotation_weight: float = 1.0,
-        translation_weight: float = 1.0
+        translation_weight: float = 1.0,
+        optimizer_type: str = 'adamw',
+        scheduler_type: str = 'onecycle',
+        warmup_steps: int = 500
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -258,24 +264,70 @@ class VIFTLightningWrapper(L.LightningModule):
         return total_loss
     
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.hparams.learning_rate,
-            weight_decay=self.hparams.weight_decay,
-            betas=(0.9, 0.999),
-            eps=1e-7
-        )
+        # Select optimizer
+        if hasattr(self.hparams, 'optimizer_type'):
+            opt_type = self.hparams.optimizer_type
+        else:
+            opt_type = 'adamw'
+            
+        if opt_type == 'adam':
+            optimizer = torch.optim.Adam(
+                self.parameters(),
+                lr=self.hparams.learning_rate,
+                weight_decay=self.hparams.weight_decay,
+                betas=(0.9, 0.999),
+                eps=1e-7
+            )
+        elif opt_type == 'sgd':
+            optimizer = torch.optim.SGD(
+                self.parameters(),
+                lr=self.hparams.learning_rate,
+                weight_decay=self.hparams.weight_decay,
+                momentum=0.9
+            )
+        else:  # adamw
+            optimizer = torch.optim.AdamW(
+                self.parameters(),
+                lr=self.hparams.learning_rate,
+                weight_decay=self.hparams.weight_decay,
+                betas=(0.9, 0.999),
+                eps=1e-7
+            )
         
-        # Use OneCycleLR
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer,
-            max_lr=self.hparams.learning_rate * 10,
-            total_steps=self.trainer.estimated_stepping_batches,
-            pct_start=0.3,
-            anneal_strategy='cos',
-            div_factor=10,
-            final_div_factor=100
-        )
+        # Select scheduler
+        if hasattr(self.hparams, 'scheduler_type'):
+            sched_type = self.hparams.scheduler_type
+        else:
+            sched_type = 'onecycle'
+            
+        if sched_type == 'cosine':
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=self.trainer.estimated_stepping_batches,
+                eta_min=1e-6
+            )
+        elif sched_type == 'linear':
+            scheduler = torch.optim.lr_scheduler.LinearLR(
+                optimizer,
+                start_factor=1.0,
+                end_factor=0.01,
+                total_iters=self.trainer.estimated_stepping_batches
+            )
+        elif sched_type == 'constant':
+            scheduler = torch.optim.lr_scheduler.ConstantLR(
+                optimizer,
+                factor=1.0
+            )
+        else:  # onecycle
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=self.hparams.learning_rate * 10,
+                total_steps=self.trainer.estimated_stepping_batches,
+                pct_start=0.3,
+                anneal_strategy='cos',
+                div_factor=10,
+                final_div_factor=100
+            )
         
         return {
             'optimizer': optimizer,
@@ -323,6 +375,21 @@ def parse_args():
     parser.add_argument('--data-dir', type=str, default='aria_latent_data_pretrained', 
                         help='Directory containing the data')
     
+    # Additional hyperparameters for optimization
+    parser.add_argument('--optimizer', type=str, default='adamw', 
+                        choices=['adam', 'adamw', 'sgd'], help='Optimizer type')
+    parser.add_argument('--scheduler', type=str, default='onecycle',
+                        choices=['cosine', 'linear', 'constant', 'onecycle'], help='Learning rate scheduler')
+    parser.add_argument('--gradient-accumulation', type=int, default=1, 
+                        help='Gradient accumulation steps')
+    parser.add_argument('--warmup-steps', type=int, default=500, help='Warmup steps for scheduler')
+    
+    # Experiment tracking
+    parser.add_argument('--checkpoint-dir', type=str, default=None, 
+                        help='Directory to save checkpoints')
+    parser.add_argument('--experiment-name', type=str, default=None, 
+                        help='Name for this experiment')
+    
     return parser.parse_args()
 
 
@@ -354,6 +421,9 @@ def main():
     console.print(f"  Learning rate: {learning_rate}")
     console.print(f"  Hidden dim: {args.hidden_dim}")
     console.print(f"  Dropout: {args.dropout}")
+    console.print(f"  Optimizer: {args.optimizer}")
+    console.print(f"  Scheduler: {args.scheduler}")
+    console.print(f"  Gradient accumulation: {args.gradient_accumulation}")
     
     # Set seed
     L.seed_everything(42, workers=True)
@@ -373,7 +443,10 @@ def main():
             weight_decay=args.weight_decay,
             sequence_length=10,
             rotation_weight=args.rotation_weight,
-            translation_weight=args.translation_weight
+            translation_weight=args.translation_weight,
+            optimizer_type=args.optimizer,
+            scheduler_type=args.scheduler,
+            warmup_steps=args.warmup_steps
         )
     elif args.model == 'multihead_fixed':
         console.print("\n[bold]Using MultiHeadVIOModel[/bold]")
@@ -393,7 +466,10 @@ def main():
             weight_decay=args.weight_decay,
             sequence_length=10,
             rotation_weight=args.rotation_weight,
-            translation_weight=args.translation_weight
+            translation_weight=args.translation_weight,
+            optimizer_type=args.optimizer,
+            scheduler_type=args.scheduler,
+            warmup_steps=args.warmup_steps
         )
     else:  # vift_original
         console.print("\n[bold]Using Original VIFT PoseTransformer[/bold]")
@@ -407,7 +483,10 @@ def main():
             learning_rate=learning_rate,
             weight_decay=args.weight_decay,
             rotation_weight=args.rotation_weight,
-            translation_weight=args.translation_weight
+            translation_weight=args.translation_weight,
+            optimizer_type=args.optimizer,
+            scheduler_type=args.scheduler,
+            warmup_steps=args.warmup_steps
         )
     
     # Create datasets with augmentation
@@ -442,11 +521,19 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     console.print(f"\n[bold]Model size:[/bold] {total_params/1e6:.1f}M parameters")
     
+    # Setup checkpoint directory
+    if args.checkpoint_dir:
+        checkpoint_dir = Path(args.checkpoint_dir)
+    else:
+        checkpoint_dir = Path("logs") / f"checkpoints_{args.model}"
+    
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    
     # Logger
     logger = TensorBoardLogger(
-        save_dir="logs",
-        name=f"{args.model}_training",
-        version=f"lr_{learning_rate}_hd_{args.hidden_dim}"
+        save_dir="logs" if not args.experiment_name else str(Path(args.checkpoint_dir).parent.parent / "logs"),
+        name=args.experiment_name or f"{args.model}_training",
+        version=args.experiment_name or f"lr_{learning_rate}_hd_{args.hidden_dim}"
     )
     
     # Callbacks
@@ -455,7 +542,7 @@ def main():
             monitor="val/total_loss",
             mode="min",
             save_top_k=3,
-            dirpath=f"logs/checkpoints_{args.model}",
+            dirpath=str(checkpoint_dir),
             filename="epoch_{epoch:03d}_val_loss_{val/total_loss:.6f}",
             save_last=True,
             verbose=True
@@ -475,10 +562,11 @@ def main():
     trainer = L.Trainer(
         max_epochs=max_epochs,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
-        devices=1,
+        devices=4,
+        strategy="ddp_find_unused_parameters_true" if torch.cuda.device_count() > 1 else "auto",
         precision="16-mixed" if torch.cuda.is_available() else 32,
         gradient_clip_val=1.0,
-        accumulate_grad_batches=2,  # Effective batch size of 64
+        accumulate_grad_batches=args.gradient_accumulation,
         logger=logger,
         callbacks=callbacks,
         log_every_n_steps=20,

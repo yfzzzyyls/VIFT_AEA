@@ -91,20 +91,19 @@ Generate pretrained features and prepare training data:
 ```bash
 python generate_all_pretrained_latents_fixed.py \
     --processed-dir /path/to/aria_processed \
-    --output-dir /path/to/aria_latent_data_pretrained \
-    --stride 1  # Use all frames
+    --output-dir /path/to/aria_latent_data_pretrained
 
 # This will:
 # - Extract 512-dim visual features using pretrained encoder
-# - Extract 256-dim IMU features 
-# - Convert poses to relative transformations in local coordinates
+# - Extract 256-dim IMU features (in m/s²)
+# - Convert poses to relative transformations in local coordinates (in meters)
 # - Create sliding windows of 11 frames (10 transitions)
 # - Generate ~371K training samples from 137 sequences
 ```
 
 ## 🏃 Training
 
-### Using Lightning CLI with Hydra Configs (Recommended)
+### Using Lightning CLI with Hydra Configs (Advanced)
 
 The project uses Hydra for configuration management. Train models with different configurations:
 
@@ -127,26 +126,39 @@ python src/train.py \
     trainer.devices=2
 ```
 
-### Using Simplified Training Script
+### Using Simplified Training Script (Recommended)
 
 Train different model architectures with the simplified interface:
 
-#### MultiHead Fixed (Recommended)
+#### MultiHead Fixed (Best Performance)
 
 Uses geodesic loss for rotation with proper weight initialization:
 
 ```bash
+# Standard training configuration
 python train_improved.py --model multihead_fixed \
-    --data-dir /mnt/ssd_ext/incSeg-data/aria_latent_data_pretrained \
+    --data-dir /path/to/aria_latent_data_pretrained \
     --epochs 100 \
     --batch-size 32 \
     --lr 1e-3 \
     --hidden-dim 128 \
     --num-heads 4 \
     --dropout 0.2
+
+# Optimized configuration with 4 GPUs
+python train_improved.py \
+    --model multihead_fixed \
+    --data-dir /path/to/aria_latent_data_pretrained \
+    --epochs 50 \
+    --optimizer adamw \
+    --scheduler onecycle \
+    --lr 2e-3 \
+    --gradient-accumulation 4 \
+    --checkpoint-dir experiment_name \
+    --experiment-name my_experiment
 ```
 
-  
+**Note**: The model trains and predicts in meters, maintaining consistency with the original data and IMU units (m/s²).
 
 #### VIFT Original
 
@@ -165,14 +177,20 @@ python train_improved.py --model vift_original \
 
 Key parameters for training:
 
-- `--batch-size`: Batch size (default: 32, use 16 for limited GPU memory)
+- `--batch-size`: Batch size per GPU (default: 32, use 16 for limited GPU memory)
 - `--lr`: Learning rate (default: 1e-3)
 - `--epochs`: Number of training epochs (default: 100)
 - `--hidden-dim`: Hidden dimension size (default: 128)
 - `--num-heads`: Number of attention heads (default: 4)
 - `--dropout`: Dropout rate (default: 0.2)
 - `--gradient-clip`: Gradient clipping value (default: 1.0)
-- `--accumulate-grad-batches`: Gradient accumulation steps (default: 4)
+- `--gradient-accumulation`: Gradient accumulation steps (default: 4)
+- `--optimizer`: Optimizer choice: adamw, adam, sgd (default: adamw)
+- `--scheduler`: Learning rate scheduler: onecycle, cosine, none (default: onecycle)
+- `--checkpoint-dir`: Directory to save checkpoints (default: logs/checkpoints_{model})
+- `--experiment-name`: Name for the experiment (for logging)
+
+**Multi-GPU Training**: The script automatically uses all available GPUs (default: 4) with DDP strategy.
 
 Monitor training:
 
@@ -185,35 +203,41 @@ tensorboard --logdir logs/
 Evaluate trained models on test sequences:
 
 ```bash
-# Evaluate MultiHead Fixed model
+# Evaluate on all test sequences
 python inference_full_sequence.py \
     --sequence-id all \
-    --checkpoint logs/checkpoints_multihead_fixed/last.ckpt \
-    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
-    --model-type multihead_fixed
+    --checkpoint /path/to/checkpoint/last.ckpt \
+    --processed-dir /path/to/aria_processed \
+    --stride 1  # Real-time sliding window
 
 # Single sequence evaluation
 python inference_full_sequence.py \
     --sequence-id 123 \
-    --checkpoint logs/checkpoints_multihead_fixed/last.ckpt \
-    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
-    --model-type multihead_fixed
+    --checkpoint /path/to/checkpoint/last.ckpt \
+    --processed-dir /path/to/aria_processed \
+    --stride 1
 
-# History-based mode (temporal smoothing)
+# Faster evaluation with larger stride
 python inference_full_sequence.py \
     --sequence-id all \
-    --checkpoint logs/checkpoints_multihead_fixed/last.ckpt \
-    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
-    --model-type multihead_fixed \
-    --mode history
+    --checkpoint /path/to/checkpoint/last.ckpt \
+    --processed-dir /path/to/aria_processed \
+    --stride 10  # Process every 10th frame
 
+# Disable visualization plots (faster)
 python inference_full_sequence.py \
     --sequence-id all \
-    --checkpoint logs/checkpoints_vift_original/best_model.ckpt \
-    --model-type vift_original
+    --checkpoint /path/to/checkpoint/last.ckpt \
+    --processed-dir /path/to/aria_processed \
+    --stride 1 \
+    --no-plots
 ```
 
-**Note**: Replace `best_model.ckpt` with your actual checkpoint path.
+**Output**:
+- Metrics displayed in meters
+- Trajectory plots saved to `trajectory_plots_all_stride_{stride}/`
+- Results JSON saved to `inference_results_realtime_averaged_stride_{stride}.json`
+- Individual trajectories saved to `inference_results_realtime_all_stride_{stride}/`
 
 ## 🏆 Model Comparison
 
@@ -276,6 +300,43 @@ If you use this code, please cite the original VIFT paper:
   booktitle={ECCV 2024 Workshop on Visual Continual Learning},
   year={2024}
 }
+```
+
+## 💡 Quick Start Example
+
+Here's a complete example workflow for testing with 10 sequences:
+
+```bash
+# 1. Create a small test dataset
+mkdir -p /path/to/small_aria_processed
+for i in {000..009}; do
+    cp -r /mnt/ssd_ext/incSeg-data/aria_processed/$i /path/to/small_aria_processed/
+done
+
+# 2. Generate features
+python generate_all_pretrained_latents_fixed.py \
+    --processed-dir /path/to/small_aria_processed \
+    --output-dir /path/to/small_dataset_10seq \
+    --stride 1
+
+# 3. Train model
+python train_improved.py \
+    --model multihead_fixed \
+    --data-dir /path/to/small_dataset_10seq \
+    --epochs 50 \
+    --optimizer adamw \
+    --scheduler onecycle \
+    --lr 2e-3 \
+    --gradient-accumulation 4 \
+    --checkpoint-dir test_experiment \
+    --experiment-name test_run
+
+# 4. Evaluate
+python inference_full_sequence.py \
+    --sequence-id all \
+    --checkpoint test_experiment/last.ckpt \
+    --processed-dir /path/to/small_aria_processed \
+    --stride 1
 ```
 
 ## 🙏 Acknowledgments

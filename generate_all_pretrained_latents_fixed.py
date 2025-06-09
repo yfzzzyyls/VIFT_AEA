@@ -210,7 +210,7 @@ def process_sequence(seq_dir, model, device, window_size=11, stride=1, pose_scal
         # Convert absolute poses to relative poses with FIXED coordinate transformation
         window_relative_poses = convert_absolute_to_relative_fixed(window_absolute_poses)
         
-        # Scale translation from meters to centimeters
+        # Scale translation if needed (default keeps in meters)
         window_relative_poses[:, :3] *= pose_scale
         
         # Resize images to 256x512 (model expects this size)
@@ -411,8 +411,8 @@ def main():
                         help='Window size for sequences')
     parser.add_argument('--stride', type=int, default=1,
                         help='Stride for sliding window (default: 1)')
-    parser.add_argument('--pose-scale', type=float, default=100.0,
-                        help='Scale factor for poses (default: 100.0 for meter to cm conversion)')
+    parser.add_argument('--pose-scale', type=float, default=1.0,
+                        help='Scale factor for poses (default: 1.0 to keep in meters)')
     parser.add_argument('--skip-test', action='store_true', default=True,
                         help='Skip test set processing (default: True, use real-time encoding for inference)')
     parser.add_argument('--process-test', action='store_true',
@@ -438,7 +438,7 @@ def main():
     print(f"\nGenerating latent features with FIXED quaternion handling...")
     print(f"Window size: {args.window_size}")
     print(f"Stride: {args.stride}")
-    print(f"Pose scale: {args.pose_scale} (meter → cm)")
+    print(f"Pose scale: {args.pose_scale} (1.0 = meters, 100.0 = cm)")
     print(f"Output directory: {args.output_dir}")
     print(f"Pose format: Relative poses in LOCAL COORDINATES with quaternions")
     
