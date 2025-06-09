@@ -134,6 +134,250 @@ def accumulate_poses(relative_poses):
     return absolute_poses
 
 
+def create_3d_visualization(pred_traj, gt_traj, metrics, output_path, seq_id):
+    """
+    Create 3D trajectory visualization with integrated translation and rotation.
+    
+    Args:
+        pred_traj: Predicted trajectory (N, 7) with position and quaternion
+        gt_traj: Ground truth trajectory (N, 7) with position and quaternion
+        metrics: Dictionary containing computed metrics
+        output_path: Path to save the visualization
+        seq_id: Sequence identifier
+    """
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+    
+    # Create figure with 3D subplot
+    fig = plt.figure(figsize=(14, 10))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Extract positions
+    gt_pos = gt_traj[:, :3]
+    pred_pos = pred_traj[:, :3]
+    
+    # Plot ground truth trajectory
+    ax.plot(gt_pos[:, 0], gt_pos[:, 1], gt_pos[:, 2], 
+            'b-', linewidth=2, label='Ground Truth', alpha=0.8)
+    
+    # Plot predicted trajectory
+    ax.plot(pred_pos[:, 0], pred_pos[:, 1], pred_pos[:, 2], 
+            'r--', linewidth=2, label='Prediction', alpha=0.8)
+    
+    # Mark start and end points
+    ax.scatter(gt_pos[0, 0], gt_pos[0, 1], gt_pos[0, 2], 
+              c='green', s=200, marker='o', edgecolor='black', 
+              linewidth=2, label='Start', depthshade=False)
+    ax.scatter(gt_pos[-1, 0], gt_pos[-1, 1], gt_pos[-1, 2], 
+              c='red', s=200, marker='s', edgecolor='black', 
+              linewidth=2, label='End', depthshade=False)
+    
+    # Add orientation arrows at regular intervals
+    fps = 20  # 20 fps for Aria
+    segment_5s = 5 * fps  # 100 frames = 5 seconds
+    arrow_indices = range(0, len(gt_traj), segment_5s)
+    arrow_length = 0.3  # meters
+    
+    # Extract quaternions and convert to rotation matrices
+    if gt_traj.shape[1] >= 7 and pred_traj.shape[1] >= 7:
+        for idx in arrow_indices:
+            if idx < len(gt_traj):
+                # Ground truth orientation
+                try:
+                    gt_rot = Rotation.from_quat(gt_traj[idx, 3:7])
+                    gt_mat = gt_rot.as_matrix()
+                    # Forward direction (assuming forward is +x in local frame)
+                    gt_forward = gt_mat @ np.array([1, 0, 0])
+                    
+                    # Draw GT arrow (blue)
+                    ax.quiver(gt_pos[idx, 0], gt_pos[idx, 1], gt_pos[idx, 2],
+                             gt_forward[0], gt_forward[1], gt_forward[2],
+                             length=arrow_length, color='blue', alpha=0.7,
+                             arrow_length_ratio=0.3, linewidth=2)
+                except:
+                    pass
+                
+                # Predicted orientation
+                try:
+                    pred_rot = Rotation.from_quat(pred_traj[idx, 3:7])
+                    pred_mat = pred_rot.as_matrix()
+                    pred_forward = pred_mat @ np.array([1, 0, 0])
+                    
+                    # Draw prediction arrow (orange)
+                    ax.quiver(pred_pos[idx, 0], pred_pos[idx, 1], pred_pos[idx, 2],
+                             pred_forward[0], pred_forward[1], pred_forward[2],
+                             length=arrow_length, color='orange', alpha=0.7,
+                             arrow_length_ratio=0.3, linewidth=2)
+                except:
+                    pass
+    
+    # Add RPE@5s visualization
+    # Calculate and show 5-second segment errors
+    segment_errors = []
+    segment_positions = []
+    
+    for start_idx in range(0, len(gt_traj) - segment_5s, segment_5s):
+        end_idx = start_idx + segment_5s
+        
+        # Translation error over 5 seconds
+        gt_motion = gt_pos[end_idx-1] - gt_pos[start_idx]
+        pred_motion = pred_pos[end_idx-1] - pred_pos[start_idx]
+        trans_error = np.linalg.norm(pred_motion - gt_motion)
+        
+        segment_errors.append(trans_error)
+        segment_positions.append(gt_pos[start_idx])
+    
+    # Color-code segments by error
+    if segment_errors:
+        segment_positions = np.array(segment_positions)
+        max_error = max(segment_errors) if segment_errors else 1.0
+        
+        # Create scatter plot for error visualization
+        scatter = ax.scatter(segment_positions[:, 0], 
+                           segment_positions[:, 1], 
+                           segment_positions[:, 2],
+                           c=segment_errors, cmap='YlOrRd', 
+                           s=100, alpha=0.6, 
+                           vmin=0, vmax=max_error,
+                           edgecolor='black', linewidth=1)
+        
+        # Add colorbar
+        cbar = plt.colorbar(scatter, ax=ax, pad=0.1)
+        cbar.set_label('Translation RPE@5s (m)', fontsize=10)
+    
+    # Get metrics
+    ate_trans = metrics.get('ate_rmse_cm', 0) / 100.0  # Convert to meters for display
+    ate_rot = metrics.get('rot_rmse_deg', 0)
+    rpe_5s_trans = metrics.get('rpe_results', {}).get('5s', {}).get('trans_mean', 0) / 100.0  # Convert to meters
+    rpe_5s_rot = metrics.get('rpe_results', {}).get('5s', {}).get('rot_mean', 0)
+    
+    # Set title with key metrics
+    title = f'Sequence {seq_id} - 3D Trajectory with Orientation\n'
+    title += f'ATE: Trans={ate_trans:.4f}m, Rot={ate_rot:.1f}°  |  '
+    title += f'RPE@5s: Trans={rpe_5s_trans:.4f}m, Rot={rpe_5s_rot:.1f}°'
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    
+    # Set labels
+    ax.set_xlabel('X Position (m)', fontsize=12, labelpad=10)
+    ax.set_ylabel('Y Position (m)', fontsize=12, labelpad=10)
+    ax.set_zlabel('Z Position (m)', fontsize=12, labelpad=10)
+    
+    # Set viewing angle for better visualization
+    ax.view_init(elev=20, azim=45)
+    
+    # Make grid more visible
+    ax.grid(True, alpha=0.3)
+    ax.xaxis.pane.fill = False
+    ax.yaxis.pane.fill = False
+    ax.zaxis.pane.fill = False
+    
+    # Create custom legend
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    
+    legend_elements = [
+        Line2D([0], [0], color='blue', linewidth=2, label='GT Trajectory'),
+        Line2D([0], [0], color='red', linewidth=2, linestyle='--', label='Pred Trajectory'),
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='green', 
+               markersize=10, label='Start', markeredgecolor='black'),
+        Line2D([0], [0], marker='s', color='w', markerfacecolor='red', 
+               markersize=10, label='End', markeredgecolor='black'),
+        Patch(facecolor='blue', alpha=0.7, label='GT Orientation'),
+        Patch(facecolor='orange', alpha=0.7, label='Pred Orientation'),
+    ]
+    
+    ax.legend(handles=legend_elements, loc='upper left', fontsize=10, framealpha=0.9)
+    
+    # Set equal aspect ratio
+    # Get the limits
+    max_range = np.array([
+        gt_pos[:, 0].max() - gt_pos[:, 0].min(),
+        gt_pos[:, 1].max() - gt_pos[:, 1].min(),
+        gt_pos[:, 2].max() - gt_pos[:, 2].min()
+    ]).max() / 2.0
+    
+    mid_x = (gt_pos[:, 0].max() + gt_pos[:, 0].min()) * 0.5
+    mid_y = (gt_pos[:, 1].max() + gt_pos[:, 1].min()) * 0.5
+    mid_z = (gt_pos[:, 2].max() + gt_pos[:, 2].min()) * 0.5
+    
+    ax.set_xlim(mid_x - max_range, mid_x + max_range)
+    ax.set_ylim(mid_y - max_range, mid_y + max_range)
+    ax.set_zlim(mid_z - max_range * 0.5, mid_z + max_range * 0.5)  # Less range in Z
+    
+    plt.tight_layout()
+    
+    # Save figure
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def create_rpe_summary_plot(all_metrics, output_dir):
+    """
+    Create summary plot showing RPE@5s for all sequences.
+    
+    Args:
+        all_metrics: List of metrics dictionaries for all sequences
+        output_dir: Directory to save the plot
+    """
+    import matplotlib.pyplot as plt
+    
+    # Collect RPE@5s data
+    seq_ids = []
+    trans_rpe_5s = []
+    rot_rpe_5s = []
+    
+    for metrics in all_metrics:
+        seq_id = metrics.get('sequence_id', 'unknown')
+        rpe_results = metrics.get('rpe_results', {})
+        if '5s' in rpe_results:
+            seq_ids.append(seq_id)
+            trans_rpe_5s.append(rpe_results['5s']['trans_mean'] / 100.0)  # Convert to meters
+            rot_rpe_5s.append(rpe_results['5s']['rot_mean'])
+    
+    if not seq_ids:
+        return
+    
+    # Create bar plot
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    
+    # Translation RPE@5s
+    x_pos = np.arange(len(seq_ids))
+    bars1 = ax1.bar(x_pos, trans_rpe_5s, color='steelblue', alpha=0.8, edgecolor='darkblue')
+    
+    for i, (bar, value) in enumerate(zip(bars1, trans_rpe_5s)):
+        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.0005,
+                f'{value:.4f}', ha='center', va='bottom', fontsize=9)
+    
+    ax1.set_xlabel('Sequence ID', fontsize=12)
+    ax1.set_ylabel('Translation RPE@5s (m)', fontsize=12)
+    ax1.set_title('Translation RPE@5s by Sequence', fontsize=14)
+    ax1.set_xticks(x_pos)
+    ax1.set_xticklabels(seq_ids, rotation=45 if len(seq_ids) > 10 else 0)
+    ax1.grid(True, axis='y', alpha=0.3)
+    
+    # Rotation RPE@5s
+    bars2 = ax2.bar(x_pos, rot_rpe_5s, color='coral', alpha=0.8, edgecolor='darkred')
+    
+    for i, (bar, value) in enumerate(zip(bars2, rot_rpe_5s)):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.2,
+                f'{value:.1f}°', ha='center', va='bottom', fontsize=9)
+    
+    ax2.set_xlabel('Sequence ID', fontsize=12)
+    ax2.set_ylabel('Rotation RPE@5s (degrees)', fontsize=12)
+    ax2.set_title('Rotation RPE@5s by Sequence', fontsize=14)
+    ax2.set_xticks(x_pos)
+    ax2.set_xticklabels(seq_ids, rotation=45 if len(seq_ids) > 10 else 0)
+    ax2.grid(True, axis='y', alpha=0.3)
+    
+    plt.suptitle('RPE@5s Summary', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    
+    # Save
+    output_path = output_dir / 'rpe_5s_summary.png'
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
 def align_trajectory_se3(estimated_traj, ground_truth_traj, align_orientation=False):
     """
     Align estimated trajectory to ground truth using Umeyama algorithm.
@@ -1308,44 +1552,16 @@ def main():
         console.print(f"       --checkpoint {args.checkpoint} \\")
         console.print(f"       --processed-dir {args.processed_dir}")
     
-    # Generate visualization plots unless disabled
-    if not args.no_plots:
-        console.print("\n[bold cyan]Generating visualization plots...[/bold cyan]")
+    # Generate summary visualization if multiple sequences and plots enabled
+    if len(all_metrics) > 1 and not args.no_plots:
+        plot_output_dir = Path(f"inference_results_realtime_all_stride_{args.stride}") / 'trajectory_plots_3d'
+        plot_output_dir.mkdir(exist_ok=True)
         
-        if len(test_sequences) == 1:
-            # Single sequence visualization
-            seq_id = test_sequences[0]
-            console.print(f"Creating plots for sequence {seq_id}...")
-            subprocess_cmd = [
-                sys.executable, 'visualize_trajectories.py',
-                '--sequence-id', seq_id,
-                '--results-dir', str(output_path.parent) if output_path.parent.name.startswith('inference_results') else '.',
-                '--output-dir', f'trajectory_plots_seq_{seq_id}',
-                '--plot-type', 'all'
-            ]
-            
-            try:
-                subprocess.run(subprocess_cmd, check=True)
-                console.print(f"✅ Visualization plots saved to trajectory_plots_seq_{seq_id}/")
-            except subprocess.CalledProcessError as e:
-                console.print(f"[red]Warning: Failed to generate plots: {e}[/red]")
-        else:
-            # Multiple sequences visualization
-            console.print("Creating plots for all sequences...")
-            subprocess_cmd = [
-                sys.executable, 'visualize_all_sequences.py',
-                '--results-dir', f'inference_results_realtime_all_stride_{args.stride}',
-                '--output-dir', f'trajectory_plots_all_stride_{args.stride}',
-                '--plot-types', 'paper', '2d', 'error'
-            ]
-            
-            try:
-                subprocess.run(subprocess_cmd, check=True)
-                console.print(f"✅ Visualization plots saved to trajectory_plots_all_stride_{args.stride}/")
-                console.print("✅ Summary statistics and multi-trajectory comparison created")
-            except subprocess.CalledProcessError as e:
-                console.print(f"[red]Warning: Failed to generate plots: {e}[/red]")
-    else:
+        # Create RPE@5s summary plot
+        create_rpe_summary_plot(all_metrics, plot_output_dir)
+        console.print(f"[green]✅[/green] Saved RPE@5s summary plot to {plot_output_dir}/rpe_5s_summary.png")
+    
+    if args.no_plots:
         console.print("\n[dim]Visualization plots disabled (--no-plots flag used)[/dim]")
 
 
