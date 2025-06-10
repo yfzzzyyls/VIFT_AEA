@@ -14,6 +14,35 @@
 
 A state-of-the-art Visual-Inertial Odometry (VIO) system for the Aria Everyday Activities dataset, implementing and improving upon the VIFT architecture with multiple model variants and AR/VR Adaptations.
 
+## 🚨 Current Status
+
+### Key Issue Resolved: Data Processing Bug
+We discovered and fixed a critical bug in the data processing pipeline:
+- The trajectory was being downsampled incorrectly from 1000Hz to 20Hz
+- **Bug**: Taking consecutive frames instead of every 50th frame
+- **Result**: Almost no motion between frames (0.001 seconds apart instead of 0.05 seconds)
+- **Fix**: Proper downsampling in `scripts/process_aria_to_vift_quaternion.py`
+
+### MultiHead Model Training Results
+The MultiHead model with quaternion support failed to train properly:
+- Training diverged with NaN weights after epoch 77
+- Even early checkpoints show poor performance:
+  - Translation ATE: 282.45 cm (with alignment: 181.07 cm)
+  - Rotation error: 96.17° mean
+  - Only 4% of frames have <2cm translation error
+
+### Coordinate System Issues
+Umeyama alignment analysis revealed:
+- **Scale mismatch**: 3.37x (predictions too large)
+- **Coordinate rotation**: 32° offset between frames
+- **Translation offset**: 1253m initial position error
+- **Y-axis inverted**: Strong negative correlation (-0.723)
+
+### Next Steps
+1. Train VIFT original architecture on corrected dataset
+2. Use conservative hyperparameters for stability
+3. Monitor coordinate system consistency
+
 ## 📋 Requirements
 
 - Python 3.9+
@@ -91,8 +120,9 @@ Generate pretrained features and prepare training data:
 ```bash
 python generate_all_pretrained_latents_fixed.py \
     --processed-dir /path/to/aria_processed \
-    --output-dir /path/to/aria_latent_data_pretrained
-    --stride 20
+    --output-dir /path/to/aria_latent_data_pretrained \
+    --stride 10 \
+    --pose-scale 100.0
 
 # This will:
 # - Extract 512-dim visual features using pretrained encoder
@@ -120,6 +150,10 @@ python train_improved.py \
     --gradient-accumulation 4 \
     --checkpoint-dir experiment_name \
     --experiment-name my_experiment
+```
+
+```bash
+./train_vift_original_fixed.sh
 ```
 
 **Note**: The model trains and predicts in meters, maintaining consistency with the original data and IMU units (m/s²).
@@ -208,7 +242,11 @@ python organize_plots_by_sequence.py \
 python plot_single_sequence.py --npz-file
       ./inference_results_realtime_seq_123_stride_1.npz --output-dir
       trajectory_plots_v3
+```
+
 ```bash
+python plot_short_term_trajectory.py       --npz-file ./inference_results_realtime_seq_008_stride_10.npz       --output-dir short_term_plots_seq008_fixed       --duration 5
+```
 
 **Output**:
 
