@@ -91,7 +91,8 @@ Generate pretrained features and prepare training data:
 ```bash
 python generate_all_pretrained_latents_fixed.py \
     --processed-dir /path/to/aria_processed \
-    --output-dir /path/to/aria_latent_data_pretrained
+    --output-dir /path/to/aria_latent_data_pretrained \
+    --stride 20
 
 # This will:
 # - Extract 512-dim visual features using pretrained encoder
@@ -103,62 +104,70 @@ python generate_all_pretrained_latents_fixed.py \
 
 ## 🏃 Training
 
-#### MultiHead Fixed
+### ⚠️ Important: Model Collapse Issue Fixed
 
-Uses geodesic loss for rotation with proper weight initialization:
+Previous training with stride=1 caused model collapse (constant predictions). Use the fixed training script with proper stride and monitoring.
 
-```bash
-# Optimized configuration with 4 GPUs
-python train_improved.py \
-    --model multihead_fixed \
-    --data-dir /path/to/aria_latent_data_pretrained \
-    --epochs 50 \
-    --optimizer adamw \
-    --scheduler onecycle \
-    --lr 2e-3 \
-    --gradient-accumulation 4 \
-    --checkpoint-dir experiment_name \
-    --experiment-name my_experiment
-```
-
-**Note**: The model trains and predicts in meters, maintaining consistency with the original data and IMU units (m/s²).
-
-#### VIFT Original
+### Fixed Training (Recommended)
 
 ```bash
-python train_improved.py --model vift_original \
-    --data-dir /path/to/aria_latent_data_pretrained \
-    --epochs 100 \
-    --batch-size 32 \
-    --lr 1e-4 \
-    --hidden-dim 128 \
-    --num-heads 8 \
-    --dropout 0.1
+# Test RPMG loss functionality
+python test_rpmg_loss.py
+
+# Quick test run to verify setup
+python train_fixed.py \
+    experiment=fixed_training \
+    trainer.max_epochs=5 \
+    trainer.limit_train_batches=50
+
+# Full training with all fixes
+python train_fixed.py experiment=fixed_training
+
+# Custom configuration
+python train_fixed.py \
+    experiment=fixed_training \
+    stride=20 \
+    use_rpmg=true \
+    angle_weight=100 \
+    diversity_weight=0.1 \
+    data.batch_size=32 \
+    trainer.accumulate_grad_batches=4 \
+    trainer.devices=4
 ```
+
+**Key improvements in fixed training:**
+
+- Uses stride=20 (1 second intervals) for meaningful motion
+- RPMG loss for proper rotation handling on SO(3) manifold
+- Diversity loss prevents constant predictions
+- Monitors for model collapse
+- Proper data scaling (cm) for numerical stability
 
 ### Configuration Options
 
 Key parameters for training:
 
 - `--batch-size`: Batch size per GPU (default: 32, use 16 for limited GPU memory)
-- `--lr`: Learning rate (default: 1e-3)
+- `--lr`: Learning rate (default: 1e-4 for fixed training)
 - `--epochs`: Number of training epochs (default: 100)
-- `--hidden-dim`: Hidden dimension size (default: 128)
-- `--num-heads`: Number of attention heads (default: 4)
-- `--dropout`: Dropout rate (default: 0.2)
+- `--stride`: Frame stride for temporal sampling (default: 20, critical for avoiding collapse)
+- `--use-rpmg`: Use RPMG loss for rotation (default: true)
+- `--angle-weight`: Weight for rotation vs translation loss (default: 100)
+- `--diversity-weight`: Weight for diversity loss to prevent collapse (default: 0.1)
+- `--hidden-dim`: Hidden dimension size (default: 512)
+- `--num-heads`: Number of attention heads (default: 8)
+- `--dropout`: Dropout rate (default: 0.1)
 - `--gradient-clip`: Gradient clipping value (default: 1.0)
-- `--gradient-accumulation`: Gradient accumulation steps (default: 4)
-- `--optimizer`: Optimizer choice: adamw, adam, sgd (default: adamw)
-- `--scheduler`: Learning rate scheduler: onecycle, cosine, none (default: onecycle)
-- `--checkpoint-dir`: Directory to save checkpoints (default: logs/checkpoints_{model})
-- `--experiment-name`: Name for the experiment (for logging)
-
-**Multi-GPU Training**: The script automatically uses all available GPUs (default: 4) with DDP strategy.
 
 Monitor training:
 
 ```bash
 tensorboard --logdir logs/
+
+# Watch for these key metrics:
+# - train/trans_std > 0.001 (not collapsing)
+# - train/rot_std > 0.001 (not collapsing)
+# - val/direction_similarity > 0.5 (correct trajectory direction)
 ```
 
 ## 📈 Evaluation
@@ -180,6 +189,14 @@ python inference_full_sequence.py \
     --processed-dir /path/to/aria_processed \
     --stride 1
 
+# Evaluate without trajectory alignment (see true performance)
+python inference_full_sequence.py \
+    --sequence-id all \
+    --checkpoint /path/to/checkpoint/last.ckpt \
+    --processed-dir /path/to/aria_processed \
+    --stride 1 \
+    --no-alignment
+
 # Faster evaluation with larger stride
 python inference_full_sequence.py \
     --sequence-id all \
@@ -198,10 +215,24 @@ python inference_full_sequence.py \
 
 **Output**:
 
-- Metrics displayed in meters
+- Metrics displayed with both aligned (Umeyama) and unaligned results
 - Trajectory plots saved to `trajectory_plots_all_stride_{stride}/`
+- Separate translation and rotation error visualizations
 - Results JSON saved to `inference_results_realtime_averaged_stride_{stride}.json`
 - Individual trajectories saved to `inference_results_realtime_all_stride_{stride}/`
+
+### Visualization Tools
+
+```bash
+# Organize plots by sequence
+python organize_plots_by_sequence.py --results-dir inference_results_realtime_all_stride_1
+
+# Analyze trajectory alignment
+python plot_aligned_trajectory.py
+
+# Check for model collapse in predictions
+python diagnostic_relative_poses.py
+```
 
 ## 🏆 Model Comparison
 
@@ -218,12 +249,43 @@ python inference_full_sequence.py \
 | Initialization   | Standard              | Standard                         | **Identity quaternion**    |
 | Parameters       | ~1M                   | 1.2M                             | 1.2M                             |
 
-### 🔍 Troubleshooting
+### Loss Function Comparison
+
+| Loss Type       | Pros                           | Cons                       | When to Use                    |
+| --------------- | ------------------------------ | -------------------------- | ------------------------------ |
+| ARVRLossWrapper | Geodesic distance, robust L1   | No manifold optimization   | General VIO tasks              |
+| RPMG Loss       | SO(3) manifold-aware gradients | More compute, needs tuning | Long sequences, rotation drift |
+| Weighted L1/L2  | Simple, fast                   | Ignores rotation geometry  | Quick prototyping              |
+
+## 🔍 Troubleshooting
+
+### Model Collapse (Constant Predictions)
+
+**Symptoms**: Model outputs same values regardless of input
+
+- Translation: ~0.000115m every frame
+- Rotation: ~0.064° every frame
+
+**Solution**: Use `train_fixed.py` with:
+
+- Larger stride (20+ frames)
+- Diversity loss monitoring
+- RPMG loss for rotations
+- Proper data scaling
+
+### Trajectory Goes Opposite Direction
+
+**Cause**: Rotation bias accumulates over time
+**Solution**:
+
+- Train with fixed script
+- Monitor `val/direction_similarity` > 0.5
+- Check unaligned metrics (--no-alignment flag)
 
 ### Out of Memory
 
 - For processing: Use CPU mode in `fix_failed_sequences.py`
-- For training: Reduce batch size: `--batch-size 16`
+- For training: Reduce batch size: `data.batch_size=16`
 - Use gradient accumulation (already enabled)
 - Process sequences individually if needed
 
@@ -236,22 +298,17 @@ python inference_full_sequence.py \
 ### Slow Training
 
 - Ensure GPU is available: `nvidia-smi`
-- Use mixed precision (enabled by default)
-- Check data loading: increase `--num-workers`
+- Use mixed precision: `trainer.precision=16-mixed`
+- Check data loading: increase `data.num_workers`
 - Use SSD for data storage if possible
 
 ### Poor Performance
 
-- Verify data processing completed successfully
+- Verify stride > 1 (avoid collapse)
 - Check pretrained encoder loaded correctly
 - Ensure sufficient training epochs (>50)
 - Verify using correct model version (fixed)
-
-### Processing Failures
-
-- Some sequences may fail with CUDA OOM
-- Run `fix_failed_sequences.py` to reprocess with CPU
-- Check logs in `/mnt/ssd_ext/incSeg-data/parallel_scripts/`
+- Check both aligned and unaligned metrics
 
 ## 📚 Citation
 
@@ -274,7 +331,7 @@ Here's a complete example workflow for testing with 10 sequences:
 # 1. Create a small test dataset
 mkdir -p /path/to/small_aria_processed
 for i in {000..009}; do
-    cp -r /mnt/ssd_ext/incSeg-data/aria_processed/$i /path/to/small_aria_processed/
+    cp -r /path/to/aria_processed/$i /path/to/small_aria_processed/
 done
 
 # 2. Generate features
@@ -283,24 +340,24 @@ python generate_all_pretrained_latents_fixed.py \
     --output-dir /path/to/small_dataset_10seq \
     --stride 1
 
-# 3. Train model
-python train_improved.py \
-    --model multihead_fixed \
-    --data-dir /path/to/small_dataset_10seq \
-    --epochs 50 \
-    --optimizer adamw \
-    --scheduler onecycle \
-    --lr 2e-3 \
-    --gradient-accumulation 4 \
-    --checkpoint-dir test_experiment \
-    --experiment-name test_run
+# 3. Train model with fixes
+python train_fixed.py \
+    experiment=fixed_training \
+    data.data_dir=/path/to/small_dataset_10seq \
+    trainer.max_epochs=50 \
+    trainer.devices=1
 
-# 4. Evaluate
+# 4. Evaluate (check both aligned and unaligned)
 python inference_full_sequence.py \
     --sequence-id all \
-    --checkpoint test_experiment/last.ckpt \
+    --checkpoint logs/checkpoints/last.ckpt \
     --processed-dir /path/to/small_aria_processed \
-    --stride 1
+    --stride 1 \
+    --no-alignment  # See true performance
+
+# 5. Visualize results
+python organize_plots_by_sequence.py \
+    --results-dir inference_results_realtime_all_stride_1
 ```
 
 ## 🙏 Acknowledgments
@@ -308,6 +365,7 @@ python inference_full_sequence.py \
 - Original VIFT implementation by Yunus Bilge Kurt et al.
 - Visual-Selective-VIO pretrained encoder
 - Aria Everyday Activities dataset by Meta
+- RPMG loss implementation from https://github.com/JYChen18/RPMG
 
 ## 📄 License
 

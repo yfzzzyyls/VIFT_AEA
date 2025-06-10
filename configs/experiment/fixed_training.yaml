@@ -1,0 +1,94 @@
+# @package _global_
+
+# Configuration for fixed training addressing model collapse
+
+defaults:
+  - override /data: aria_latent
+  - override /model: weighted_latent_vio_tf
+  - override /callbacks: default
+  - override /trainer: gpu
+  - override /logger: tensorboard
+
+# Fixed training parameters
+stride: 20  # Use 1 second intervals (20 frames at 20fps)
+use_rpmg: true  # Use RPMG loss for better rotation handling
+monitor_collapse: true  # Monitor for constant predictions
+diversity_weight: 0.1  # Weight for diversity loss
+angle_weight: 100.0  # Weight for rotation vs translation
+
+# Data configuration with fixes
+data:
+  batch_size: 32
+  num_workers: 8
+  stride: ${stride}
+  pose_scale: 100.0  # Convert to cm for numerical stability
+  window_size: 11
+  # Data augmentation
+  augment: true
+  augment_prob: 0.5
+  noise_std: 0.001
+
+# Model configuration
+model:
+  _target_: src.models.multihead_vio.MultiHeadVIO
+  visual_dim: 2048  # From pretrained encoder
+  imu_dim: 396  # 33 IMU frames * 6 DoF * 2 (for bi-directional)
+  output_dim: 7  # 3 translation + 4 quaternion
+  hidden_dim: 512
+  num_heads: 8
+  num_layers: 4
+  dropout: 0.1
+  # Important: ensure proper initialization
+  init_weights: true
+  
+# Optimizer configuration
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1e-4  # Conservative learning rate
+  weight_decay: 1e-4
+  betas: [0.9, 0.999]
+
+# Learning rate scheduler
+scheduler:
+  _target_: torch.optim.lr_scheduler.OneCycleLR
+  max_lr: ${optimizer.lr}
+  pct_start: 0.1  # 10% warmup
+  anneal_strategy: 'cos'
+  
+# Training configuration
+trainer:
+  max_epochs: 100
+  accelerator: gpu
+  devices: 1
+  precision: 16-mixed  # Mixed precision for efficiency
+  gradient_clip_val: 1.0  # Prevent exploding gradients
+  accumulate_grad_batches: 4  # Effective batch size = 32 * 4 = 128
+  val_check_interval: 0.25  # Validate 4x per epoch
+  log_every_n_steps: 10
+  
+# Callbacks
+callbacks:
+  model_checkpoint:
+    monitor: 'val/loss'
+    mode: 'min'
+    save_top_k: 3
+    save_last: true
+    filename: 'vio-fixed-{epoch:02d}-{val_loss:.4f}'
+    
+  early_stopping:
+    monitor: 'val/loss'
+    patience: 20
+    mode: 'min'
+    
+# Logger
+logger:
+  tensorboard:
+    save_dir: ${paths.output_dir}/tensorboard/
+    name: "vio_fixed_training"
+    log_graph: false
+    default_hp_metric: false
+
+# Experiment name
+task_name: "train_vio_fixed"
+tags: ["vio", "fixed", "rpmg", "stride20", "collapse_prevention"]
+seed: 42
