@@ -31,6 +31,7 @@ from src.models.multihead_vio_separate import MultiHeadVIOModelSeparate
 from src.models.multihead_vio_separate_fixed import MultiHeadVIOModelSeparate as MultiHeadVIOModelSeparateFixed
 from src.models.multihead_vio import MultiHeadVIOModel
 from src.models.components.pose_transformer import PoseTransformer
+from src.models.vift_quaternion_module import VIFTQuaternionModel
 from src.metrics.arvr_loss_wrapper import ARVRLossWrapper
 from torchmetrics import MeanAbsoluteError
 
@@ -354,7 +355,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train VIO models with different architectures')
     
     # Model selection
-    parser.add_argument('--model', type=str, choices=['multihead', 'multihead_fixed', 'vift_original'], 
+    parser.add_argument('--model', type=str, choices=['multihead', 'multihead_fixed', 'vift_original', 'vift_quaternion'], 
                         default='multihead', help='Model architecture to use')
     
     # Training parameters
@@ -390,6 +391,12 @@ def parse_args():
                         help='Directory to save checkpoints')
     parser.add_argument('--experiment-name', type=str, default=None, 
                         help='Name for this experiment')
+    
+    # Training configuration
+    parser.add_argument('--log-every-n-steps', type=int, default=5,
+                        help='Log metrics every n steps (default: 5)')
+    parser.add_argument('--val-check-interval', type=float, default=1.0,
+                        help='Run validation every n epochs (default: 1.0)')
     
     return parser.parse_args()
 
@@ -472,9 +479,29 @@ def main():
             scheduler_type=args.scheduler,
             warmup_steps=args.warmup_steps
         )
-    else:  # vift_original
+    elif args.model == 'vift_original':
         console.print("\n[bold]Using Original VIFT PoseTransformer[/bold]")
         model = VIFTLightningWrapper(
+            input_dim=768,  # 512 visual + 256 IMU
+            embedding_dim=args.hidden_dim,
+            num_layers=2,
+            nhead=args.num_heads,
+            dim_feedforward=args.hidden_dim * 4,
+            dropout=args.dropout,
+            learning_rate=learning_rate,
+            weight_decay=args.weight_decay,
+            rotation_weight=args.rotation_weight,
+            translation_weight=args.translation_weight,
+            optimizer_type=args.optimizer,
+            scheduler_type=args.scheduler,
+            warmup_steps=args.warmup_steps
+        )
+    else:  # vift_quaternion
+        console.print("\n[bold]Using VIFT Quaternion Model[/bold]")
+        console.print("[green]✓ Outputs quaternions instead of Euler angles[/green]")
+        console.print("[green]✓ Avoids gimbal lock and discontinuities[/green]")
+        console.print("[green]✓ Better rotation representation[/green]")
+        model = VIFTQuaternionModel(
             input_dim=768,  # 512 visual + 256 IMU
             embedding_dim=args.hidden_dim,
             num_layers=2,
@@ -570,8 +597,8 @@ def main():
         accumulate_grad_batches=args.gradient_accumulation,
         logger=logger,
         callbacks=callbacks,
-        log_every_n_steps=20,
-        val_check_interval=1.0,  # Check validation every full epoch
+        log_every_n_steps=args.log_every_n_steps,
+        val_check_interval=args.val_check_interval,  # Check validation every full epoch
         deterministic=True
     )
     

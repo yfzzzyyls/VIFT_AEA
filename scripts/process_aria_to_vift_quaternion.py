@@ -263,7 +263,8 @@ class AriaToVIFTProcessor:
             next_pose = poses[i + 1] if i + 1 < len(poses) else poses[-1]
             
             # Compute motion between poses
-            dt = max(next_pose['timestamp'] - current_pose['timestamp'], 1.0 / camera_frequency)
+            # After downsampling, poses should be ~0.05s apart (20Hz)
+            dt = next_pose['timestamp'] - current_pose['timestamp'] if i + 1 < len(poses) else 0.05
             
             # Position difference
             dp = np.array(next_pose['translation']) - np.array(current_pose['translation'])
@@ -324,9 +325,27 @@ class AriaToVIFTProcessor:
             print(f"❌ No SLAM trajectory found for {sequence_path.name}")
             return False, 0
         
-        # Limit frames
-        num_frames = min(len(poses), self.max_frames)
-        poses = poses[:num_frames]
+        # Downsample trajectory from ~1000Hz to 20Hz
+        # The SLAM trajectory is typically at 1000Hz, we need 20Hz for RGB frames
+        print(f"📊 Original poses: {len(poses)} at ~{1.0/(poses[1]['timestamp']-poses[0]['timestamp']):.1f} Hz")
+        
+        # Calculate proper downsampling rate
+        if len(poses) > 1:
+            avg_dt = (poses[-1]['timestamp'] - poses[0]['timestamp']) / (len(poses) - 1)
+            original_freq = 1.0 / avg_dt
+            downsample_factor = int(original_freq / 20.0)  # Target 20Hz
+            print(f"📊 Downsampling by factor of {downsample_factor} to achieve 20Hz")
+        else:
+            downsample_factor = 50  # Default for 1000Hz to 20Hz
+        
+        # Downsample poses
+        downsampled_poses = poses[::downsample_factor]
+        
+        # Limit frames after downsampling
+        num_frames = min(len(downsampled_poses), self.max_frames)
+        poses = downsampled_poses[:num_frames]
+        
+        print(f"📊 Downsampled poses: {len(poses)} at ~20Hz")
         
         # Extract RGB frames
         visual_data = self.extract_rgb_frames(sequence_path, num_frames)

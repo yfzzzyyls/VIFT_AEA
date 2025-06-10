@@ -628,6 +628,13 @@ def sliding_window_inference_batched(
                         'translation': raw_predictions[:, :, :3],
                         'rotation': raw_predictions[:, :, 3:]  # Keep as Euler for now
                     }
+                elif model_type == 'vift_quaternion':
+                    # Quaternion model can handle dict directly
+                    raw_predictions = vio_models[gpu_id](batch, None)
+                    predictions = {
+                        'translation': raw_predictions[:, :, :3],
+                        'rotation': raw_predictions[:, :, 3:]  # Already quaternions
+                    }
                 else:
                     predictions = vio_models[gpu_id](batch)
                 gpu_predictions.append(predictions)
@@ -652,6 +659,17 @@ def sliding_window_inference_batched(
                             q = r.as_quat()  # [x, y, z, w]
                             pred_rotation.append(q)
                         pred_rotation = np.array(pred_rotation)  # [10, 4]
+                        
+                        # Add identity pose at the beginning
+                        identity_pose = np.array([[0, 0, 0, 0, 0, 0, 1]])  # [x, y, z, qx, qy, qz, qw]
+                        pred_poses = np.vstack([
+                            identity_pose,
+                            np.concatenate([pred_translation, pred_rotation], axis=1)
+                        ])  # [11, 7]
+                    elif model_type == 'vift_quaternion':
+                        # Quaternion model outputs [tx, ty, tz, qx, qy, qz, qw]
+                        pred_translation = predictions['translation'][i].cpu().numpy()  # [10, 3]
+                        pred_rotation = predictions['rotation'][i].cpu().numpy()  # [10, 4] already quaternions
                         
                         # Add identity pose at the beginning
                         identity_pose = np.array([[0, 0, 0, 0, 0, 0, 1]])  # [x, y, z, qx, qy, qz, qw]
@@ -756,20 +774,22 @@ def sliding_window_inference_batched(
     gt_absolute = []
     for pose in poses_data:
         t = pose['translation']
+        # CRITICAL FIX: Scale translation from meters to centimeters
+        t_cm = [t[0] * pose_scale, t[1] * pose_scale, t[2] * pose_scale]
         # Check if we have quaternion data directly
         if 'quaternion' in pose:
             # Already have quaternion in XYZW format
             q = pose['quaternion']
-            gt_absolute.append([t[0], t[1], t[2], q[0], q[1], q[2], q[3]])
+            gt_absolute.append([t_cm[0], t_cm[1], t_cm[2], q[0], q[1], q[2], q[3]])
         elif 'rotation_euler' in pose:
             # Convert Euler to quaternion (backward compatibility)
             euler = pose['rotation_euler']
             r = Rotation.from_euler('xyz', euler)
             q = r.as_quat()  # [x, y, z, w]
-            gt_absolute.append([t[0], t[1], t[2], q[0], q[1], q[2], q[3]])
+            gt_absolute.append([t_cm[0], t_cm[1], t_cm[2], q[0], q[1], q[2], q[3]])
         else:
             # No rotation data - use identity
-            gt_absolute.append([t[0], t[1], t[2], 0, 0, 0, 1])
+            gt_absolute.append([t_cm[0], t_cm[1], t_cm[2], 0, 0, 0, 1])
     gt_absolute = np.array(gt_absolute)
     
     # Convert absolute GT to relative poses
@@ -796,8 +816,7 @@ def sliding_window_inference_batched(
         gt_relative[i, :3] = rel_trans
         gt_relative[i, 3:] = rel_quat
     
-    # Scale after conversion to relative
-    gt_relative[:, :3] *= pose_scale
+    # No need to scale here - already scaled the absolute poses above
     
     # Build absolute trajectory from relative GT for verification
     gt_absolute_from_relative = accumulate_poses(gt_relative)
@@ -1069,28 +1088,57 @@ def main():
     
     # Check for different model architectures
     if any(key.startswith('model.') for key in state_dict_keys):
-        # VIFT original model (wrapped in VIOLitModule)
-        console.print("Detected VIFT original model (VIOLitModule)")
-        # Need to load the model manually since VIOLitModule requires many init params
-        # Get hyperparameters from checkpoint
-        hparams = checkpoint.get('hyper_parameters', {})
-        # Create the model with hyperparameters
-        vio_model = PoseTransformer(
-            input_dim=hparams.get('input_dim', 768),
-            embedding_dim=hparams.get('embedding_dim', 128),
-            num_layers=hparams.get('num_layers', 2),
-            nhead=hparams.get('nhead', 4),
-            dim_feedforward=hparams.get('dim_feedforward', 512),
-            dropout=hparams.get('dropout', 0.2)
-        )
-        # Load state dict with proper key mapping
-        model_state_dict = {}
+        # Check if it's quaternion model by looking at output dimensions
+        is_quaternion = False
         for key, value in checkpoint['state_dict'].items():
-            if key.startswith('model.'):
-                new_key = key.replace('model.', '')
-                model_state_dict[new_key] = value
-        vio_model.load_state_dict(model_state_dict)
-        model_type = 'vift_original'
+            if 'fc2' in key and 'bias' in key and isinstance(value, torch.Tensor):
+                if value.shape[0] == 7:  # Quaternion output
+                    is_quaternion = True
+                    break
+        
+        if is_quaternion:
+            console.print("Detected VIFT quaternion model")
+            from src.models.components.pose_transformer_quaternion import PoseTransformerQuaternion
+            hparams = checkpoint.get('hyper_parameters', {})
+            vio_model = PoseTransformerQuaternion(
+                input_dim=hparams.get('input_dim', 768),
+                embedding_dim=hparams.get('embedding_dim', 128),
+                num_layers=hparams.get('num_layers', 2),
+                nhead=hparams.get('nhead', 8),
+                dim_feedforward=hparams.get('dim_feedforward', 512),
+                dropout=hparams.get('dropout', 0.1)
+            )
+            # Load state dict
+            model_state_dict = {}
+            for key, value in checkpoint['state_dict'].items():
+                if key.startswith('model.'):
+                    new_key = key.replace('model.', '')
+                    model_state_dict[new_key] = value
+            vio_model.load_state_dict(model_state_dict)
+            model_type = 'vift_quaternion'
+        else:
+            # VIFT original model (wrapped in VIOLitModule)
+            console.print("Detected VIFT original model (VIOLitModule)")
+            # Need to load the model manually since VIOLitModule requires many init params
+            # Get hyperparameters from checkpoint
+            hparams = checkpoint.get('hyper_parameters', {})
+            # Create the model with hyperparameters
+            vio_model = PoseTransformer(
+                input_dim=hparams.get('input_dim', 768),
+                embedding_dim=hparams.get('embedding_dim', 128),
+                num_layers=hparams.get('num_layers', 2),
+                nhead=hparams.get('nhead', 4),
+                dim_feedforward=hparams.get('dim_feedforward', 512),
+                dropout=hparams.get('dropout', 0.2)
+            )
+            # Load state dict with proper key mapping
+            model_state_dict = {}
+            for key, value in checkpoint['state_dict'].items():
+                if key.startswith('model.'):
+                    new_key = key.replace('model.', '')
+                    model_state_dict[new_key] = value
+            vio_model.load_state_dict(model_state_dict)
+            model_type = 'vift_original'
     elif any('visual_projection' in key for key in state_dict_keys) or any('shared_processor.visual_projection' in key for key in state_dict_keys):
         # MultiHead separate features model
         console.print("Detected separate visual/IMU features model")
