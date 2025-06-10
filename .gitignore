@@ -1,11 +1,4 @@
 # Python
-aria_latent_*
-test_latent_features/
-inference_results_*/
-*.npz
-*_diagnostic_*.png
-*_trajectory_*.png
-scale_fix_*.png
 __pycache__/
 *.py[cod]
 *$py.class

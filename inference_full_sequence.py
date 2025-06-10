@@ -462,7 +462,7 @@ def sliding_window_inference_batched(
     device: torch.device,
     window_size: int = 11,
     stride: int = 1,
-    pose_scale: float = 100.0,  # Convert to centimeters to match training
+    pose_scale: float = 1.0,  # Keep in meters
     batch_size: int = 32,
     num_gpus: int = 4,
     model_type: str = 'multihead_concat'
