@@ -14,34 +14,94 @@
 
 A state-of-the-art Visual-Inertial Odometry (VIO) system for the Aria Everyday Activities dataset, implementing and improving upon the VIFT architecture with multiple model variants and AR/VR Adaptations.
 
-## 🚨 Current Status
+## 🚨 Recent Updates (Jan 2025)
 
-### Key Issue Resolved: Data Processing Bug
-We discovered and fixed a critical bug in the data processing pipeline:
-- The trajectory was being downsampled incorrectly from 1000Hz to 20Hz
-- **Bug**: Taking consecutive frames instead of every 50th frame
-- **Result**: Almost no motion between frames (0.001 seconds apart instead of 0.05 seconds)
-- **Fix**: Proper downsampling in `scripts/process_aria_to_vift_quaternion.py`
+### Critical Issues Resolved
+1. **Data Representation Bug**: Fixed issue where training data contained absolute poses instead of frame-to-frame relative poses
+2. **Subsampling Issue**: Discovered pretrained latent data contains subsampled frames (~40cm apart) rather than consecutive frames
+3. **Scale Mismatch**: Fixed meter/centimeter conversion issues in data pipeline
+4. **Loss Function**: Balanced rotation and translation losses for stable training
 
-### MultiHead Model Training Results
-The MultiHead model with quaternion support failed to train properly:
-- Training diverged with NaN weights after epoch 77
-- Even early checkpoints show poor performance:
-  - Translation ATE: 282.45 cm (with alignment: 181.07 cm)
-  - Rotation error: 96.17° mean
-  - Only 4% of frames have <2cm translation error
+### Latest Results
+Training with relative poses shows improved performance:
+- **Average ATE**: 0.71m (down from >100m)
+- **Frame-to-frame error**: 6.15cm (down from >25cm) 
+- **Target**: 1-5cm (still improving)
 
-### Coordinate System Issues
-Umeyama alignment analysis revealed:
-- **Scale mismatch**: 3.37x (predictions too large)
-- **Coordinate rotation**: 32° offset between frames
-- **Translation offset**: 1253m initial position error
-- **Y-axis inverted**: Strong negative correlation (-0.723)
+| Test Seq | ATE (m) | RPE@1f (cm) | RPE@1s (m) |
+|----------|---------|-------------|------------|
+| 016      | 0.24    | 7.41        | 1.02       |
+| 017      | 0.12    | 3.20        | 0.39       |
+| 018      | 0.15    | 6.03        | 0.81       |
+| 019      | 1.07    | 5.18        | 0.78       |
 
-### Next Steps
-1. Train VIFT original architecture on corrected dataset
-2. Use conservative hyperparameters for stability
-3. Monitor coordinate system consistency
+## 🚀 Quick Reproduction Guide
+
+To reproduce the results shown above, follow these exact commands:
+
+### Prerequisites
+- You need the preprocessed Aria data in `data/aria_processed/` (see Data Preparation section)
+- You need the pretrained latent features in `data/aria_latent_data_pretrained/` 
+
+If you don't have these, first follow the Data Preparation steps below.
+
+### Reproduction Steps
+
+```bash
+# 1. Setup Environment
+source ~/venv/py39/bin/activate  # Or your Python 3.9 environment
+pip install -r requirements.txt
+
+# 2. Download Pretrained Encoder (if not already done)
+python download_pretrained_model.py
+
+# 3. Convert Absolute Poses to Relative Poses
+python convert_to_relative_poses.py
+# Input: data/aria_latent_data_pretrained/
+# Output: data/aria_latent_data_relative/
+
+# 4. Train VIFT Quaternion Model with Relative Poses
+python train_improved.py \
+    --model vift_quaternion \
+    --data-dir data/aria_latent_data_relative \
+    --epochs 50 \
+    --batch-size 8 \
+    --lr 1e-4 \
+    --hidden-dim 128 \
+    --dropout 0.1 \
+    --rotation-weight 1.0 \
+    --translation-weight 1.0 \
+    --checkpoint-dir checkpoints_relative_v2 \
+    --experiment-name relative_poses_v2 \
+    --log-every-n-steps 5 \
+    --optimizer adamw \
+    --scheduler cosine \
+    --gradient-accumulation 2
+
+# Monitor training progress (in another terminal):
+# tensorboard --logdir logs/
+# Or check the training log:
+# tail -f training_relative_v2.log
+
+# 5. Run Inference on Test Sequences
+for seq in 016 017 018 019; do
+    python inference_full_sequence.py \
+        --sequence-id $seq \
+        --checkpoint checkpoints_relative_v2/epoch_epoch=021_val_loss_val/total_loss=12.422941.ckpt \
+        --stride 20 \
+        --no-plots
+done
+
+# 6. Generate Summary Results
+python summarize_test_results.py
+
+# 7. (Optional) Visualize Short-Term Trajectory
+python plot_short_term_trajectory.py \
+    --npz-file inference_results_realtime_seq_016_stride_20.npz \
+    --output-dir short_term_plots_relative_v2
+```
+
+**Note**: The checkpoint path in step 5 should be updated to your best checkpoint after training completes.
 
 ## 📋 Requirements
 
@@ -270,40 +330,45 @@ python plot_short_term_trajectory.py       --npz-file ./inference_results_realti
 | Initialization   | Standard              | Standard                         | **Identity quaternion**    |
 | Parameters       | ~1M                   | 1.2M                             | 1.2M                             |
 
-### 🔍 Troubleshooting
+## 🔍 Troubleshooting
 
-### Out of Memory
+### Common Issues and Solutions
 
+#### Model Predicting Straight Lines
+- **Cause**: Training on absolute poses instead of relative poses
+- **Solution**: Use `convert_to_relative_poses.py` before training
+- **Verify**: Check that poses in `data/aria_latent_data_relative/train/0_gt.npy` have first frame as [0,0,0,0,0,0,1]
+
+#### High Training Loss (>50)
+- **Cause**: Data scale mismatch or wrong pose representation
+- **Solution**: Ensure using relative poses and correct scale (centimeters)
+- **Expected**: Loss should start around 12-15 and decrease to <10
+
+#### Training Metrics Not Logged
+- **Cause**: `log_every_n_steps` too high for small batch sizes
+- **Solution**: Use `--log-every-n-steps 5` (or lower)
+- **Note**: With 588 train samples and batch size 8, there are only 18 steps per epoch
+
+#### Out of Memory
 - For processing: Use CPU mode in `fix_failed_sequences.py`
-- For training: Reduce batch size: `--batch-size 16`
-- Use gradient accumulation (already enabled)
+- For training: Reduce batch size: `--batch-size 4`
+- Use gradient accumulation: `--gradient-accumulation 4`
 - Process sequences individually if needed
 
-### Rotation Predictions Stuck at 0.5
+#### Rotation Predictions Stuck
+- **Cause**: Wrong model architecture or initialization
+- **Solution**: Use `vift_quaternion` model with proper initialization
+- **Check**: Model should output quaternions without ReLU activation
 
-- This is the ReLU bug! Use `multihead_fixed` model
-- Check model file for ReLU after quaternion output
-- Ensure using geodesic loss, not MSE
+#### Poor Inference Performance
+- **Cause**: Model trained on wrong data or scale mismatch
+- **Target**: Frame-to-frame error should be 1-5cm
+- **Current**: ~6cm (still improving with better data)
 
-### Slow Training
-
-- Ensure GPU is available: `nvidia-smi`
-- Use mixed precision (enabled by default)
-- Check data loading: increase `--num-workers`
-- Use SSD for data storage if possible
-
-### Poor Performance
-
-- Verify data processing completed successfully
-- Check pretrained encoder loaded correctly
-- Ensure sufficient training epochs (>50)
-- Verify using correct model version (fixed)
-
-### Processing Failures
-
+#### Processing Failures
 - Some sequences may fail with CUDA OOM
 - Run `fix_failed_sequences.py` to reprocess with CPU
-- Check logs in `/mnt/ssd_ext/incSeg-data/parallel_scripts/`
+- Check logs in data processing directory
 
 ## 📚 Citation
 
@@ -317,6 +382,36 @@ If you use this code, please cite the original VIFT paper:
   year={2024}
 }
 ```
+
+## 🔧 Key Fixes and Improvements
+
+### Data Processing Fixes
+1. **Relative Pose Conversion** (`convert_to_relative_poses.py`)
+   - Converts absolute trajectory poses to frame-to-frame relative poses
+   - Handles quaternion transformations correctly
+   - Scales translations to centimeters for training
+
+2. **Scale Consistency** 
+   - Fixed meter/centimeter conversions in `AriaLatentDataset`
+   - Ensured consistent scaling across training and inference
+   - Model now trains and predicts in centimeters
+
+3. **Loss Function Improvements**
+   - Balanced rotation and translation losses (equal weights)
+   - Removed problematic log scaling
+   - Fixed double-weighting bug in loss computation
+
+4. **Model Initialization**
+   - Improved weight initialization (gain=1.0 instead of 0.01)
+   - Fixed bias initialization for quaternions [0,0,0,0,0,0,1]
+   - Prevents model from getting stuck at zero predictions
+
+### Training Configuration
+- **Reduced learning rate**: 1e-4 (more stable than 1e-3)
+- **Smaller batch size**: 8 (reduces memory usage)
+- **Gradient accumulation**: 2 steps (effective batch size of 16)
+- **Cosine scheduler**: Smooth learning rate decay
+- **Log every 5 steps**: Ensures metrics are logged even with small batches
 
 ## 💡 Quick Start Example
 

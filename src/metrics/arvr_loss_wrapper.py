@@ -85,7 +85,8 @@ class ARVRLossWrapper(nn.Module):
         # Typical values: rotation ~0.001 rad, translation ~0.5 cm
         # Use much more conservative scaling to prevent rotation from dominating
         # Start with 10x and tune based on loss balance
-        rot_loss = rot_loss * 10.0
+        # DISABLED: This scaling causes issues with log transform
+        # rot_loss = rot_loss * 10.0
         
         # Optional: use log-scale to prevent underflow with very small values
         if self.use_log_scale:
