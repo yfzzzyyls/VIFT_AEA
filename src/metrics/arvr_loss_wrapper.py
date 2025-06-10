@@ -80,17 +80,19 @@ class ARVRLossWrapper(nn.Module):
         # This is less sensitive to outliers than MSE and works better for small values
         trans_loss = torch.nn.functional.smooth_l1_loss(pred_translation, target_translation)
         
+        # Scale losses to similar magnitudes BEFORE log transform
+        # Translation is in centimeters, rotation is now in radians (after exact geodesic loss)
+        # Typical values: rotation ~0.001 rad, translation ~0.5 cm
+        # Use much more conservative scaling to prevent rotation from dominating
+        # Start with 10x and tune based on loss balance
+        rot_loss = rot_loss * 10.0
+        
         # Optional: use log-scale to prevent underflow with very small values
         if self.use_log_scale:
             # Add 1 to prevent log(0)
-            # FIXED: Removed 100x multiplier for translation - data is in meters not cm
+            # Apply log AFTER scaling to maintain proper balance
             trans_loss = torch.log1p(trans_loss)
             rot_loss = torch.log1p(rot_loss)
-        
-        # Scale losses to similar magnitudes
-        # Translation is in meters, rotation is unitless [0,1]
-        # FIXED: Removed 10x multiplier that was causing scale issues
-        # rot_loss = rot_loss * 10.0  # This was causing 100x scale issue!
         
         if self.use_weighted_loss:
             # Compute scale-aware weights based on motion magnitude
@@ -121,9 +123,13 @@ class ARVRLossWrapper(nn.Module):
         # Add a small regularization term to prevent trivial solutions
         reg_loss = 0.001 * (pred_rotation.norm(dim=-1).mean() + pred_translation.norm(dim=-1).mean())
         
+        # Remove regularization for now - it might be causing the constant predictions
+        # The model should learn naturally from the data
+        small_trans_penalty = 0.0
+        
         return {
             'translation_loss': weighted_trans_loss,
             'rotation_loss': weighted_rot_loss,
-            'regularization_loss': reg_loss,
-            'total_loss': weighted_trans_loss + weighted_rot_loss + reg_loss
+            'regularization_loss': reg_loss + small_trans_penalty,
+            'total_loss': weighted_trans_loss + weighted_rot_loss + reg_loss + small_trans_penalty
         }

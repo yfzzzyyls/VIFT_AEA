@@ -267,7 +267,11 @@ class TranslationSpecializedHead(nn.Module):
         for module in self.translation_output.modules():
             if isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight)
-                nn.init.zeros_(module.bias)
+                if module.out_features == 3:  # Final output layer
+                    # Initialize to predict small but non-zero translations
+                    nn.init.normal_(module.bias, mean=0.5, std=0.1)
+                else:
+                    nn.init.zeros_(module.bias)
         
         nn.init.xavier_uniform_(self.velocity_output.weight)
         nn.init.zeros_(self.velocity_output.bias)
@@ -372,7 +376,7 @@ class MultiHeadVIOModelSeparate(L.LightningModule):
                 nn.init.zeros_(module.bias)
         
         # Loss function with improved settings
-        self.arvr_loss = ARVRLossWrapper(use_log_scale=True, use_weighted_loss=False)
+        self.arvr_loss = ARVRLossWrapper(use_log_scale=False, use_weighted_loss=False)
         
         # Metrics - use proper quaternion MAE
         self.train_rot_mae = QuaternionMAE()

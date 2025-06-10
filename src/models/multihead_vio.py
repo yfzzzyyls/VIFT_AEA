@@ -373,7 +373,8 @@ class MultiHeadVIOModel(L.LightningModule):
                 nn.init.zeros_(module.bias)
         
         # Loss function with improved settings
-        self.arvr_loss = ARVRLossWrapper(use_log_scale=True, use_weighted_loss=False)
+        # Disable log scale for better gradient flow with small values
+        self.arvr_loss = ARVRLossWrapper(use_log_scale=False, use_weighted_loss=False)
         
         # Metrics - use proper quaternion MAE
         self.train_rot_mae = QuaternionMAE()

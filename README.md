@@ -204,6 +204,12 @@ python organize_plots_by_sequence.py \
       --output-dir inference_results_realtime_all_stride_1/sequence_plots
 ```
 
+```bash
+python plot_single_sequence.py --npz-file
+      ./inference_results_realtime_seq_123_stride_1.npz --output-dir
+      trajectory_plots_v3
+```bash
+
 **Output**:
 
 - Metrics displayed in meters

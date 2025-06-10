@@ -66,8 +66,9 @@ class SeparateFeatureDataset(Dataset):
         imu_features = torch.from_numpy(imu_features).float()
         poses = torch.from_numpy(poses).float()
         
-        # Data is already in centimeters from feature generation (pose_scale=100.0)
-        # No additional scaling needed!
+        # CRITICAL FIX: The pretrained data is in METERS, not centimeters!
+        # Scale translations from meters to centimeters
+        poses[:, :3] *= 100.0
         
         # Apply augmentation if requested
         if self.augment:
@@ -368,8 +369,8 @@ def parse_args():
     parser.add_argument('--dropout', type=float, default=0.2, help='Dropout rate')
     
     # Loss weights
-    parser.add_argument('--rotation-weight', type=float, default=1.0, help='Weight for rotation loss')
-    parser.add_argument('--translation-weight', type=float, default=1.0, help='Weight for translation loss')
+    parser.add_argument('--rotation-weight', type=float, default=0.1, help='Weight for rotation loss')
+    parser.add_argument('--translation-weight', type=float, default=10.0, help='Weight for translation loss')
     
     # Data
     parser.add_argument('--data-dir', type=str, default='aria_latent_data_pretrained', 
@@ -549,7 +550,7 @@ def main():
         ),
         EarlyStopping(
             monitor="val/total_loss",
-            patience=10,
+            patience=20,  # More patience for proper convergence
             mode="min",
             verbose=True,
             min_delta=0.0001
@@ -562,15 +563,15 @@ def main():
     trainer = L.Trainer(
         max_epochs=max_epochs,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
-        devices=4,
-        strategy="ddp_find_unused_parameters_true" if torch.cuda.device_count() > 1 else "auto",
+        devices=1,  # Use single GPU for now
+        strategy="auto",  # Let Lightning choose the strategy
         precision="16-mixed" if torch.cuda.is_available() else 32,
         gradient_clip_val=1.0,
         accumulate_grad_batches=args.gradient_accumulation,
         logger=logger,
         callbacks=callbacks,
         log_every_n_steps=20,
-        val_check_interval=0.5,
+        val_check_interval=1.0,  # Check validation every full epoch
         deterministic=True
     )
     
