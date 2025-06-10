@@ -43,8 +43,9 @@ class ProperQuaternionLoss(nn.Module):
         dot = torch.clamp(dot, -1.0, 1.0)
         
         # Geodesic distance: angle = 2 * arccos(|dot|)
-        # Loss = 1 - |dot| is a good approximation and more stable
-        loss = 1.0 - torch.abs(dot)
+        # Use exact geodesic distance instead of approximation
+        # This is crucial for small angles in AR/VR applications
+        loss = 2.0 * torch.acos(torch.abs(dot))
         
         return loss.mean()
 
