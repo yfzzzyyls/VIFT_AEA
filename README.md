@@ -92,6 +92,7 @@ Generate pretrained features and prepare training data:
 python generate_all_pretrained_latents_fixed.py \
     --processed-dir /path/to/aria_processed \
     --output-dir /path/to/aria_latent_data_pretrained
+    --stride 20
 
 # This will:
 # - Extract 512-dim visual features using pretrained encoder
@@ -194,6 +195,13 @@ python inference_full_sequence.py \
     --processed-dir /path/to/aria_processed \
     --stride 1 \
     --no-plots
+```
+
+**Visualization**:
+```bash
+python organize_plots_by_sequence.py \
+      --results-dir inference_results_realtime_all_stride_1 \
+      --output-dir inference_results_realtime_all_stride_1/sequence_plots
 ```
 
 **Output**:

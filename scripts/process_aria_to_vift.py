@@ -216,15 +216,18 @@ class AriaToVIFTProcessor:
                         tx, ty, tz = float(row[tx_col]), float(row[ty_col]), float(row[tz_col])
                         qx, qy, qz, qw = float(row[qx_col]), float(row[qy_col]), float(row[qz_col]), float(row[qw_col])
                         
+                        # Convert translation from meters to centimeters
+                        tx_cm, ty_cm, tz_cm = tx * 100.0, ty * 100.0, tz * 100.0
+                        
                         # Ensure quaternion is normalized
                         q_norm = np.sqrt(qx*qx + qy*qy + qz*qz + qw*qw)
                         if q_norm > 0:
                             qx, qy, qz, qw = qx/q_norm, qy/q_norm, qz/q_norm, qw/q_norm
                         
-                        # Store pose with quaternion in XYZW format
+                        # Store pose with quaternion in XYZW format and translation in centimeters
                         poses.append({
                             'timestamp': timestamp,
-                            'translation': [tx, ty, tz],
+                            'translation': [tx_cm, ty_cm, tz_cm],  # Now in centimeters
                             'quaternion': [qx, qy, qz, qw]  # XYZW format
                         })
                 except (ValueError, IndexError):
