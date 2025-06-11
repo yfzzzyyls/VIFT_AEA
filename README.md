@@ -48,6 +48,63 @@ If you don't have these, first follow the Data Preparation steps below.
 ### Reproduction Steps
 
 ```bash
+# 1. Convert absolute poses to relative poses (if not already done)
+python convert_to_relative_poses.py
+
+# 2. Train the model (data is already in centimeters in aria_latent_data_cm/)
+python train_improved.py \
+    --data-dir aria_latent_data_cm \
+    --batch-size 32 \
+    --num-epochs 50 \
+    --learning-rate 1e-4 \
+    --log-every-n-steps 5 \
+    --gradient-clip-val 1.0
+
+# 3. Run inference on all test sequences
+for seq in 016 017 018 019; do
+    python inference_full_sequence.py \
+        --sequence-id $seq \
+        --checkpoint fixed_scale_v1/epoch_epoch=024_val_loss_val/total_loss=14.812485.ckpt \
+        --processed-dir data/aria_processed \
+        --stride 1 \
+        --batch-size 64
+done
+
+# 4. Generate visualization plots for a sequence
+python plot_short_term_trajectory.py \
+    --npz-file inference_results_realtime_seq_016_stride_1.npz \
+    --output-dir short_term_plots_seq016 \
+    --duration 5
+
+# 5. View results
+ls short_term_plots_seq016/  # Contains 3D trajectory and rotation plots
+```
+
+### ⚠️ Known Issues with Current Model
+
+The current model still shows straight-line predictions instead of natural curves. This is due to:
+1. **Systematic bias**: ~16.5 cm/frame constant prediction
+2. **Training data issues**: Very small motions (0.11 cm/frame) from 30-frame subsampling
+3. **Mode collapse**: Model outputs nearly constant values
+
+### 🔧 Recommended Fix
+
+To properly fix the straight-line issue, retrain with bias correction:
+
+```bash
+# Train with bias-aware loss function (fixes straight-line predictions)
+python train_fixed_bias.py \
+    --data-dir aria_latent_data_cm \
+    --batch-size 32 \
+    --num-epochs 50 \
+    --learning-rate 5e-5 \
+    --rotation-weight 100.0 \
+    --bias-weight 0.1 \
+    --variance-weight 0.1 \
+    --gradient-clip-val 1.0
+```
+
+This uses an improved loss that penalizes bias and encourages prediction diversity.
 # 1. Setup Environment
 source ~/venv/py39/bin/activate  # Or your Python 3.9 environment
 pip install -r requirements.txt

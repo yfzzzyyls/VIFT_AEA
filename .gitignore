@@ -81,3 +81,58 @@ site/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+# Temporary analysis and debug files
+analyze_*.py
+check_*.py
+debug_*.py
+diagnose_*.py
+test_*.py
+validate_*.py
+verify_*.py
+monitor_*.py
+summarize_*.py
+prepare_*.py
+fix_*.py
+generate_*.py
+
+# Diagnostic outputs and plots
+diagnostic_outputs/
+*.png
+alignment_plots/
+coordinate_diagnosis/
+trajectory_plots*/
+short_term_plots*/
+multihead_short_term_plots/
+final_success_plots*/
+
+# Inference results
+inference_*.npz
+inference_results*/
+
+# Training runs and checkpoints (keep only final)
+checkpoints_fixed/
+stable_fix_*/
+lightning_logs/
+training_log.txt
+training_curves.png
+training_summary*
+
+# Shell scripts (except main ones)
+process_*.sh
+train_*.sh
+inference_*.sh
+
+# Temporary Python training scripts
+train_accurate_prediction.py
+train_balanced_prediction.py
+train_fixed_bias*.py
+train_stable_fix.py
+train_simple_fix.py
+train_with_*.py
+train_vift_quaternion*.py
+
+# Test data
+test_latent_features/
+
+# JSON results
+*.json
