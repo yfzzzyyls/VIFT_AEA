@@ -485,6 +485,14 @@ def sliding_window_inference_batched(
     """
     console.print(f"\n[bold cyan]Processing sequence: {sequence_path.name}[/bold cyan]")
     
+    # Check if required files exist
+    required_files = ["visual_data.pt", "imu_data.pt"]
+    for file in required_files:
+        if not (sequence_path / file).exists():
+            console.print(f"[red]ERROR: Required file '{file}' not found in {sequence_path}[/red]")
+            console.print(f"[yellow]Make sure you're using the correct processed data directory (e.g., data/aria_processed)[/yellow]")
+            raise FileNotFoundError(f"Missing {file} in {sequence_path}")
+    
     # Load sequence data
     visual_data = torch.load(sequence_path / "visual_data.pt").float()  # [N, 3, H, W]
     imu_data = torch.load(sequence_path / "imu_data.pt").float()        # [N, 33, 6]
@@ -496,7 +504,29 @@ def sliding_window_inference_batched(
         poses_file = sequence_path / "poses.json"
     
     with open(poses_file, 'r') as f:
-        poses_data = json.load(f)
+        poses_data_raw = json.load(f)
+    
+    # Handle different data formats
+    if isinstance(poses_data_raw, dict):
+        # Check if it's a wrapped format with 'poses' key
+        if 'poses' in poses_data_raw:
+            console.print(f"  Detected wrapped pose format with keys: {list(poses_data_raw.keys())}")
+            poses_data = poses_data_raw['poses']
+        else:
+            console.print(f"[red]ERROR: Poses file is a dict but doesn't have 'poses' key. Keys: {list(poses_data_raw.keys())}[/red]")
+            raise ValueError(f"Unexpected poses format in {poses_file}")
+    elif isinstance(poses_data_raw, list):
+        poses_data = poses_data_raw
+    else:
+        console.print(f"[red]ERROR: Poses data is neither a list nor a dict. Type: {type(poses_data_raw)}[/red]")
+        raise ValueError(f"Unexpected poses format in {poses_file}")
+    
+    # Debug: Check the loaded data structure
+    console.print(f"  Loaded poses data: type={type(poses_data)}, length={len(poses_data) if hasattr(poses_data, '__len__') else 'N/A'}")
+    if isinstance(poses_data, list) and len(poses_data) > 0:
+        console.print(f"  First pose type: {type(poses_data[0])}")
+        if isinstance(poses_data[0], dict):
+            console.print(f"  First pose keys: {list(poses_data[0].keys())}")
     
     num_frames = visual_data.shape[0]
     console.print(f"  Total frames: {num_frames}")
@@ -772,24 +802,37 @@ def sliding_window_inference_batched(
     
     # Convert ground truth to relative poses (same as before)
     gt_absolute = []
-    for pose in poses_data:
-        t = pose['translation']
-        # CRITICAL FIX: Scale translation from meters to centimeters
-        t_cm = [t[0] * pose_scale, t[1] * pose_scale, t[2] * pose_scale]
-        # Check if we have quaternion data directly
-        if 'quaternion' in pose:
-            # Already have quaternion in XYZW format
-            q = pose['quaternion']
-            gt_absolute.append([t_cm[0], t_cm[1], t_cm[2], q[0], q[1], q[2], q[3]])
-        elif 'rotation_euler' in pose:
-            # Convert Euler to quaternion (backward compatibility)
-            euler = pose['rotation_euler']
-            r = Rotation.from_euler('xyz', euler)
-            q = r.as_quat()  # [x, y, z, w]
-            gt_absolute.append([t_cm[0], t_cm[1], t_cm[2], q[0], q[1], q[2], q[3]])
-        else:
-            # No rotation data - use identity
-            gt_absolute.append([t_cm[0], t_cm[1], t_cm[2], 0, 0, 0, 1])
+    try:
+        for i, pose in enumerate(poses_data):
+            # Debug first few poses
+            if i < 3:
+                console.print(f"  Debug pose {i}: type={type(pose)}, content={pose if isinstance(pose, dict) else 'not a dict'}")
+            
+            t = pose['translation']
+            # CRITICAL FIX: Scale translation from meters to centimeters
+            t_cm = [t[0] * pose_scale, t[1] * pose_scale, t[2] * pose_scale]
+            # Check if we have quaternion data directly
+            if 'quaternion' in pose:
+                # Already have quaternion in XYZW format
+                q = pose['quaternion']
+                gt_absolute.append([t_cm[0], t_cm[1], t_cm[2], q[0], q[1], q[2], q[3]])
+            elif 'rotation_euler' in pose:
+                # Convert Euler to quaternion (backward compatibility)
+                euler = pose['rotation_euler']
+                r = Rotation.from_euler('xyz', euler)
+                q = r.as_quat()  # [x, y, z, w]
+                gt_absolute.append([t_cm[0], t_cm[1], t_cm[2], q[0], q[1], q[2], q[3]])
+            else:
+                # No rotation data - use identity
+                gt_absolute.append([t_cm[0], t_cm[1], t_cm[2], 0, 0, 0, 1])
+    except TypeError as e:
+        console.print(f"[red]Error processing poses:[/red] {e}")
+        console.print(f"  poses_data type: {type(poses_data)}")
+        console.print(f"  Current index: {i if 'i' in locals() else 'unknown'}")
+        console.print(f"  Current pose type: {type(pose) if 'pose' in locals() else 'unknown'}")
+        if 'pose' in locals():
+            console.print(f"  Pose content: {pose}")
+        raise
     gt_absolute = np.array(gt_absolute)
     
     # Convert absolute GT to relative poses
@@ -1084,7 +1127,13 @@ def main():
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
     
     # Detect model type based on state dict keys
-    state_dict_keys = list(checkpoint['state_dict'].keys())
+    if 'state_dict' in checkpoint:
+        state_dict_keys = list(checkpoint['state_dict'].keys())
+    elif 'model_state_dict' in checkpoint:
+        state_dict_keys = list(checkpoint['model_state_dict'].keys())
+    else:
+        # Assume it's a raw state dict
+        state_dict_keys = list(checkpoint.keys())
     
     # Check for different model architectures
     if any(key.startswith('model.') for key in state_dict_keys):

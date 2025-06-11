@@ -1,302 +1,285 @@
 #!/usr/bin/env python3
 """
-Simple direct training approach for VIFT model
+Simple direct training script for VIFT on full AriaEveryday dataset
 """
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset
 import numpy as np
-from torch.utils.data import Dataset, DataLoader
-import lightning.pytorch as L
-from lightning.pytorch.callbacks import ModelCheckpoint, RichProgressBar
 from pathlib import Path
+from tqdm import tqdm
+import argparse
+from datetime import datetime
+import json
 
-class SimpleVIFTModel(nn.Module):
-    """Simple VIFT model architecture"""
-    
-    def __init__(self, visual_dim=512, imu_dim=256, hidden_dim=256):
-        super().__init__()
-        
-        # Feature projection
-        self.visual_proj = nn.Linear(visual_dim, hidden_dim)
-        self.imu_proj = nn.Linear(imu_dim, hidden_dim)
-        
-        # Fusion
-        self.fusion = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU()
-        )
-        
-        # Transformer encoder
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=hidden_dim,
-            nhead=8,
-            dim_feedforward=1024,
-            dropout=0.1,
-            batch_first=True
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=4)
-        
-        # Output heads
-        self.translation_head = nn.Sequential(
-            nn.Linear(hidden_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, 3)
-        )
-        
-        self.rotation_head = nn.Sequential(
-            nn.Linear(hidden_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(128, 4)
-        )
-        
-        # Initialize weights
-        self._init_weights()
-    
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-    
-    def forward(self, visual_features, imu_features):
-        # Project features
-        visual_proj = self.visual_proj(visual_features)
-        imu_proj = self.imu_proj(imu_features)
-        
-        # Fuse features
-        fused = torch.cat([visual_proj, imu_proj], dim=-1)
-        fused = self.fusion(fused)
-        
-        # Transformer processing
-        encoded = self.transformer(fused)
-        
-        # Output predictions
-        translation = self.translation_head(encoded)
-        rotation = self.rotation_head(encoded)
-        
-        # Normalize quaternions
-        rotation = F.normalize(rotation, p=2, dim=-1)
-        
-        return translation, rotation
-
-class SimpleVIFTModule(L.LightningModule):
-    def __init__(self, **kwargs):
-        super().__init__()
-        self.save_hyperparameters()
-        
-        # Create model
-        self.model = SimpleVIFTModel()
-        
-        # Loss weights (found from data analysis)
-        self.trans_weight = 1.0
-        self.rot_weight = 10.0  # Rotation values are smaller, need higher weight
-        
-    def forward(self, batch):
-        visual = batch['visual_features']
-        imu = batch['imu_features']
-        return self.model(visual, imu)
-    
-    def compute_loss(self, pred_trans, pred_rot, gt_trans, gt_rot):
-        """Compute balanced loss"""
-        # Translation loss (Huber for robustness)
-        trans_loss = F.huber_loss(pred_trans, gt_trans, delta=2.0)
-        
-        # Rotation loss (quaternion distance)
-        # Ensure quaternions are normalized
-        pred_rot_norm = F.normalize(pred_rot, p=2, dim=-1)
-        gt_rot_norm = F.normalize(gt_rot, p=2, dim=-1)
-        
-        # Quaternion distance: 1 - |<q1, q2>|
-        dot_product = torch.abs(torch.sum(pred_rot_norm * gt_rot_norm, dim=-1))
-        dot_product = torch.clamp(dot_product, -1.0, 1.0)
-        rot_loss = torch.mean(1.0 - dot_product)
-        
-        return trans_loss, rot_loss
-    
-    def training_step(self, batch, batch_idx):
-        # Forward pass
-        pred_trans, pred_rot = self.forward(batch)
-        
-        # Ground truth
-        gt_poses = batch['poses']
-        gt_trans = gt_poses[:, :, :3]
-        gt_rot = gt_poses[:, :, 3:]
-        
-        # Compute losses
-        trans_loss, rot_loss = self.compute_loss(pred_trans, pred_rot, gt_trans, gt_rot)
-        total_loss = self.trans_weight * trans_loss + self.rot_weight * rot_loss
-        
-        # Metrics
-        with torch.no_grad():
-            trans_mae = torch.mean(torch.abs(pred_trans - gt_trans))
-            trans_rmse = torch.sqrt(torch.mean((pred_trans - gt_trans)**2))
-            
-            # Translation magnitude
-            pred_mag = torch.mean(torch.norm(pred_trans, dim=-1))
-            gt_mag = torch.mean(torch.norm(gt_trans, dim=-1))
-            
-        # Log everything
-        self.log('train/trans_loss', trans_loss)
-        self.log('train/rot_loss', rot_loss)
-        self.log('train/total_loss', total_loss)
-        self.log('train/trans_mae_cm', trans_mae)
-        self.log('train/trans_rmse_cm', trans_rmse)
-        self.log('train/pred_magnitude', pred_mag)
-        self.log('train/gt_magnitude', gt_mag)
-        
-        return total_loss
-    
-    def validation_step(self, batch, batch_idx):
-        # Forward pass
-        pred_trans, pred_rot = self.forward(batch)
-        
-        # Ground truth
-        gt_poses = batch['poses']
-        gt_trans = gt_poses[:, :, :3]
-        gt_rot = gt_poses[:, :, 3:]
-        
-        # Compute losses
-        trans_loss, rot_loss = self.compute_loss(pred_trans, pred_rot, gt_trans, gt_rot)
-        total_loss = self.trans_weight * trans_loss + self.rot_weight * rot_loss
-        
-        # Metrics
-        trans_mae = torch.mean(torch.abs(pred_trans - gt_trans))
-        trans_rmse = torch.sqrt(torch.mean((pred_trans - gt_trans)**2))
-        
-        # Log
-        self.log('val/trans_loss', trans_loss)
-        self.log('val/rot_loss', rot_loss)
-        self.log('val/total_loss', total_loss)
-        self.log('val/trans_mae_cm', trans_mae)
-        self.log('val/trans_rmse_cm', trans_rmse)
-        
-        return total_loss
-    
-    def configure_optimizers(self):
-        # Use AdamW with warm restart
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=1e-4,
-            weight_decay=1e-4
-        )
-        
-        # Cosine annealing with warm restarts
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            optimizer,
-            T_0=10,  # Initial restart interval
-            T_mult=2,  # Multiply interval by 2 after each restart
-            eta_min=1e-6
-        )
-        
-        return {
-            'optimizer': optimizer,
-            'lr_scheduler': {
-                'scheduler': scheduler,
-                'interval': 'epoch'
-            }
-        }
-
-# Dataset
-class SeparateFeatureDataset(Dataset):
-    def __init__(self, data_dir):
-        self.data_dir = Path(data_dir)
+class AriaLatentDataset(Dataset):
+    def __init__(self, data_dir, split='train'):
+        self.data_dir = Path(data_dir) / split
         self.samples = []
         
-        for visual_file in sorted(self.data_dir.glob("*_visual.npy")):
-            idx = visual_file.stem.split("_")[0]
+        # Find all samples
+        for gt_file in sorted(self.data_dir.glob("*_gt.npy")):
+            idx = gt_file.stem.split('_')[0]
+            visual_file = self.data_dir / f"{idx}_visual.npy"
             imu_file = self.data_dir / f"{idx}_imu.npy"
-            gt_file = self.data_dir / f"{idx}_gt.npy"
             
-            if imu_file.exists() and gt_file.exists():
+            if visual_file.exists() and imu_file.exists():
                 self.samples.append({
                     'visual': visual_file,
                     'imu': imu_file,
                     'gt': gt_file
                 })
         
-        print(f"Found {len(self.samples)} samples in {data_dir}")
+        print(f"Found {len(self.samples)} samples in {split} split")
     
     def __len__(self):
         return len(self.samples)
     
     def __getitem__(self, idx):
         sample = self.samples[idx]
+        
         visual = torch.from_numpy(np.load(sample['visual'])).float()
         imu = torch.from_numpy(np.load(sample['imu'])).float()
-        poses = torch.from_numpy(np.load(sample['gt'])).float()
+        gt = torch.from_numpy(np.load(sample['gt'])).float()
         
-        return {
-            'visual_features': visual,
-            'imu_features': imu,
-            'poses': poses
-        }
+        return visual, imu, gt
 
-def collate_fn(batch):
-    return {
-        'visual_features': torch.stack([b['visual_features'] for b in batch]),
-        'imu_features': torch.stack([b['imu_features'] for b in batch]),
-        'poses': torch.stack([b['poses'] for b in batch])
-    }
+class SimpleVIFT(nn.Module):
+    def __init__(self, visual_dim=512, imu_dim=256, hidden_dim=512, output_dim=7):
+        super().__init__()
+        
+        # Visual encoder
+        self.visual_encoder = nn.Sequential(
+            nn.Linear(visual_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
+        )
+        
+        # IMU encoder
+        self.imu_encoder = nn.Sequential(
+            nn.Linear(imu_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
+        )
+        
+        # Fusion and prediction
+        self.fusion = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim)
+        )
+    
+    def forward(self, visual, imu):
+        # visual: [B, T, 256], imu: [B, T, 256]
+        B, T, _ = visual.shape
+        
+        # Process each timestep
+        outputs = []
+        for t in range(T):
+            v_feat = self.visual_encoder(visual[:, t])
+            i_feat = self.imu_encoder(imu[:, t])
+            
+            # Fuse features
+            fused = torch.cat([v_feat, i_feat], dim=-1)
+            pred = self.fusion(fused)
+            
+            outputs.append(pred)
+        
+        return torch.stack(outputs, dim=1)  # [B, T, 7]
 
-if __name__ == "__main__":
-    # Set seeds
-    torch.manual_seed(42)
-    np.random.seed(42)
+def compute_loss(pred, gt):
+    """Compute loss with separate translation and rotation components"""
+    # Split translation and rotation
+    pred_trans = pred[..., :3]  # [B, T, 3]
+    pred_rot = pred[..., 3:]    # [B, T, 4]
+    
+    gt_trans = gt[..., :3]
+    gt_rot = gt[..., 3:]
+    
+    # Normalize quaternions
+    pred_rot = torch.nn.functional.normalize(pred_rot, p=2, dim=-1)
+    gt_rot = torch.nn.functional.normalize(gt_rot, p=2, dim=-1)
+    
+    # Translation loss (MSE in centimeters)
+    trans_loss = torch.mean((pred_trans - gt_trans) ** 2)
+    
+    # Rotation loss (1 - |<q1, q2>|)
+    rot_loss = 1.0 - torch.abs(torch.sum(pred_rot * gt_rot, dim=-1)).mean()
+    
+    # Combined loss with weighting
+    total_loss = trans_loss + 100.0 * rot_loss
+    
+    return total_loss, trans_loss, rot_loss
+
+def train_epoch(model, dataloader, optimizer, device):
+    model.train()
+    total_loss = 0
+    total_trans_loss = 0
+    total_rot_loss = 0
+    
+    for visual, imu, gt in tqdm(dataloader, desc="Training"):
+        visual = visual.to(device)
+        imu = imu.to(device)
+        gt = gt.to(device)
+        
+        # Forward pass
+        pred = model(visual, imu)
+        
+        # Compute loss
+        loss, trans_loss, rot_loss = compute_loss(pred, gt)
+        
+        # Backward pass
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        
+        # Track losses
+        total_loss += loss.item()
+        total_trans_loss += trans_loss.item()
+        total_rot_loss += rot_loss.item()
+    
+    n_batches = len(dataloader)
+    return total_loss / n_batches, total_trans_loss / n_batches, total_rot_loss / n_batches
+
+def evaluate(model, dataloader, device):
+    model.eval()
+    total_loss = 0
+    total_trans_loss = 0
+    total_rot_loss = 0
+    
+    with torch.no_grad():
+        for visual, imu, gt in tqdm(dataloader, desc="Evaluating"):
+            visual = visual.to(device)
+            imu = imu.to(device)
+            gt = gt.to(device)
+            
+            # Forward pass
+            pred = model(visual, imu)
+            
+            # Compute loss
+            loss, trans_loss, rot_loss = compute_loss(pred, gt)
+            
+            # Track losses
+            total_loss += loss.item()
+            total_trans_loss += trans_loss.item()
+            total_rot_loss += rot_loss.item()
+    
+    n_batches = len(dataloader)
+    return total_loss / n_batches, total_trans_loss / n_batches, total_rot_loss / n_batches
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data-dir', type=str, default='/mnt/ssd_ext/incSeg-data/aria_latent_data_pretrained')
+    parser.add_argument('--batch-size', type=int, default=64)
+    parser.add_argument('--num-epochs', type=int, default=50)
+    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
+    parser.add_argument('--output-dir', type=str, default='full_dataset_checkpoints')
+    args = parser.parse_args()
+    
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(exist_ok=True)
+    
+    # Create timestamp directory
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = output_dir / timestamp
+    run_dir.mkdir(exist_ok=True)
+    
+    # Save config
+    config = vars(args)
+    with open(run_dir / 'config.json', 'w') as f:
+        json.dump(config, f, indent=2)
     
     # Create datasets
-    train_dataset = SeparateFeatureDataset('aria_latent_data_cm/train')
-    val_dataset = SeparateFeatureDataset('aria_latent_data_cm/val')
+    train_dataset = AriaLatentDataset(args.data_dir, 'train')
+    val_dataset = AriaLatentDataset(args.data_dir, 'val')
     
     # Create dataloaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=32,
-        shuffle=True,
-        num_workers=4,
-        collate_fn=collate_fn,
-        pin_memory=True
-    )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=32,
-        shuffle=False,
-        num_workers=4,
-        collate_fn=collate_fn,
-        pin_memory=True
-    )
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
     
     # Create model
-    model = SimpleVIFTModule()
+    model = SimpleVIFT().to(args.device)
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
-    # Create trainer
-    trainer = L.Trainer(
-        max_epochs=50,
-        callbacks=[
-            ModelCheckpoint(
-                dirpath='simple_direct_model',
-                filename='epoch_{epoch:03d}_mae_{val/trans_mae_cm:.4f}',
-                monitor='val/trans_mae_cm',
-                mode='min',
-                save_top_k=5,
-                save_last=True
-            ),
-            RichProgressBar()
-        ],
-        log_every_n_steps=10,
-        val_check_interval=0.5,
-        gradient_clip_val=1.0,
-        accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-        devices=1  # Use single GPU to avoid DDP issues
-    )
+    # Create optimizer and scheduler
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
     
-    # Train
-    trainer.fit(model, train_loader, val_loader)
+    # Training loop
+    best_val_loss = float('inf')
+    train_history = []
+    
+    for epoch in range(args.num_epochs):
+        print(f"\nEpoch {epoch+1}/{args.num_epochs}")
+        
+        # Train
+        train_loss, train_trans_loss, train_rot_loss = train_epoch(model, train_loader, optimizer, args.device)
+        
+        # Evaluate
+        val_loss, val_trans_loss, val_rot_loss = evaluate(model, val_loader, args.device)
+        
+        # Step scheduler
+        scheduler.step(val_loss)
+        
+        # Log results
+        print(f"Train Loss: {train_loss:.4f} (Trans: {train_trans_loss:.4f}, Rot: {train_rot_loss:.4f})")
+        print(f"Val Loss: {val_loss:.4f} (Trans: {val_trans_loss:.4f}, Rot: {val_rot_loss:.4f})")
+        print(f"LR: {optimizer.param_groups[0]['lr']:.2e}")
+        
+        # Save history
+        train_history.append({
+            'epoch': epoch + 1,
+            'train_loss': train_loss,
+            'train_trans_loss': train_trans_loss,
+            'train_rot_loss': train_rot_loss,
+            'val_loss': val_loss,
+            'val_trans_loss': val_trans_loss,
+            'val_rot_loss': val_rot_loss,
+            'lr': optimizer.param_groups[0]['lr']
+        })
+        
+        # Save checkpoint
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            checkpoint = {
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_loss': val_loss,
+                'config': config
+            }
+            torch.save(checkpoint, run_dir / 'best_checkpoint.pth')
+            print("  => Saved best checkpoint")
+        
+        # Save periodic checkpoint
+        if (epoch + 1) % 10 == 0:
+            checkpoint = {
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_loss': val_loss,
+                'config': config
+            }
+            torch.save(checkpoint, run_dir / f'checkpoint_epoch_{epoch+1}.pth')
+    
+    # Save training history
+    with open(run_dir / 'training_history.json', 'w') as f:
+        json.dump(train_history, f, indent=2)
+    
+    print(f"\nTraining complete! Best val loss: {best_val_loss:.4f}")
+    print(f"Results saved to: {run_dir}")
+
+if __name__ == '__main__':
+    main()

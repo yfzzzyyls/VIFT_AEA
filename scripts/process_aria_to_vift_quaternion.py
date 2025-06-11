@@ -15,7 +15,6 @@ import cv2
 from pathlib import Path
 import argparse
 from tqdm import tqdm
-import ffmpeg
 from typing import List, Dict, Tuple, Optional
 
 
@@ -342,8 +341,13 @@ class AriaToVIFTProcessor:
         downsampled_poses = poses[::downsample_factor]
         
         # Limit frames after downsampling
-        num_frames = min(len(downsampled_poses), self.max_frames)
-        poses = downsampled_poses[:num_frames]
+        if self.max_frames > 0:
+            num_frames = min(len(downsampled_poses), self.max_frames)
+            poses = downsampled_poses[:num_frames]
+        else:
+            # Process all frames
+            num_frames = len(downsampled_poses)
+            poses = downsampled_poses
         
         print(f"📊 Downsampled poses: {len(poses)} at ~20Hz")
         
