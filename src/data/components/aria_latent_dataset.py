@@ -37,8 +37,7 @@ class AriaLatentDataset(Dataset):
         imu_features = torch.from_numpy(imu_features).float()
         relative_poses = torch.from_numpy(relative_poses).float()
         
-        # CRITICAL: Scale translations from meters to centimeters to match training data
-        relative_poses[:, :3] *= 100.0
+        # NOTE: GT files already contain poses in centimeters, no scaling needed!
         
         batch = {
             'visual_features': visual_features,
