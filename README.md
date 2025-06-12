@@ -79,14 +79,21 @@ python train_vift_aria.py --help
 ### 4. Inference and Visualization
 
 ```bash
-# Run inference on test sequences and generate 3D plots
-python inference_full_frames.py \
-    --checkpoint checkpoints_vift_aria/[timestamp]/best_model.pt \
+# IMPORTANT: Use the fixed inference script for models trained with train_vift_aria.py
+# This script uses the correct VIFTTransition architecture matching the training
+python inference_full_frames_fixed.py \
+    --checkpoint checkpoints_vift_aria_fixed_final/[timestamp]/best_model.pt \
     --processed-dir aria_processed_full_frames \
-    --output-dir full_frames_results
+    --output-dir full_frames_results_fixed
 ```
 
-This generates 3D trajectory plots comparing predicted vs ground truth trajectories.
+This generates:
+- 3D trajectory plots comparing predicted vs ground truth trajectories
+- Relative pose analysis plots showing frame-by-frame predictions
+- NPZ files with raw predictions for further analysis
+
+**Note on Model Architecture Mismatch:** 
+The original `inference_full_frames.py` uses a different model class than `train_vift_aria.py`, causing architecture mismatch errors. Always use `inference_full_frames_fixed.py` for models trained with the transition-based architecture.
 
 ## Project Structure
 
@@ -99,11 +106,16 @@ VIFT_AEA/
 │   └── metrics/                   # Loss functions
 ├── scripts/
 │   └── process_aria_to_vift_quaternion.py  # Data processing
+├── train_vift_aria.py             # Main training script (transition-based)
+├── train_vift_original_simple.py  # Original architecture training
+├── inference_full_frames.py       # Original inference (architecture mismatch)
+├── inference_full_frames_fixed.py # Fixed inference for transition models
 ├── configs/                       # Hydra configuration files
 ├── pretrained_models/             # Pretrained VIFT encoder
 ├── aria_processed_full_frames/    # Processed sequences
 ├── aria_latent_full_frames/       # Generated features
-└── full_frames_checkpoints/       # Trained models
+├── full_frames_results_fixed/     # Inference outputs
+└── checkpoints_vift_aria_fixed_final/  # Trained models
 ```
 
 ## Key Features
@@ -116,16 +128,36 @@ VIFT_AEA/
 
 ## Results
 
-With full frame data and fixed training approach:
-- Model successfully learns to predict non-zero motion (was stuck at ~0.1cm)
-- Predictions gradually improve from 5-6cm to more realistic values
-- Natural curved trajectories instead of straight lines
-- Robust to varying sequence lengths (1,000-9,000 frames)
+### Recent Improvements (Fixed Architecture)
 
-**Training Progress:**
-- Initial issue: Model predicted constant near-zero values
-- After fix: 10-100x improvement in prediction magnitude
-- Model now actively learns motion patterns instead of outputting constants
+**Key Issues Resolved:**
+1. **Model Architecture Mismatch**: Fixed inference script now uses the same `VIFTTransition` class as training
+2. **Layer Normalization Bug**: Removed layer norm on transitions that was destroying motion magnitude
+3. **Loss Function Issues**: Fixed temporal and transition losses that were preventing learning
+
+**Current Performance:**
+- Model now produces varying predictions instead of constant values
+- Predictions show reasonable motion magnitudes (0.1-2cm per frame)
+- Different sequences produce different trajectories (not all the same)
+- Embeddings show temporal variation (std ~0.05-0.18)
+
+**Remaining Challenges:**
+- Predictions still form relatively straight lines instead of following curved paths
+- Prediction magnitude is smaller than ground truth (10-50cm total vs 3000-4700cm)
+- Model needs architectural improvements to better capture motion dynamics
+
+### Training Progress History
+
+**Phase 1 - Initial Issues:**
+- Model predicted constant near-zero values (~0.001cm)
+- All sequences produced identical straight-line trajectories
+- NaN losses during training
+
+**Phase 2 - After Fixes:**
+- 10-100x improvement in prediction magnitude
+- Model outputs varying predictions based on input
+- Stable training without NaN losses
+- Predictions still need improvement to match ground truth curves
 
 ## Citation
 
