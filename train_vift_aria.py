@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Train VIFT with the original architecture, just changing 6DoF to 7DoF quaternion output
-This follows the existing implementation in the repo which is correct
+Train VIFT with transition-based architecture for Aria dataset.
+Key difference: Model outputs embeddings, transitions are computed as differences.
 """
 
 import os
@@ -24,8 +24,8 @@ from src.data.components.aria_latent_dataset import AriaLatentDataset
 from src.models.components.pose_transformer import PoseTransformer
 
 
-class VIFTQuaternion(nn.Module):
-    """Simple VIFT model with quaternion output"""
+class VIFTTransition(nn.Module):
+    """VIFT model with transition-based architecture"""
     
     def __init__(self, input_dim=768, embedding_dim=128, num_layers=2, 
                  nhead=8, dim_feedforward=512, dropout=0.1):
@@ -41,19 +41,27 @@ class VIFTQuaternion(nn.Module):
             dropout=dropout
         )
         
-        # Replace the 6DoF output with 7DoF quaternion output
+        # CRITICAL CHANGE: Output embeddings, not poses
+        # Replace the pose output with embedding output
         self.pose_transformer.fc2 = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
-            nn.LeakyReLU(0.1),
+            nn.LayerNorm(embedding_dim),
+            nn.GELU()
+        )
+        
+        # NEW: Transition to pose projection
+        # This projects transition embeddings to 7DoF poses
+        self.transition_to_pose = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.LayerNorm(embedding_dim),
+            nn.GELU(),
             nn.Linear(embedding_dim, 7)  # 3 translation + 4 quaternion
         )
         
-        # Better initialization for relative motion prediction
+        # Initialize projection to small values
         with torch.no_grad():
-            # Initialize last layer with smaller weights
-            self.pose_transformer.fc2[-1].weight.data *= 0.01
-            # Zero bias - no preference for any particular motion
-            self.pose_transformer.fc2[-1].bias.data.zero_()
+            self.transition_to_pose[-1].weight.data *= 0.01
+            self.transition_to_pose[-1].bias.data.zero_()
     
     def forward(self, batch):
         # Combine visual and IMU features
@@ -68,26 +76,32 @@ class VIFTQuaternion(nn.Module):
         combined = self.pose_transformer.fc1(combined)
         combined += pos_embedding
         
-        # CRITICAL FIX: Use causal mask for proper temporal modeling
+        # Use causal mask for proper temporal modeling
         mask = self.pose_transformer.generate_square_subsequent_mask(seq_len, combined.device)
         
         # Pass through transformer with causal mask
-        output = self.pose_transformer.transformer_encoder(combined, mask=mask, is_causal=True)
+        embeddings = self.pose_transformer.transformer_encoder(combined, mask=mask, is_causal=True)
         
-        # Get predictions
-        output = self.pose_transformer.fc2(output)  # [B, seq_len, 7]
+        # Get embeddings (not poses!)
+        embeddings = self.pose_transformer.fc2(embeddings)  # [B, seq_len, embedding_dim]
         
-        # For relative motion prediction: use frames 0 to seq_len-1 to predict motions
-        relative_predictions = output[:, :-1, :]  # [B, seq_len-1, 7]
+        # CRITICAL: Compute transitions as differences between consecutive embeddings
+        # This is the KEY difference from our previous implementation
+        transitions = embeddings[:, 1:] - embeddings[:, :-1]  # [B, seq_len-1, embedding_dim]
+        
+        # Project transitions to pose space
+        pose_predictions = self.transition_to_pose(transitions)  # [B, seq_len-1, 7]
         
         # Split and normalize quaternions
-        translation = relative_predictions[:, :, :3]
-        quaternion = relative_predictions[:, :, 3:]
+        translation = pose_predictions[:, :, :3]
+        quaternion = pose_predictions[:, :, 3:]
         
         # Normalize quaternions
         quaternion = nn.functional.normalize(quaternion, p=2, dim=-1)
         
         return {
+            'embeddings': embeddings,
+            'transitions': transitions,
             'translation': translation,
             'rotation': quaternion,
             'poses': torch.cat([translation, quaternion], dim=-1)
@@ -95,9 +109,15 @@ class VIFTQuaternion(nn.Module):
 
 
 def compute_loss(predictions, batch, trans_weight=1.0, rot_weight=10.0, 
-                smooth_weight=0.1, diversity_weight=0.1):
-    """Enhanced loss computation for relative motion prediction"""
+                smooth_weight=0.1, diversity_weight=0.2, embed_reg_weight=0.01):
+    """
+    Enhanced loss computation for transition-based predictions.
+    
+    Key difference: We compare predicted transitions with ground truth transitions,
+    not absolute poses.
+    """
     pred_poses = predictions['poses']  # [B, seq_len-1, 7]
+    embeddings = predictions['embeddings']  # [B, seq_len, embed_dim]
     gt_poses = batch['poses']  # [B, seq_len, 7] - already relative poses!
     
     # Since we predict seq_len-1 relative motions, align with GT
@@ -129,30 +149,35 @@ def compute_loss(predictions, batch, trans_weight=1.0, rot_weight=10.0,
     gt_rot_aligned = torch.where(dot < 0, -gt_rot, gt_rot)
     rot_loss = nn.functional.l1_loss(pred_rot, gt_rot_aligned)
     
-    # 3. Temporal smoothness loss
+    # 3. Temporal smoothness loss on predicted transitions
     smooth_loss = torch.tensor(0.0, device=pred_trans.device)
     if pred_trans.shape[1] > 1:
-        # Penalize sudden changes in predicted motions
-        pred_motion_diff = pred_trans[:, 1:] - pred_trans[:, :-1]
-        smooth_loss = pred_motion_diff.abs().mean()
+        # Penalize sudden changes in predicted transitions
+        transition_diff = pred_poses[:, 1:] - pred_poses[:, :-1]
+        smooth_loss = transition_diff.abs().mean()
     
-    # 4. Diversity loss - prevent constant predictions
+    # 4. Diversity loss - prevent constant predictions (increased weight!)
     pred_variance = pred_trans.var(dim=1).mean()
     gt_variance = gt_trans.var(dim=1).mean()
     diversity_loss = (gt_variance - pred_variance).abs()
+    
+    # 5. NEW: Embedding regularization - prevent embeddings from growing too large
+    embed_reg_loss = embeddings.pow(2).mean()
     
     # Combined loss
     total_loss = (trans_weight * trans_loss + 
                   rot_weight * rot_loss + 
                   smooth_weight * smooth_loss +
-                  diversity_weight * diversity_loss)
+                  diversity_weight * diversity_loss +
+                  embed_reg_weight * embed_reg_loss)
     
     return {
         'total_loss': total_loss,
         'trans_loss': trans_loss,
         'rot_loss': rot_loss,
         'smooth_loss': smooth_loss,
-        'diversity_loss': diversity_loss
+        'diversity_loss': diversity_loss,
+        'embed_reg_loss': embed_reg_loss
     }
 
 
@@ -200,7 +225,8 @@ def train_epoch(model, dataloader, optimizer, device, epoch, print_freq=20):
             'trans': f"{loss_dict['trans_loss'].item():.4f}",
             'rot': f"{loss_dict['rot_loss'].item():.4f}",
             'smooth': f"{loss_dict['smooth_loss'].item():.4f}",
-            'div': f"{loss_dict['diversity_loss'].item():.4f}"
+            'div': f"{loss_dict['diversity_loss'].item():.4f}",
+            'embed': f"{loss_dict['embed_reg_loss'].item():.4f}"
         })
         
         # Detailed logging
@@ -211,6 +237,7 @@ def train_epoch(model, dataloader, optimizer, device, epoch, print_freq=20):
             print(f"  Rot loss: {loss_dict['rot_loss'].item():.6f}")
             print(f"  Smooth loss: {loss_dict['smooth_loss'].item():.6f}")
             print(f"  Diversity loss: {loss_dict['diversity_loss'].item():.6f}")
+            print(f"  Embed reg loss: {loss_dict['embed_reg_loss'].item():.6f}")
             
             # Sample predictions
             with torch.no_grad():
@@ -222,6 +249,15 @@ def train_epoch(model, dataloader, optimizer, device, epoch, print_freq=20):
                 gt_var = batch_gpu['poses'][0, 1:].cpu().numpy()[:, :3].var(axis=0)
                 print(f"  Prediction variance: {pred_var}")
                 print(f"  GT variance: {gt_var}")
+                
+                # Check embedding statistics
+                embed_mean = predictions['embeddings'][0].mean().item()
+                embed_std = predictions['embeddings'][0].std().item()
+                print(f"  Embedding mean: {embed_mean:.4f}, std: {embed_std:.4f}")
+                
+                # Check transition magnitudes
+                trans_mag = predictions['transitions'][0].norm(dim=-1).cpu().numpy()[:5]
+                print(f"  Transition magnitudes: {trans_mag}")
                 
                 print("  Sample predictions (first 5 frames):")
                 for i in range(5):
@@ -271,13 +307,13 @@ def validate(model, dataloader, device):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Train VIFT with original architecture')
+    parser = argparse.ArgumentParser(description='Train VIFT with transition-based architecture')
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--batch-size', type=int, default=8)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--print-freq', type=int, default=20)
     parser.add_argument('--data-dir', type=str, default='/home/external/VIFT_AEA/aria_latent_full_frames')
-    parser.add_argument('--checkpoint-dir', type=str, default='checkpoints_vift_simple')
+    parser.add_argument('--checkpoint-dir', type=str, default='checkpoints_vift_aria')
     parser.add_argument('--device', type=str, default='cuda')
     args = parser.parse_args()
     
@@ -289,6 +325,17 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     checkpoint_dir = Path(args.checkpoint_dir) / timestamp
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"\n{'='*60}")
+    print("VIFT with Transition-based Architecture")
+    print(f"{'='*60}")
+    print("Key architectural changes:")
+    print("1. Model outputs embeddings, not poses directly")
+    print("2. Transitions computed as embedding differences")
+    print("3. Transitions projected to 7DoF pose space")
+    print("4. Enhanced diversity loss weight (0.2)")
+    print("5. Embedding regularization added")
+    print(f"{'='*60}\n")
     
     # Load datasets
     train_dataset = AriaLatentDataset(os.path.join(args.data_dir, 'train'))
@@ -304,10 +351,20 @@ def main():
                           shuffle=False, num_workers=4, pin_memory=True)
     
     # Initialize model
-    model = VIFTQuaternion().to(device)
+    model = VIFTTransition().to(device)
+    
+    # Count parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"\nModel Parameters:")
+    print(f"  Total: {total_params:,}")
+    print(f"  Trainable: {trainable_params:,}")
     
     # Optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    
+    # Learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     
     # Training loop
     best_val_loss = float('inf')
@@ -315,6 +372,7 @@ def main():
     for epoch in range(args.epochs):
         print(f"\n{'='*60}")
         print(f"Epoch {epoch + 1}/{args.epochs}")
+        print(f"Learning rate: {scheduler.get_last_lr()[0]:.6f}")
         print(f"{'='*60}")
         
         # Train
@@ -341,6 +399,9 @@ def main():
             }
             torch.save(checkpoint, checkpoint_dir / 'best_model.pt')
             print(f"  ✓ New best model saved")
+        
+        # Step scheduler
+        scheduler.step()
     
     print(f"\nTraining complete! Best val loss: {best_val_loss:.6f}")
     print(f"Checkpoints saved to: {checkpoint_dir}")
