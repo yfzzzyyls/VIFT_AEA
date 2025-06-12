@@ -38,23 +38,32 @@ python generate_all_pretrained_latents_fixed.py \
 ### 3. Training
 
 ```bash
-# Train model with fixed relative motion loss
-python train_full_frames_model.py \
-    --data-dir aria_latent_full_frames \
+# Train with original VIFT architecture (simple and stable)
+# Uses the existing correct implementation, just changes output to 7DoF quaternions
+python train_vift_original_simple.py \
     --epochs 50 \
     --batch-size 8 \
-    --lr 1e-3 \
-    --hidden-dim 128 \
-    --num-heads 4 \
-    --print-freq 20
+    --lr 1e-4 \
+    --print-freq 20 \
+    --data-dir /home/external/VIFT_AEA/aria_latent_full_frames \
+    --checkpoint-dir checkpoints_vift_simple \
+    --device cuda
+
+# To see all available options:
+python train_vift_original_simple.py --help
 ```
 
 The model uses:
-- Multi-head attention for visual-IMU fusion
-- Separate specialized heads for rotation and translation
-- Fixed relative motion loss that encourages realistic motion
-- Proper weight initialization to avoid local minima
-- Quaternion representation for rotations
+- Original VIFT unified transformer architecture with 7DoF output
+- Multi-head attention (8 heads) for visual-IMU fusion
+- 6 transformer layers
+- Fixed relative motion loss with proper gradient flow
+- Quaternion representation for rotations (x, y, z, w)
+- AdamW optimizer with OneCycleLR scheduler
+- Detailed 7-DoF logging every 20 batches showing:
+  - Ground truth translation (cm) and quaternion values
+  - Predicted translation (cm) and quaternion values
+  - Loss values and rotation variance metrics
 
 **Key Training Improvements:**
 - Loss function encourages minimum motion (5cm) to prevent zero predictions

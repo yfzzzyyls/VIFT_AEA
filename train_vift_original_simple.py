@@ -1,0 +1,307 @@
+#!/usr/bin/env python3
+"""
+Train VIFT with the original architecture, just changing 6DoF to 7DoF quaternion output
+This follows the existing implementation in the repo which is correct
+"""
+
+import os
+import sys
+import json
+import torch
+import torch.nn as nn
+import numpy as np
+from pathlib import Path
+from datetime import datetime
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+import argparse
+
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
+
+from src.data.components.aria_latent_dataset import AriaLatentDataset
+from src.models.components.pose_transformer import PoseTransformer
+
+
+class VIFTQuaternion(nn.Module):
+    """Simple VIFT model with quaternion output"""
+    
+    def __init__(self, input_dim=768, embedding_dim=128, num_layers=2, 
+                 nhead=8, dim_feedforward=512, dropout=0.1):
+        super().__init__()
+        
+        # Use the existing PoseTransformer but replace output
+        self.pose_transformer = PoseTransformer(
+            input_dim=input_dim,
+            embedding_dim=embedding_dim,
+            num_layers=num_layers,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout
+        )
+        
+        # Replace the 6DoF output with 7DoF quaternion output
+        self.pose_transformer.fc2 = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.LeakyReLU(0.1),
+            nn.Linear(embedding_dim, 7)  # 3 translation + 4 quaternion
+        )
+        
+        # Initialize quaternion output
+        with torch.no_grad():
+            # Initialize last layer with small weights
+            self.pose_transformer.fc2[-1].weight.data *= 0.1
+            # Set quaternion bias to identity [0, 0, 0, 1]
+            self.pose_transformer.fc2[-1].bias.data[:3] = 0.0  # translation
+            self.pose_transformer.fc2[-1].bias.data[3:6] = 0.0  # qx, qy, qz
+            self.pose_transformer.fc2[-1].bias.data[6] = 1.0   # qw
+    
+    def forward(self, batch):
+        # Combine visual and IMU features
+        visual_features = batch['visual_features']
+        imu_features = batch['imu_features']
+        combined = torch.cat([visual_features, imu_features], dim=-1)
+        
+        # Create batch tuple for PoseTransformer
+        batch_tuple = (combined, None, None)
+        
+        # Get output from transformer
+        output = self.pose_transformer(batch_tuple, None)  # [B, seq_len, 7]
+        
+        # Split and normalize quaternions
+        translation = output[:, :, :3]
+        quaternion = output[:, :, 3:]
+        
+        # Normalize quaternions
+        quaternion = nn.functional.normalize(quaternion, p=2, dim=-1)
+        
+        return {
+            'translation': translation,
+            'rotation': quaternion,
+            'poses': torch.cat([translation, quaternion], dim=-1)
+        }
+
+
+def compute_loss(predictions, batch, trans_weight=1.0, rot_weight=10.0):
+    """Simple loss computation"""
+    pred_poses = predictions['poses']
+    gt_poses = batch['poses']
+    
+    # Make sure dimensions match
+    if pred_poses.shape[1] != gt_poses.shape[1]:
+        # If GT has one more frame, skip the first one
+        if gt_poses.shape[1] == pred_poses.shape[1] + 1:
+            gt_poses = gt_poses[:, 1:, :]
+        else:
+            raise ValueError(f"Shape mismatch: pred {pred_poses.shape} vs gt {gt_poses.shape}")
+    
+    # Split translation and rotation
+    pred_trans = pred_poses[:, :, :3]
+    pred_rot = pred_poses[:, :, 3:]
+    gt_trans = gt_poses[:, :, :3]
+    gt_rot = gt_poses[:, :, 3:]
+    
+    # Normalize GT quaternions
+    gt_rot = nn.functional.normalize(gt_rot, p=2, dim=-1)
+    
+    # Translation loss (L1)
+    trans_loss = nn.functional.l1_loss(pred_trans, gt_trans)
+    
+    # Quaternion loss - simple L1 after handling double cover
+    # Handle quaternion ambiguity (q and -q represent same rotation)
+    dot = (pred_rot * gt_rot).sum(dim=-1, keepdim=True)
+    gt_rot_aligned = torch.where(dot < 0, -gt_rot, gt_rot)
+    rot_loss = nn.functional.l1_loss(pred_rot, gt_rot_aligned)
+    
+    # Weighted combination
+    total_loss = trans_weight * trans_loss + rot_weight * rot_loss
+    
+    return {
+        'total_loss': total_loss,
+        'trans_loss': trans_loss,
+        'rot_loss': rot_loss
+    }
+
+
+def train_epoch(model, dataloader, optimizer, device, epoch, print_freq=20):
+    """Train for one epoch"""
+    model.train()
+    total_loss = 0
+    num_batches = 0
+    
+    progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}")
+    for batch_idx, batch in enumerate(progress_bar):
+        # Move to device
+        batch_gpu = {
+            'visual_features': batch['visual_features'].to(device),
+            'imu_features': batch['imu_features'].to(device),
+            'poses': batch['poses'].to(device)
+        }
+        
+        # Forward pass
+        predictions = model(batch_gpu)
+        loss_dict = compute_loss(predictions, batch_gpu)
+        loss = loss_dict['total_loss']
+        
+        # Check for NaN
+        if torch.isnan(loss):
+            print(f"NaN loss at batch {batch_idx}, skipping...")
+            continue
+        
+        # Backward pass
+        optimizer.zero_grad()
+        loss.backward()
+        
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
+        optimizer.step()
+        
+        # Update metrics
+        total_loss += loss.item()
+        num_batches += 1
+        
+        # Update progress bar
+        progress_bar.set_postfix({
+            'loss': f"{loss.item():.4f}",
+            'trans': f"{loss_dict['trans_loss'].item():.4f}",
+            'rot': f"{loss_dict['rot_loss'].item():.4f}"
+        })
+        
+        # Detailed logging
+        if batch_idx % print_freq == 0 and batch_idx > 0:
+            print(f"\nBatch {batch_idx}:")
+            print(f"  Total loss: {loss.item():.6f}")
+            print(f"  Trans loss: {loss_dict['trans_loss'].item():.6f}")
+            print(f"  Rot loss: {loss_dict['rot_loss'].item():.6f}")
+            
+            # Sample predictions
+            with torch.no_grad():
+                pred_poses = predictions['poses'][0, :5].cpu().numpy()
+                gt_poses = batch_gpu['poses'][0, :5].cpu().numpy()
+                print("  Sample predictions (first 5 frames):")
+                for i in range(5):
+                    print(f"    Frame {i}:")
+                    print(f"      GT:   t=[{gt_poses[i,0]:.3f}, {gt_poses[i,1]:.3f}, {gt_poses[i,2]:.3f}], "
+                          f"q=[{gt_poses[i,3]:.3f}, {gt_poses[i,4]:.3f}, {gt_poses[i,5]:.3f}, {gt_poses[i,6]:.3f}]")
+                    print(f"      Pred: t=[{pred_poses[i,0]:.3f}, {pred_poses[i,1]:.3f}, {pred_poses[i,2]:.3f}], "
+                          f"q=[{pred_poses[i,3]:.3f}, {pred_poses[i,4]:.3f}, {pred_poses[i,5]:.3f}, {pred_poses[i,6]:.3f}]")
+    
+    return total_loss / num_batches if num_batches > 0 else float('inf')
+
+
+def validate(model, dataloader, device):
+    """Validate model"""
+    model.eval()
+    total_loss = 0
+    total_trans_error = 0
+    num_batches = 0
+    
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc="Validation"):
+            batch_gpu = {
+                'visual_features': batch['visual_features'].to(device),
+                'imu_features': batch['imu_features'].to(device),
+                'poses': batch['poses'].to(device)
+            }
+            
+            predictions = model(batch_gpu)
+            loss_dict = compute_loss(predictions, batch_gpu)
+            
+            if torch.isnan(loss_dict['total_loss']):
+                continue
+            
+            # Compute translation error
+            pred_trans = predictions['translation']
+            gt_trans = batch_gpu['poses'][:, :pred_trans.shape[1], :3]
+            trans_error = torch.mean(torch.norm(pred_trans - gt_trans, dim=-1))
+            
+            total_loss += loss_dict['total_loss'].item()
+            total_trans_error += trans_error.item()
+            num_batches += 1
+    
+    return {
+        'loss': total_loss / num_batches if num_batches > 0 else float('inf'),
+        'trans_error': total_trans_error / num_batches if num_batches > 0 else float('inf')
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Train VIFT with original architecture')
+    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--batch-size', type=int, default=8)
+    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--print-freq', type=int, default=20)
+    parser.add_argument('--data-dir', type=str, default='/home/external/VIFT_AEA/aria_latent_full_frames')
+    parser.add_argument('--checkpoint-dir', type=str, default='checkpoints_vift_simple')
+    parser.add_argument('--device', type=str, default='cuda')
+    args = parser.parse_args()
+    
+    # Setup
+    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    
+    # Create checkpoint directory
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    checkpoint_dir = Path(args.checkpoint_dir) / timestamp
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Load datasets
+    train_dataset = AriaLatentDataset(os.path.join(args.data_dir, 'train'))
+    val_dataset = AriaLatentDataset(os.path.join(args.data_dir, 'val'))
+    
+    print(f"Train samples: {len(train_dataset)}")
+    print(f"Val samples: {len(val_dataset)}")
+    
+    # Create dataloaders
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, 
+                            shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
+                          shuffle=False, num_workers=4, pin_memory=True)
+    
+    # Initialize model
+    model = VIFTQuaternion().to(device)
+    
+    # Optimizer
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    
+    # Training loop
+    best_val_loss = float('inf')
+    
+    for epoch in range(args.epochs):
+        print(f"\n{'='*60}")
+        print(f"Epoch {epoch + 1}/{args.epochs}")
+        print(f"{'='*60}")
+        
+        # Train
+        train_loss = train_epoch(model, train_loader, optimizer, device, 
+                               epoch + 1, args.print_freq)
+        
+        # Validate
+        val_metrics = validate(model, val_loader, device)
+        
+        print(f"\nEpoch {epoch + 1} Summary:")
+        print(f"  Train Loss: {train_loss:.6f}")
+        print(f"  Val Loss: {val_metrics['loss']:.6f}")
+        print(f"  Val Trans Error: {val_metrics['trans_error']:.4f} cm")
+        
+        # Save checkpoint
+        if val_metrics['loss'] < best_val_loss:
+            best_val_loss = val_metrics['loss']
+            checkpoint = {
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'train_loss': train_loss,
+                'val_metrics': val_metrics
+            }
+            torch.save(checkpoint, checkpoint_dir / 'best_model.pt')
+            print(f"  ✓ New best model saved")
+    
+    print(f"\nTraining complete! Best val loss: {best_val_loss:.6f}")
+    print(f"Checkpoints saved to: {checkpoint_dir}")
+
+
+if __name__ == "__main__":
+    main()

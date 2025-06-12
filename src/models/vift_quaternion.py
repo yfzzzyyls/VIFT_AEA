@@ -124,16 +124,14 @@ class VIFTQuaternionModel(L.LightningModule):
         x = combined_features
         
         # Apply input projection
-        x = self.pose_transformer.input_fc(x)  # [B, seq_len, embedding_dim]
+        x = self.pose_transformer.fc1(x)  # [B, seq_len, embedding_dim]
         
         # Add positional encoding
-        positions = torch.arange(seq_len, device=x.device).unsqueeze(0).expand(B, -1)
-        x = self.pose_transformer.position_encoder(x, positions)
+        pos_embedding = self.pose_transformer.positional_embedding(seq_len).to(x.device)
+        x = x + pos_embedding
         
         # Pass through transformer
-        x = x.permute(1, 0, 2)  # [seq_len, batch, embedding_dim]
-        x = self.pose_transformer.transformer(x)
-        x = x.permute(1, 0, 2)  # [batch, seq_len, embedding_dim]
+        x = self.pose_transformer.transformer_encoder(x)  # [batch, seq_len, embedding_dim]
         
         # For transitions, we need seq_len-1 outputs
         # Take differences between consecutive frames
@@ -158,11 +156,11 @@ class VIFTQuaternionModel(L.LightningModule):
     def compute_loss(self, predictions: Dict[str, torch.Tensor], 
                      batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Compute loss using quaternion predictions"""
-        # Target poses
-        target_rotation = batch['poses'][:, :, 3:7]
-        target_translation = batch['poses'][:, :, :3]
+        # Target poses - skip first frame to match transitions
+        target_rotation = batch['poses'][:, 1:, 3:7]  # [B, seq_len-1, 4]
+        target_translation = batch['poses'][:, 1:, :3]  # [B, seq_len-1, 3]
         
-        # Predictions
+        # Predictions (already seq_len-1)
         pred_rotation = predictions['rotation']
         pred_translation = predictions['translation']
         
@@ -203,9 +201,9 @@ class VIFTQuaternionModel(L.LightningModule):
         # Update metrics
         with torch.no_grad():
             pred_trans = predictions['translation'].reshape(-1, 3).contiguous()
-            target_trans = batch['poses'][:, :, :3].reshape(-1, 3).contiguous()
+            target_trans = batch['poses'][:, 1:, :3].reshape(-1, 3).contiguous()
             pred_rot = predictions['rotation'].reshape(-1, 4).contiguous()
-            target_rot = batch['poses'][:, :, 3:7].reshape(-1, 4).contiguous()
+            target_rot = batch['poses'][:, 1:, 3:7].reshape(-1, 4).contiguous()
             
             self.train_trans_mae(pred_trans, target_trans)
             rot_mae = self.train_rot_mae(pred_rot, target_rot)
@@ -231,9 +229,9 @@ class VIFTQuaternionModel(L.LightningModule):
         # Update metrics
         with torch.no_grad():
             pred_trans = predictions['translation'].reshape(-1, 3).contiguous()
-            target_trans = batch['poses'][:, :, :3].reshape(-1, 3).contiguous()
+            target_trans = batch['poses'][:, 1:, :3].reshape(-1, 3).contiguous()
             pred_rot = predictions['rotation'].reshape(-1, 4).contiguous()
-            target_rot = batch['poses'][:, :, 3:7].reshape(-1, 4).contiguous()
+            target_rot = batch['poses'][:, 1:, 3:7].reshape(-1, 4).contiguous()
             
             self.val_trans_mae(pred_trans, target_trans)
             rot_mae = self.val_rot_mae(pred_rot, target_rot)
