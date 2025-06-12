@@ -48,14 +48,12 @@ class VIFTQuaternion(nn.Module):
             nn.Linear(embedding_dim, 7)  # 3 translation + 4 quaternion
         )
         
-        # Initialize quaternion output
+        # Better initialization for relative motion prediction
         with torch.no_grad():
-            # Initialize last layer with small weights
-            self.pose_transformer.fc2[-1].weight.data *= 0.1
-            # Set quaternion bias to identity [0, 0, 0, 1]
-            self.pose_transformer.fc2[-1].bias.data[:3] = 0.0  # translation
-            self.pose_transformer.fc2[-1].bias.data[3:6] = 0.0  # qx, qy, qz
-            self.pose_transformer.fc2[-1].bias.data[6] = 1.0   # qw
+            # Initialize last layer with smaller weights
+            self.pose_transformer.fc2[-1].weight.data *= 0.01
+            # Zero bias - no preference for any particular motion
+            self.pose_transformer.fc2[-1].bias.data.zero_()
     
     def forward(self, batch):
         # Combine visual and IMU features
@@ -63,15 +61,28 @@ class VIFTQuaternion(nn.Module):
         imu_features = batch['imu_features']
         combined = torch.cat([visual_features, imu_features], dim=-1)
         
-        # Create batch tuple for PoseTransformer
-        batch_tuple = (combined, None, None)
+        batch_size, seq_len, _ = combined.shape
         
-        # Get output from transformer
-        output = self.pose_transformer(batch_tuple, None)  # [B, seq_len, 7]
+        # Apply positional encoding and projection
+        pos_embedding = self.pose_transformer.positional_embedding(seq_len).to(combined.device)
+        combined = self.pose_transformer.fc1(combined)
+        combined += pos_embedding
+        
+        # CRITICAL FIX: Use causal mask for proper temporal modeling
+        mask = self.pose_transformer.generate_square_subsequent_mask(seq_len, combined.device)
+        
+        # Pass through transformer with causal mask
+        output = self.pose_transformer.transformer_encoder(combined, mask=mask, is_causal=True)
+        
+        # Get predictions
+        output = self.pose_transformer.fc2(output)  # [B, seq_len, 7]
+        
+        # For relative motion prediction: use frames 0 to seq_len-1 to predict motions
+        relative_predictions = output[:, :-1, :]  # [B, seq_len-1, 7]
         
         # Split and normalize quaternions
-        translation = output[:, :, :3]
-        quaternion = output[:, :, 3:]
+        translation = relative_predictions[:, :, :3]
+        quaternion = relative_predictions[:, :, 3:]
         
         # Normalize quaternions
         quaternion = nn.functional.normalize(quaternion, p=2, dim=-1)
@@ -83,18 +94,18 @@ class VIFTQuaternion(nn.Module):
         }
 
 
-def compute_loss(predictions, batch, trans_weight=1.0, rot_weight=10.0):
-    """Simple loss computation"""
-    pred_poses = predictions['poses']
-    gt_poses = batch['poses']
+def compute_loss(predictions, batch, trans_weight=1.0, rot_weight=10.0, 
+                smooth_weight=0.1, diversity_weight=0.1):
+    """Enhanced loss computation for relative motion prediction"""
+    pred_poses = predictions['poses']  # [B, seq_len-1, 7]
+    gt_poses = batch['poses']  # [B, seq_len, 7] - already relative poses!
     
-    # Make sure dimensions match
-    if pred_poses.shape[1] != gt_poses.shape[1]:
-        # If GT has one more frame, skip the first one
-        if gt_poses.shape[1] == pred_poses.shape[1] + 1:
-            gt_poses = gt_poses[:, 1:, :]
-        else:
-            raise ValueError(f"Shape mismatch: pred {pred_poses.shape} vs gt {gt_poses.shape}")
+    # Since we predict seq_len-1 relative motions, align with GT
+    if gt_poses.shape[1] == pred_poses.shape[1] + 1:
+        # Skip the first GT pose
+        gt_poses = gt_poses[:, 1:, :]
+    elif gt_poses.shape[1] != pred_poses.shape[1]:
+        raise ValueError(f"Shape mismatch: pred {pred_poses.shape} vs gt {gt_poses.shape}")
     
     # Split translation and rotation
     pred_trans = pred_poses[:, :, :3]
@@ -105,22 +116,43 @@ def compute_loss(predictions, batch, trans_weight=1.0, rot_weight=10.0):
     # Normalize GT quaternions
     gt_rot = nn.functional.normalize(gt_rot, p=2, dim=-1)
     
-    # Translation loss (L1)
-    trans_loss = nn.functional.l1_loss(pred_trans, gt_trans)
+    # 1. Adaptive translation loss based on motion magnitude
+    trans_magnitude = gt_trans.norm(dim=-1, keepdim=True)
+    small_motion_mask = (trans_magnitude < 0.5).float()  # < 0.5cm
+    motion_weight = 1.0 + 2.0 * small_motion_mask  # Weight small motions 3x more
     
-    # Quaternion loss - simple L1 after handling double cover
-    # Handle quaternion ambiguity (q and -q represent same rotation)
+    trans_diff = (pred_trans - gt_trans).abs()
+    trans_loss = (trans_diff * motion_weight).mean()
+    
+    # 2. Quaternion loss
     dot = (pred_rot * gt_rot).sum(dim=-1, keepdim=True)
     gt_rot_aligned = torch.where(dot < 0, -gt_rot, gt_rot)
     rot_loss = nn.functional.l1_loss(pred_rot, gt_rot_aligned)
     
-    # Weighted combination
-    total_loss = trans_weight * trans_loss + rot_weight * rot_loss
+    # 3. Temporal smoothness loss
+    smooth_loss = torch.tensor(0.0, device=pred_trans.device)
+    if pred_trans.shape[1] > 1:
+        # Penalize sudden changes in predicted motions
+        pred_motion_diff = pred_trans[:, 1:] - pred_trans[:, :-1]
+        smooth_loss = pred_motion_diff.abs().mean()
+    
+    # 4. Diversity loss - prevent constant predictions
+    pred_variance = pred_trans.var(dim=1).mean()
+    gt_variance = gt_trans.var(dim=1).mean()
+    diversity_loss = (gt_variance - pred_variance).abs()
+    
+    # Combined loss
+    total_loss = (trans_weight * trans_loss + 
+                  rot_weight * rot_loss + 
+                  smooth_weight * smooth_loss +
+                  diversity_weight * diversity_loss)
     
     return {
         'total_loss': total_loss,
         'trans_loss': trans_loss,
-        'rot_loss': rot_loss
+        'rot_loss': rot_loss,
+        'smooth_loss': smooth_loss,
+        'diversity_loss': diversity_loss
     }
 
 
@@ -166,7 +198,9 @@ def train_epoch(model, dataloader, optimizer, device, epoch, print_freq=20):
         progress_bar.set_postfix({
             'loss': f"{loss.item():.4f}",
             'trans': f"{loss_dict['trans_loss'].item():.4f}",
-            'rot': f"{loss_dict['rot_loss'].item():.4f}"
+            'rot': f"{loss_dict['rot_loss'].item():.4f}",
+            'smooth': f"{loss_dict['smooth_loss'].item():.4f}",
+            'div': f"{loss_dict['diversity_loss'].item():.4f}"
         })
         
         # Detailed logging
@@ -175,11 +209,20 @@ def train_epoch(model, dataloader, optimizer, device, epoch, print_freq=20):
             print(f"  Total loss: {loss.item():.6f}")
             print(f"  Trans loss: {loss_dict['trans_loss'].item():.6f}")
             print(f"  Rot loss: {loss_dict['rot_loss'].item():.6f}")
+            print(f"  Smooth loss: {loss_dict['smooth_loss'].item():.6f}")
+            print(f"  Diversity loss: {loss_dict['diversity_loss'].item():.6f}")
             
             # Sample predictions
             with torch.no_grad():
                 pred_poses = predictions['poses'][0, :5].cpu().numpy()
-                gt_poses = batch_gpu['poses'][0, :5].cpu().numpy()
+                gt_poses = batch_gpu['poses'][0, 1:6].cpu().numpy()  # Skip first GT, align with predictions
+                
+                # Check variance to detect constant predictions
+                pred_var = predictions['poses'][0].cpu().numpy()[:, :3].var(axis=0)
+                gt_var = batch_gpu['poses'][0, 1:].cpu().numpy()[:, :3].var(axis=0)
+                print(f"  Prediction variance: {pred_var}")
+                print(f"  GT variance: {gt_var}")
+                
                 print("  Sample predictions (first 5 frames):")
                 for i in range(5):
                     print(f"    Frame {i}:")
