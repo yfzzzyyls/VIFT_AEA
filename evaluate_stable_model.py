@@ -85,16 +85,29 @@ def load_checkpoint(checkpoint_path, device):
     return model
 
 
-def integrate_trajectory(relative_poses):
-    """Integrate relative poses to get absolute trajectory"""
+def integrate_trajectory(relative_poses, initial_pose=None):
+    """Integrate relative poses to get absolute trajectory
+    
+    Args:
+        relative_poses: Array of relative poses [N, 7] where each pose is [x,y,z,qx,qy,qz,qw]
+        initial_pose: Optional initial pose [7]. If None, starts at origin.
+    """
     N = relative_poses.shape[0]
     
     absolute_positions = np.zeros((N + 1, 3))
     absolute_rotations = np.zeros((N + 1, 4))
-    absolute_rotations[0] = [0, 0, 0, 1]
     
-    current_position = np.zeros(3)
-    current_rotation = R.from_quat([0, 0, 0, 1])
+    # Set initial pose
+    if initial_pose is not None:
+        absolute_positions[0] = initial_pose[:3]
+        absolute_rotations[0] = initial_pose[3:]
+        current_position = initial_pose[:3].copy()
+        current_rotation = R.from_quat(initial_pose[3:])
+    else:
+        absolute_positions[0] = [0, 0, 0]
+        absolute_rotations[0] = [0, 0, 0, 1]
+        current_position = np.zeros(3)
+        current_rotation = R.from_quat([0, 0, 0, 1])
     
     for i in range(N):
         rel_trans = relative_poses[i, :3]

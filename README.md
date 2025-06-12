@@ -37,26 +37,74 @@ python generate_all_pretrained_latents_fixed.py \
 
 ### 3. Training
 
+#### Stable Version (RECOMMENDED - Before Scale Fixes)
+
+This is the stable version that achieved good results (0.843cm translation error) before addressing scale issues:
+
 ```bash
-# RECOMMENDED: Stable VIFT Training (Fixes NaN issues)
-# Use this version if you encounter NaN losses
+# Step 1: Generate latent features (if not already done)
+python generate_all_pretrained_latents_fixed.py \
+    --processed-dir aria_processed_full_frames \
+    --output-dir aria_latent_full_frames \
+    --stride 10 \
+    --pose-scale 100.0
+
+# Step 2: Train the stable model
 python train_vift_aria_stable.py \
     --epochs 50 \
-    --batch-size 8 \
+    --batch-size 32 \
     --lr 5e-5 \
     --data-dir aria_latent_full_frames \
     --checkpoint-dir checkpoints_vift_stable \
     --device cuda
 
-# Alternative: Standard training (if no NaN issues)
-python train_vift_aria.py \
+# Step 3: Evaluate (auto-generates test features if needed)
+python evaluate_stable_model.py \
+    --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
+    --data-dir aria_latent_full_frames \
+    --output-dir evaluation_results \
+    --device cuda
+```
+
+**Stable Version Results:**
+- Translation Error: 0.843 cm (mean), 0.339 cm (median)
+- Rotation Error: 1.302° (mean), 0.741° (median)
+- 95% of predictions within 3.192 cm and 4.288°
+
+#### Alternative: World-Frame Features with Scale Fixes
+```bash
+# Generate features with world-frame relative poses (prevents direction flips)
+python generate_all_pretrained_latents_world_frame.py \
+    --processed-dir aria_processed_full_frames \
+    --output-dir aria_latent_world_frame \
+    --stride 10 \
+    --pose-scale 100.0
+```
+
+#### Fixed Scale Training
+```bash
+# New training script that addresses scale and stability issues
+python train_vift_aria_fixed_scale.py \
     --epochs 50 \
     --batch-size 16 \
     --lr 1e-4 \
-    --data-dir aria_latent_full_frames \
-    --checkpoint-dir checkpoints_vift_unified \
+    --data-dir aria_latent_world_frame \
+    --checkpoint-dir checkpoints_vift_fixed \
     --device cuda
 ```
+
+**Key Improvements in Fixed Training:**
+- Learnable normalization that preserves motion scale
+- World-frame relative poses (no coordinate transformations)
+- Mixed precision training with gradient accumulation
+- Scale correction factor to prevent underestimation
+- Robust gradient handling without skipping batches
+
+**Important Note on Inference:**
+- During inference, the model only needs images and IMU data (no ground truth)
+- The model predicts relative poses directly in world coordinates
+- No coordinate transformations are needed during inference
+- The world-frame training ensures consistent predictions without direction flips
 
 **Stable Training Features (train_vift_aria_stable.py):**
 - Input normalization for visual (×0.1) and IMU (×0.01) features
@@ -76,7 +124,7 @@ python train_vift_aria.py \
 
 ### 4. Evaluation and Inference
 
-#### Evaluate Model Performance
+#### Evaluate Stable Model Performance
 ```bash
 # For models trained with stable training script
 python evaluate_stable_model.py \
@@ -87,7 +135,7 @@ python evaluate_stable_model.py \
     --device cuda
 ```
 
-**Note**: The evaluation script automatically generates test features if they don't exist, so you don't need to run the feature generation separately.
+**Note**: The evaluation script automatically generates test features if they don't exist using `generate_all_pretrained_latents_fixed.py`.
 
 This will output:
 - Translation and rotation error statistics

@@ -10,27 +10,27 @@ class AriaLatentDataset(Dataset):
     def __init__(self, root_dir):
         self.root_dir = Path(root_dir)
         
-        # Get all unique sample indices
+        # Get all unique sample indices - keep the original filenames
         all_files = list(self.root_dir.glob("*_visual.npy"))
-        self.indices = sorted([int(f.stem.split('_')[0]) for f in all_files])
+        self.file_prefixes = sorted([f.stem.split('_')[0] for f in all_files])
         
         # Verify all files exist
-        for idx in self.indices:
-            assert (self.root_dir / f"{idx}_visual.npy").exists(), f"Missing visual file for {idx}"
-            assert (self.root_dir / f"{idx}_imu.npy").exists(), f"Missing IMU file for {idx}"
-            assert (self.root_dir / f"{idx}_gt.npy").exists(), f"Missing GT file for {idx}"
+        for prefix in self.file_prefixes:
+            assert (self.root_dir / f"{prefix}_visual.npy").exists(), f"Missing visual file for {prefix}"
+            assert (self.root_dir / f"{prefix}_imu.npy").exists(), f"Missing IMU file for {prefix}"
+            assert (self.root_dir / f"{prefix}_gt.npy").exists(), f"Missing GT file for {prefix}"
     
     def __len__(self):
-        return len(self.indices)
+        return len(self.file_prefixes)
     
     def __getitem__(self, idx):
-        # Get actual file index
-        file_idx = self.indices[idx]
+        # Get actual file prefix
+        file_prefix = self.file_prefixes[idx]
         
         # Load features
-        visual_features = np.load(self.root_dir / f"{file_idx}_visual.npy")  # [10, 512]
-        imu_features = np.load(self.root_dir / f"{file_idx}_imu.npy")        # [10, 256]
-        relative_poses = np.load(self.root_dir / f"{file_idx}_gt.npy")       # [10, 7]
+        visual_features = np.load(self.root_dir / f"{file_prefix}_visual.npy")  # [10, 512]
+        imu_features = np.load(self.root_dir / f"{file_prefix}_imu.npy")        # [10, 256]
+        relative_poses = np.load(self.root_dir / f"{file_prefix}_gt.npy")       # [10, 7]
         
         # Convert to tensors
         visual_features = torch.from_numpy(visual_features).float()
