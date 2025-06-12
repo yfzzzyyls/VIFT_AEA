@@ -79,13 +79,14 @@ class VIFTStable(nn.Module):
             nn.Linear(embedding_dim, 7)
         )
         
+        # Output normalization (learnable)
+        self.output_norm = nn.BatchNorm1d(7)
+        
         # Very careful initialization
         with torch.no_grad():
             # Small weights for final layer
             nn.init.xavier_uniform_(self.fc2[-1].weight, gain=0.01)
-            # Initialize bias: zero translations, identity quaternion
-            self.fc2[-1].bias.data[:3] = 0.0
-            self.fc2[-1].bias.data[3:] = torch.tensor([0.0, 0.0, 0.0, 1.0])
+            # Remove hard zero-bias on final layer
             
             # Small initialization for first layer too
             nn.init.xavier_uniform_(self.fc1[0].weight, gain=0.1)
@@ -134,8 +135,14 @@ class VIFTStable(nn.Module):
         # Project to 7DoF
         output = self.fc2(output)
         
+        # Normalize outputs to stabilize scale
+        B,S,_ = output.shape
+        output_flat = output.view(-1, 7)
+        output_normed = self.output_norm(output_flat).view(B, S, 7)
+        
         # For relative poses between consecutive frames
-        predictions = output[:, :-1, :]  # [B, seq_len-1, 7]
+        # Use full sequence of relative pose outputs
+        predictions = output_normed  # shape [B, seq_len, 7]
         
         # Split and normalize quaternions
         translation = predictions[:, :, :3]
@@ -185,7 +192,7 @@ def robust_geodesic_loss(pred_quat, gt_quat):
 def compute_stable_loss(predictions, batch, trans_weight=1.0, rot_weight=0.1):
     """Stable loss computation with gradient-friendly formulation"""
     pred_poses = predictions['poses']
-    gt_poses = batch['poses'][:, 1:, :]  # [B, seq_len-1, 7]
+    gt_poses = batch['poses']  # [B, seq_len, 7]
     
     # Ensure shapes match
     if pred_poses.shape[1] != gt_poses.shape[1]:
@@ -237,8 +244,55 @@ def train_epoch(model, dataloader, optimizer, device, epoch, grad_clip=0.5):
             'poses': batch['poses'].to(device)
         }
         
+        # Normalize input features (visual and IMU) per batch
+        vf = batch_gpu['visual_features']
+        batch_gpu['visual_features'] = (vf - vf.mean()) / (vf.std() + 1e-8)
+        imu = batch_gpu['imu_features']
+        batch_gpu['imu_features'] = (imu - imu.mean()) / (imu.std() + 1e-8)
+        # Normalize GT translation to zero mean/unit variance per batch
+        poses = batch_gpu['poses']
+        t = poses[:, :, :3]
+        rest = poses[:, :, 3:]
+        t_norm = (t - t.mean()) / (t.std() + 1e-8)
+        batch_gpu['poses'] = torch.cat([t_norm, rest], dim=-1)
+        # Inspect scale mismatch on first batch
+        if batch_idx == 0:
+            # Feature stats
+            vf = batch_gpu['visual_features']  # [B, S, V]
+            imu = batch_gpu['imu_features']    # [B, S, I]
+            print(f"Visual features mean: {vf.mean().item():.6f}, std: {vf.std().item():.6f}")
+            print(f"IMU features mean: {imu.mean().item():.6f}, std: {imu.std().item():.6f}")
+            # Translation stats before denormalization
+            t_norm = batch_gpu['poses'][0, :, :3]
+            print(f"Normalized translation mean: {t_norm.mean().item():.6f}, std: {t_norm.std().item():.6f}")
+            # Denormalize using dataset stats
+            ds = dataloader.dataset
+            mean = ds.trans_mean.to(device)
+            std = ds.trans_std.to(device)
+            t_raw = t_norm * std + mean
+            print(f"Raw translation mean: {t_raw.mean().item():.6f}, std: {t_raw.std().item():.6f}")
+            # Print raw feature windows to inspect scale
+            raw_vf = batch_gpu['visual_features'][0]  # [S, V]
+            raw_imu = batch_gpu['imu_features'][0]    # [S, I]
+            print("Raw visual feature window (shape", raw_vf.shape, "):")
+            print(raw_vf.cpu().numpy())
+            print("Raw IMU feature window (shape", raw_imu.shape, "):")
+            print(raw_imu.cpu().numpy())
+            # Print raw ground-truth translation and quaternion window
+            print("Raw GT translation window (cm) shape:", t_raw.shape)
+            print(t_raw.cpu().numpy())
+            # Quaternion raw GT
+            q_raw = batch_gpu['poses'][0, :, 3:7]
+            print("Raw GT quaternion window shape:", q_raw.shape)
+            print(q_raw.cpu().numpy())
+        
         # Forward pass
         predictions = model(batch_gpu)
+        # Print predictions for first batch
+        if batch_idx == 0:
+            pred_window = predictions['poses'][0].cpu().detach().numpy()  # [seq_len-1, 7]
+            print("Predicted pose window shape:", pred_window.shape)
+            print(pred_window)
         loss_dict = compute_stable_loss(predictions, batch_gpu)
         
         if loss_dict is None:
@@ -266,12 +320,7 @@ def train_epoch(model, dataloader, optimizer, device, epoch, grad_clip=0.5):
         
         # More aggressive gradient clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
-        
-        # Skip update if gradients are too large even after clipping
-        if total_norm > 10.0:
-            print(f"Skipping batch {batch_idx} with large gradients: {total_norm:.2f}")
-            optimizer.zero_grad()
-            continue
+        # Always apply optimizer step after clipping
         
         optimizer.step()
         
@@ -294,16 +343,11 @@ def train_epoch(model, dataloader, optimizer, device, epoch, grad_clip=0.5):
                 pred_poses = predictions['poses'][0, :5].cpu().numpy()
                 gt_poses = batch_gpu['poses'][0, 1:6].cpu().numpy()
                 
-                print(f"\nBatch {batch_idx}:")
-                print(f"  Total loss: {loss.item():.6f}")
-                print(f"  Gradient norm: {total_norm:.4f}")
-                print(f"  NaN count: {nan_count}")
-                print("  Sample predictions (first 5 frames):")
-                for i in range(min(5, pred_poses.shape[0])):
-                    pred_t = pred_poses[i, :3]
-                    gt_t = gt_poses[i, :3]
-                    print(f"    Frame {i}: Pred=[{pred_t[0]:.3f}, {pred_t[1]:.3f}, {pred_t[2]:.3f}] cm, "
-                          f"GT=[{gt_t[0]:.3f}, {gt_t[1]:.3f}, {gt_t[2]:.3f}] cm")
+                print(f"\nBatch {batch_idx} sample poses:")
+                print("  Predicted poses (first 5 timesteps):")
+                print(pred_poses)
+                print("  Ground truth poses (corresponding):")
+                print(gt_poses)
     
     return total_loss / num_batches if num_batches > 0 else float('inf')
 
@@ -327,12 +371,10 @@ def validate(model, dataloader, device):
             predictions = model(batch_gpu)
             loss_dict = compute_stable_loss(predictions, batch_gpu)
             
-            if loss_dict is None:
-                continue
-            
-            # Compute translation error
-            pred_trans = predictions['translation']
-            gt_trans = batch_gpu['poses'][:, 1:pred_trans.shape[1]+1, :3]
+            # Compute translation error and align GT dynamically
+            pred_trans = predictions['translation']  # [B, num_preds, 3]
+            num_preds = pred_trans.shape[1]
+            gt_trans = batch_gpu['poses'][:, :num_preds, :3]  # [B, num_preds, 3]
             trans_error = torch.mean(torch.norm(pred_trans - gt_trans, dim=-1))
             
             # Convert rotation error to degrees

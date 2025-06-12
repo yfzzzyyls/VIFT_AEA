@@ -156,9 +156,16 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
             # Get predictions
             predictions = model(batch_gpu)
             
-            # Get ground truth
-            gt_poses = batch_gpu['poses'][:, 1:, :].cpu().numpy()  # [B, seq_len-1, 7]
-            pred_poses = predictions['poses'].cpu().numpy()
+            # Get predictions and align ground truth to prediction length
+            pred_poses = predictions['poses'].cpu().numpy()  # [B, num_preds, 7]
+            num_preds = pred_poses.shape[1]
+            # Get all ground truths
+            gt_all = batch_gpu['poses'].cpu().numpy()  # [B, seq_len, 7]
+            # If full window with initial frame, skip it; otherwise align from start
+            if gt_all.shape[1] >= num_preds + 1:
+                gt_poses = gt_all[:, 1:num_preds+1, :]
+            else:
+                gt_poses = gt_all[:, :num_preds, :]  # [B, num_preds, 7]
             
             # Process each sequence in batch
             for i in range(pred_poses.shape[0]):

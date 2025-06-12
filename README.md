@@ -37,9 +37,7 @@ python generate_all_pretrained_latents_fixed.py \
 
 ### 3. Training
 
-#### Stable Version (RECOMMENDED - Before Scale Fixes)
-
-This is the stable version that achieved good results (0.843cm translation error) before addressing scale issues:
+#### Stable Version
 
 ```bash
 # Step 1: Generate latent features (if not already done)

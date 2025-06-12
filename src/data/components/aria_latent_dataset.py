@@ -19,6 +19,31 @@ class AriaLatentDataset(Dataset):
             assert (self.root_dir / f"{prefix}_visual.npy").exists(), f"Missing visual file for {prefix}"
             assert (self.root_dir / f"{prefix}_imu.npy").exists(), f"Missing IMU file for {prefix}"
             assert (self.root_dir / f"{prefix}_gt.npy").exists(), f"Missing GT file for {prefix}"
+        
+        # Compute global mean/std for translation
+        # load all ground-truth files correctly as strings
+        all_gt = np.stack([np.load(str(self.root_dir / f"{prefix}_gt.npy")) for prefix in self.file_prefixes])  # [N, seq,7]
+        trans = all_gt[..., :3]
+        self.trans_mean = trans.mean(axis=(0,1))
+        self.trans_std = trans.std(axis=(0,1)) + 1e-8
+        # convert stats to torch tensors for use in __getitem__
+        self.trans_mean = torch.tensor(self.trans_mean, dtype=torch.float32)
+        self.trans_std = torch.tensor(self.trans_std, dtype=torch.float32)
+        
+        # Compute global mean/std for visual and IMU features
+        all_vis = []
+        all_imu = []
+        for prefix in self.file_prefixes:
+            v = np.load(self.root_dir / f"{prefix}_visual.npy")  # [seq_len, 512]
+            i = np.load(self.root_dir / f"{prefix}_imu.npy")     # [seq_len, 256]
+            all_vis.append(v)
+            all_imu.append(i)
+        all_vis = np.concatenate(all_vis, axis=0)  # [N*seq_len, 512]
+        all_imu = np.concatenate(all_imu, axis=0)  # [N*seq_len, 256]
+        self.vis_mean = torch.tensor(all_vis.mean(axis=0), dtype=torch.float32)
+        self.vis_std = torch.tensor(all_vis.std(axis=0) + 1e-8, dtype=torch.float32)
+        self.imu_mean = torch.tensor(all_imu.mean(axis=0), dtype=torch.float32)
+        self.imu_std = torch.tensor(all_imu.std(axis=0) + 1e-8, dtype=torch.float32)
     
     def __len__(self):
         return len(self.file_prefixes)
@@ -32,12 +57,20 @@ class AriaLatentDataset(Dataset):
         imu_features = np.load(self.root_dir / f"{file_prefix}_imu.npy")        # [10, 256]
         relative_poses = np.load(self.root_dir / f"{file_prefix}_gt.npy")       # [10, 7]
         
-        # Convert to tensors
+        # Convert to tensors and apply global normalization
         visual_features = torch.from_numpy(visual_features).float()
+        visual_features = (visual_features - self.vis_mean.to(visual_features.device)) / self.vis_std.to(visual_features.device)
         imu_features = torch.from_numpy(imu_features).float()
+        imu_features = (imu_features - self.imu_mean.to(imu_features.device)) / self.imu_std.to(imu_features.device)
         relative_poses = torch.from_numpy(relative_poses).float()
         
         # NOTE: GT files already contain poses in centimeters, no scaling needed!
+
+        # Normalize translation targets using dataset-wide stats
+        t = relative_poses[:, :3]
+        t = (t - self.trans_mean.to(t.device)) / self.trans_std.to(t.device)
+        q = relative_poses[:, 3:7]
+        relative_poses = torch.cat([t, q], dim=-1)
         
         batch = {
             'visual_features': visual_features,
