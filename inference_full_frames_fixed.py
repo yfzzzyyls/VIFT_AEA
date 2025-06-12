@@ -144,8 +144,8 @@ def integrate_poses(relative_poses):
     return np.array(trajectory)
 
 
-def plot_trajectory_3d(pred_trajectory, gt_trajectory, sequence_name, output_path):
-    """Create 3D trajectory plot"""
+def plot_trajectory_3d(pred_trajectory, gt_trajectory, sequence_name, output_path, time_window=None):
+    """Create 3D trajectory plot with optional time window"""
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
     
@@ -166,7 +166,12 @@ def plot_trajectory_3d(pred_trajectory, gt_trajectory, sequence_name, output_pat
     ax.set_xlabel('X (cm)')
     ax.set_ylabel('Y (cm)')
     ax.set_zlabel('Z (cm)')
-    ax.set_title(f'Sequence {sequence_name} - Full Frame Model (Fixed)\nGT Length: {gt_length:.1f}cm, Pred Length: {pred_length:.1f}cm')
+    
+    if time_window:
+        ax.set_title(f'Sequence {sequence_name} - First {time_window}\nGT Length: {gt_length:.1f}cm, Pred Length: {pred_length:.1f}cm')
+    else:
+        ax.set_title(f'Sequence {sequence_name} - Full Trajectory\nGT Length: {gt_length:.1f}cm, Pred Length: {pred_length:.1f}cm')
+    
     ax.legend()
     
     plt.tight_layout()
@@ -228,8 +233,8 @@ def plot_relative_poses(pred_poses, gt_poses, output_path, title="Relative Pose 
     print(f"Saved relative poses plot to {output_path}")
 
 
-def plot_rotation_3d(pred_rotations, gt_rotations, sequence_name, output_path):
-    """Create 3D rotation trajectory visualization in axis-angle space"""
+def plot_rotation_3d(pred_rotations, gt_rotations, sequence_name, output_path, time_window=None):
+    """Create 3D rotation trajectory visualization in axis-angle space with optional time window"""
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
     
@@ -267,8 +272,14 @@ def plot_rotation_3d(pred_rotations, gt_rotations, sequence_name, output_path):
     ax.set_xlabel('X (rad)')
     ax.set_ylabel('Y (rad)')
     ax.set_zlabel('Z (rad)')
-    ax.set_title(f'Sequence {sequence_name} - Rotation Trajectory\n'
-                 f'Mean Error: {mean_error:.2f}°, Max Error: {max_error:.2f}°')
+    
+    if time_window:
+        ax.set_title(f'Sequence {sequence_name} - Rotation First {time_window}\n'
+                     f'Mean Error: {mean_error:.2f}°, Max Error: {max_error:.2f}°')
+    else:
+        ax.set_title(f'Sequence {sequence_name} - Full Rotation Trajectory\n'
+                     f'Mean Error: {mean_error:.2f}°, Max Error: {max_error:.2f}°')
+    
     ax.legend()
     
     # Set equal aspect ratio for better visualization
@@ -376,7 +387,7 @@ def main():
                 pred_trajectory=pred_trajectory,
                 gt_trajectory=gt_trajectory)
         
-        # Plot trajectory
+        # Plot full trajectory
         plot_trajectory_3d(
             pred_trajectory, 
             gt_trajectory,
@@ -384,24 +395,73 @@ def main():
             output_dir / f'trajectory_3d_{seq_name}.png'
         )
         
+        # Extract rotations (quaternions) from the full poses
+        pred_rotations = all_pred[:, 3:7]  # Quaternions are in columns 3-6
+        gt_rotations = all_gt[:, 3:7]
+        
+        # Plot full rotation trajectory
+        plot_rotation_3d(
+            pred_rotations,
+            gt_rotations,
+            seq_name,
+            output_dir / f'rotation_3d_{seq_name}.png'
+        )
+        
+        # Aria Everyday dataset is 20 FPS
+        fps = 20
+        
+        # Generate 1-second plots (first 20 frames)
+        frames_1s = min(fps, len(all_pred))
+        if frames_1s > 0:
+            # 1s trajectory
+            pred_traj_1s = integrate_poses(all_pred[:frames_1s])
+            gt_traj_1s = integrate_poses(all_gt[:frames_1s])
+            plot_trajectory_3d(
+                pred_traj_1s,
+                gt_traj_1s,
+                seq_name,
+                output_dir / f'trajectory_3d_{seq_name}_1s.png',
+                time_window='1s'
+            )
+            
+            # 1s rotation
+            plot_rotation_3d(
+                pred_rotations[:frames_1s],
+                gt_rotations[:frames_1s],
+                seq_name,
+                output_dir / f'rotation_3d_{seq_name}_1s.png',
+                time_window='1s'
+            )
+        
+        # Generate 5-second plots (first 100 frames)
+        frames_5s = min(5 * fps, len(all_pred))
+        if frames_5s > 0:
+            # 5s trajectory
+            pred_traj_5s = integrate_poses(all_pred[:frames_5s])
+            gt_traj_5s = integrate_poses(all_gt[:frames_5s])
+            plot_trajectory_3d(
+                pred_traj_5s,
+                gt_traj_5s,
+                seq_name,
+                output_dir / f'trajectory_3d_{seq_name}_5s.png',
+                time_window='5s'
+            )
+            
+            # 5s rotation
+            plot_rotation_3d(
+                pred_rotations[:frames_5s],
+                gt_rotations[:frames_5s],
+                seq_name,
+                output_dir / f'rotation_3d_{seq_name}_5s.png',
+                time_window='5s'
+            )
+        
         # Plot relative poses
         plot_relative_poses(
             all_pred,
             all_gt,
             output_dir / f'relative_poses_{seq_name}.png',
             title=f'Sequence {seq_name} - Relative Poses'
-        )
-        
-        # Plot rotation analysis
-        # Extract rotations (quaternions) from the full poses
-        pred_rotations = all_pred[:, 3:7]  # Quaternions are in columns 3-6
-        gt_rotations = all_gt[:, 3:7]
-        
-        plot_rotation_3d(
-            pred_rotations,
-            gt_rotations,
-            seq_name,
-            output_dir / f'rotation_3d_{seq_name}.png'
         )
         
         print(f"Results saved for {seq_name}")
