@@ -94,15 +94,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if ckpt_path == "":
             log.warning("Best ckpt not found! Using current weights for testing...")
             ckpt_path = None
-        
-        # Skip automatic testing due to tester signature mismatch
-        # Use standalone_evaluation.py for robust evaluation instead
-        log.info("⚠️  Skipping automatic testing due to tester signature issues")
-        log.info("✅ Training completed successfully!")
-        log.info(f"📁 Best checkpoint saved at: {ckpt_path}")
-        log.info("🔍 For evaluation, use: python standalone_evaluation.py --checkpoint {ckpt_path} --test_data aria_latent_data/test")
-        
-        # trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
+        trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
         log.info(f"Best ckpt path: {ckpt_path}")
 
     test_metrics = trainer.callback_metrics

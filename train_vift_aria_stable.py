@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Unified VIFT training with direct prediction and geodesic loss.
-Combines improvements from train_vift_direct.py with geodesic rotation loss.
+Stable VIFT training with input normalization and gradient monitoring.
 """
 
 import os
@@ -22,20 +21,41 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from src.data.components.aria_latent_dataset import AriaLatentDataset
-from src.models.components.pose_transformer import PoseTransformer
 
 
-class VIFTDirect(nn.Module):
-    """Direct VIFT model with geodesic loss support"""
+class InputNormalization(nn.Module):
+    """Normalize inputs to prevent gradient explosion"""
+    def __init__(self, visual_dim=512, imu_dim=256):
+        super().__init__()
+        # Learnable normalization parameters
+        self.visual_scale = nn.Parameter(torch.ones(visual_dim) * 0.1)
+        self.visual_bias = nn.Parameter(torch.zeros(visual_dim))
+        self.imu_scale = nn.Parameter(torch.ones(imu_dim) * 0.01)  # IMU has larger values
+        self.imu_bias = nn.Parameter(torch.zeros(imu_dim))
+    
+    def forward(self, visual_features, imu_features):
+        # Normalize features
+        visual_norm = visual_features * self.visual_scale + self.visual_bias
+        imu_norm = imu_features * self.imu_scale + self.imu_bias
+        return visual_norm, imu_norm
+
+
+class VIFTStable(nn.Module):
+    """Stable VIFT model with normalization and careful initialization"""
     
     def __init__(self, input_dim=768, embedding_dim=128, num_layers=2, 
                  nhead=8, dim_feedforward=512, dropout=0.1):
         super().__init__()
         
-        # Create a modified pose transformer that doesn't require the tuple input
+        # Input normalization
+        self.input_norm = InputNormalization()
+        
+        # Create transformer components
         self.embedding_dim = embedding_dim
         self.fc1 = nn.Sequential(
             nn.Linear(input_dim, embedding_dim),
+            nn.LayerNorm(embedding_dim),  # Add layer norm for stability
+            nn.GELU()
         )
         
         self.transformer_encoder = nn.TransformerEncoder(
@@ -44,25 +64,31 @@ class VIFTDirect(nn.Module):
                 nhead=nhead, 
                 dim_feedforward=dim_feedforward,
                 dropout=dropout,
-                batch_first=True
+                batch_first=True,
+                norm_first=True  # Pre-norm for stability
             ), 
             num_layers=num_layers
         )
         
-        # Direct 7DoF output
+        # Direct 7DoF output with careful initialization
         self.fc2 = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
-            nn.LeakyReLU(0.1),
-            nn.Linear(embedding_dim, 7)  # Direct 7DoF output
+            nn.LayerNorm(embedding_dim),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(embedding_dim, 7)
         )
         
-        # Initialize output layer with reasonable scale for cm-scale motion
+        # Very careful initialization
         with torch.no_grad():
-            # Moderate initialization to prevent explosion
-            nn.init.normal_(self.fc2[-1].weight, mean=0.0, std=0.1)
-            # Initialize bias: small translations, identity quaternion
-            self.fc2[-1].bias.data[:3] = 0.0  # Zero translation bias
+            # Small weights for final layer
+            nn.init.xavier_uniform_(self.fc2[-1].weight, gain=0.01)
+            # Initialize bias: zero translations, identity quaternion
+            self.fc2[-1].bias.data[:3] = 0.0
             self.fc2[-1].bias.data[3:] = torch.tensor([0.0, 0.0, 0.0, 1.0])
+            
+            # Small initialization for first layer too
+            nn.init.xavier_uniform_(self.fc1[0].weight, gain=0.1)
     
     def positional_embedding(self, seq_length, device):
         import math
@@ -72,8 +98,7 @@ class VIFTDirect(nn.Module):
         pos_embedding = torch.zeros(seq_length, self.embedding_dim, device=device)
         pos_embedding[:, 0::2] = torch.sin(pos * div_term)
         pos_embedding[:, 1::2] = torch.cos(pos * div_term)
-        pos_embedding = pos_embedding.unsqueeze(0)
-        return pos_embedding
+        return pos_embedding.unsqueeze(0)
     
     def generate_square_subsequent_mask(self, sz, device):
         """Generate a square causal mask for sequence."""
@@ -83,17 +108,22 @@ class VIFTDirect(nn.Module):
         )
     
     def forward(self, batch):
-        # Prepare input
+        # Extract and normalize inputs
         visual_features = batch['visual_features']
         imu_features = batch['imu_features']
-        combined = torch.cat([visual_features, imu_features], dim=-1)
+        
+        # Apply input normalization
+        visual_norm, imu_norm = self.input_norm(visual_features, imu_features)
+        
+        # Combine normalized features
+        combined = torch.cat([visual_norm, imu_norm], dim=-1)
         
         batch_size, seq_length, _ = combined.shape
         
         # Apply input projection and positional encoding
-        pos_embedding = self.positional_embedding(seq_length, combined.device)
         features = self.fc1(combined)
-        features = features + pos_embedding
+        pos_embedding = self.positional_embedding(seq_length, combined.device)
+        features = features + pos_embedding * 0.1  # Scale down positional encoding
         
         # Generate causal mask
         mask = self.generate_square_subsequent_mask(seq_length, combined.device)
@@ -104,14 +134,16 @@ class VIFTDirect(nn.Module):
         # Project to 7DoF
         output = self.fc2(output)
         
-        # For VIFT, we predict relative poses between consecutive frames
-        # So we need seq_len-1 predictions
+        # For relative poses between consecutive frames
         predictions = output[:, :-1, :]  # [B, seq_len-1, 7]
         
         # Split and normalize quaternions
         translation = predictions[:, :, :3]
         quaternion = predictions[:, :, 3:]
-        quaternion = F.normalize(quaternion, p=2, dim=-1)
+        
+        # Ensure quaternion normalization doesn't produce NaN
+        quat_norm = torch.norm(quaternion, p=2, dim=-1, keepdim=True)
+        quaternion = quaternion / (quat_norm + 1e-8)
         
         return {
             'poses': torch.cat([translation, quaternion], dim=-1),
@@ -120,55 +152,39 @@ class VIFTDirect(nn.Module):
         }
 
 
-def geodesic_rotation_loss(pred_quat, gt_quat):
-    """
-    Compute geodesic distance between predicted and ground truth quaternions.
-    This properly measures rotation error on the SO(3) manifold.
-    
-    Args:
-        pred_quat: Predicted quaternions [B, N, 4]
-        gt_quat: Ground truth quaternions [B, N, 4]
-    
-    Returns:
-        Mean geodesic distance in radians
-    """
+def robust_geodesic_loss(pred_quat, gt_quat):
+    """More robust geodesic rotation loss"""
     # Reshape to [B*N, 4]
-    batch_size = pred_quat.shape[0]
-    seq_len = pred_quat.shape[1]
-    
     pred_quat = pred_quat.reshape(-1, 4)
     gt_quat = gt_quat.reshape(-1, 4)
     
-    # Ensure quaternions are normalized
-    pred_quat = F.normalize(pred_quat, p=2, dim=-1)
-    gt_quat = F.normalize(gt_quat, p=2, dim=-1)
+    # Normalize with epsilon for stability
+    pred_quat = F.normalize(pred_quat, p=2, dim=-1, eps=1e-8)
+    gt_quat = F.normalize(gt_quat, p=2, dim=-1, eps=1e-8)
     
-    # Compute dot product between quaternions
-    # Handle double cover: q and -q represent the same rotation
-    dot = torch.abs((pred_quat * gt_quat).sum(dim=-1))
+    # Compute dot product
+    dot = (pred_quat * gt_quat).sum(dim=-1)
     
-    # Clamp to avoid numerical issues with acos
-    dot = torch.clamp(dot, min=0.0, max=1.0)
+    # Handle double cover with absolute value
+    dot = torch.abs(dot)
     
-    # Compute angle in radians
-    angle_error = 2 * torch.acos(dot)
+    # Clamp more conservatively
+    dot = torch.clamp(dot, min=-0.9999, max=0.9999)
+    
+    # Use smooth approximation for small angles
+    # For small angles, acos can be approximated as: acos(x) ≈ π/2 - x
+    angle_error = torch.where(
+        dot > 0.95,
+        2.0 * (1.0 - dot),  # Small angle approximation: 2*acos(x) ≈ 2*(1-x) for x close to 1
+        2.0 * torch.acos(dot)
+    )
     
     return angle_error.mean()
 
 
-def compute_vift_loss(predictions, batch, trans_weight=1.0, rot_weight=1.0):
-    """
-    Unified loss computation with geodesic rotation loss.
-    
-    Args:
-        predictions: Model predictions dict
-        batch: Batch data dict
-        trans_weight: Weight for translation loss
-        rot_weight: Weight for rotation loss (reduced from 10.0 to 1.0 for stability)
-    """
+def compute_stable_loss(predictions, batch, trans_weight=1.0, rot_weight=0.1):
+    """Stable loss computation with gradient-friendly formulation"""
     pred_poses = predictions['poses']
-    
-    # Ground truth is relative poses between consecutive frames
     gt_poses = batch['poses'][:, 1:, :]  # [B, seq_len-1, 7]
     
     # Ensure shapes match
@@ -183,24 +199,19 @@ def compute_vift_loss(predictions, batch, trans_weight=1.0, rot_weight=1.0):
     gt_trans = gt_poses[:, :, :3]
     gt_rot = gt_poses[:, :, 3:]
     
-    # Translation loss (L1 in cm)
-    trans_loss = F.l1_loss(pred_trans, gt_trans)
+    # Use Huber loss for translation (more robust to outliers)
+    trans_loss = F.smooth_l1_loss(pred_trans, gt_trans)
     
-    # Rotation loss (geodesic distance)
-    rot_loss = geodesic_rotation_loss(pred_rot, gt_rot)
+    # Rotation loss
+    rot_loss = robust_geodesic_loss(pred_rot, gt_rot)
     
-    # Check for NaN in individual losses
-    if torch.isnan(trans_loss) or torch.isnan(rot_loss):
-        print(f"Warning: NaN detected - trans_loss: {trans_loss.item() if not torch.isnan(trans_loss) else 'nan'}, "
-              f"rot_loss: {rot_loss.item() if not torch.isnan(rot_loss) else 'nan'}")
-        # Return a default loss to skip this batch
-        return {
-            'total_loss': torch.tensor(float('nan')),
-            'trans_loss': trans_loss,
-            'rot_loss': rot_loss
-        }
+    # Check for NaN
+    if torch.isnan(trans_loss) or torch.isnan(rot_loss) or torch.isinf(trans_loss) or torch.isinf(rot_loss):
+        print(f"Warning: Invalid loss - trans: {trans_loss.item() if not torch.isnan(trans_loss) else 'nan'}, "
+              f"rot: {rot_loss.item() if not torch.isnan(rot_loss) else 'nan'}")
+        return None
     
-    # Combined loss
+    # Combined loss with small rotation weight
     total_loss = trans_weight * trans_loss + rot_weight * rot_loss
     
     return {
@@ -210,11 +221,12 @@ def compute_vift_loss(predictions, batch, trans_weight=1.0, rot_weight=1.0):
     }
 
 
-def train_epoch(model, dataloader, optimizer, device, epoch):
-    """Train for one epoch"""
+def train_epoch(model, dataloader, optimizer, device, epoch, grad_clip=0.5):
+    """Train with gradient monitoring"""
     model.train()
     total_loss = 0
     num_batches = 0
+    nan_count = 0
     
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}")
     for batch_idx, batch in enumerate(progress_bar):
@@ -227,20 +239,39 @@ def train_epoch(model, dataloader, optimizer, device, epoch):
         
         # Forward pass
         predictions = model(batch_gpu)
-        loss_dict = compute_vift_loss(predictions, batch_gpu)
+        loss_dict = compute_stable_loss(predictions, batch_gpu)
+        
+        if loss_dict is None:
+            nan_count += 1
+            continue
+        
         loss = loss_dict['total_loss']
         
-        # Skip if NaN
-        if torch.isnan(loss):
-            print(f"NaN loss at batch {batch_idx}, skipping...")
+        # Skip if loss is too large (likely to cause instability)
+        if loss.item() > 100.0:
+            print(f"Skipping batch {batch_idx} with large loss: {loss.item():.2f}")
             continue
         
         # Backward pass
         optimizer.zero_grad()
         loss.backward()
         
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        # Check gradient norms before clipping
+        total_norm = 0
+        for p in model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** 0.5
+        
+        # More aggressive gradient clipping
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
+        
+        # Skip update if gradients are too large even after clipping
+        if total_norm > 10.0:
+            print(f"Skipping batch {batch_idx} with large gradients: {total_norm:.2f}")
+            optimizer.zero_grad()
+            continue
         
         optimizer.step()
         
@@ -252,10 +283,12 @@ def train_epoch(model, dataloader, optimizer, device, epoch):
         progress_bar.set_postfix({
             'loss': f"{loss.item():.4f}",
             'trans': f"{loss_dict['trans_loss'].item():.4f}",
-            'rot': f"{loss_dict['rot_loss'].item():.4f}"
+            'rot': f"{loss_dict['rot_loss'].item():.4f}",
+            'grad': f"{total_norm:.2f}",
+            'nan': nan_count
         })
         
-        # Detailed logging every 50 batches
+        # Detailed logging
         if batch_idx % 50 == 0 and batch_idx > 0:
             with torch.no_grad():
                 pred_poses = predictions['poses'][0, :5].cpu().numpy()
@@ -263,8 +296,8 @@ def train_epoch(model, dataloader, optimizer, device, epoch):
                 
                 print(f"\nBatch {batch_idx}:")
                 print(f"  Total loss: {loss.item():.6f}")
-                print(f"  Trans loss: {loss_dict['trans_loss'].item():.6f}")
-                print(f"  Rot loss (geodesic): {loss_dict['rot_loss'].item():.6f}")
+                print(f"  Gradient norm: {total_norm:.4f}")
+                print(f"  NaN count: {nan_count}")
                 print("  Sample predictions (first 5 frames):")
                 for i in range(min(5, pred_poses.shape[0])):
                     pred_t = pred_poses[i, :3]
@@ -292,9 +325,9 @@ def validate(model, dataloader, device):
             }
             
             predictions = model(batch_gpu)
-            loss_dict = compute_vift_loss(predictions, batch_gpu)
+            loss_dict = compute_stable_loss(predictions, batch_gpu)
             
-            if torch.isnan(loss_dict['total_loss']):
+            if loss_dict is None:
                 continue
             
             # Compute translation error
@@ -318,12 +351,12 @@ def validate(model, dataloader, device):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Train VIFT with Direct Prediction and Geodesic Loss')
+    parser = argparse.ArgumentParser(description='Train VIFT with Stable Training')
     parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--batch-size', type=int, default=16)
-    parser.add_argument('--lr', type=float, default=1e-4)  # Reduced learning rate
+    parser.add_argument('--batch-size', type=int, default=8)  # Smaller batch size
+    parser.add_argument('--lr', type=float, default=5e-5)  # Very small learning rate
     parser.add_argument('--data-dir', type=str, default='/home/external/VIFT_AEA/aria_latent_full_frames')
-    parser.add_argument('--checkpoint-dir', type=str, default='checkpoints_vift_aria')
+    parser.add_argument('--checkpoint-dir', type=str, default='checkpoints_vift_stable')
     parser.add_argument('--device', type=str, default='cuda')
     args = parser.parse_args()
     
@@ -337,14 +370,15 @@ def main():
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"\n{'='*60}")
-    print("VIFT Training - Unified Implementation")
+    print("VIFT Training - Stable Version")
     print(f"{'='*60}")
     print("Key features:")
-    print("- Direct pose prediction (no transitions)")
-    print("- Geodesic rotation loss for proper SO(3) distance")
-    print("- 7DoF output (quaternion + translation)")
-    print("- Moderate weight initialization (std=0.1)")
-    print("- Rotation loss weight: 1.0 (reduced for stability)")
+    print("- Input normalization for visual and IMU features")
+    print("- Robust loss functions (Huber + smooth geodesic)")
+    print("- Aggressive gradient clipping (0.5)")
+    print("- Pre-norm transformer for stability")
+    print("- Very small learning rate (5e-5)")
+    print("- Small batch size (8)")
     print(f"{'='*60}\n")
     
     # Load datasets
@@ -354,14 +388,14 @@ def main():
     print(f"Train samples: {len(train_dataset)}")
     print(f"Val samples: {len(val_dataset)}")
     
-    # Create dataloaders
+    # Create dataloaders with fewer workers to reduce memory pressure
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, 
-                            shuffle=True, num_workers=4, pin_memory=True)
+                            shuffle=True, num_workers=2, pin_memory=False)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
-                          shuffle=False, num_workers=4, pin_memory=True)
+                          shuffle=False, num_workers=2, pin_memory=False)
     
     # Initialize model
-    model = VIFTDirect().to(device)
+    model = VIFTStable().to(device)
     
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -370,9 +404,16 @@ def main():
     print(f"  Total: {total_params:,}")
     print(f"  Trainable: {trainable_params:,}")
     
-    # Optimizer - Simple Adam with cosine annealing
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    # Optimizer with small learning rate and weight decay
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    
+    # Warmup scheduler
+    warmup_steps = len(train_loader) * 2  # 2 epochs of warmup
+    scheduler = torch.optim.lr_scheduler.LinearLR(
+        optimizer, 
+        start_factor=0.1, 
+        total_iters=warmup_steps
+    )
     
     # Training loop
     best_val_loss = float('inf')
@@ -380,7 +421,7 @@ def main():
     for epoch in range(args.epochs):
         print(f"\n{'='*60}")
         print(f"Epoch {epoch + 1}/{args.epochs}")
-        print(f"Learning rate: {scheduler.get_last_lr()[0]:.6f}")
+        print(f"Learning rate: {optimizer.param_groups[0]['lr']:.8f}")
         print(f"{'='*60}")
         
         # Train
@@ -389,8 +430,9 @@ def main():
         # Validate
         val_metrics = validate(model, val_loader, device)
         
-        # Step scheduler
-        scheduler.step()
+        # Step scheduler during warmup
+        if epoch < 2:
+            scheduler.step()
         
         print(f"\nEpoch {epoch + 1} Summary:")
         print(f"  Train Loss: {train_loss:.6f}")
@@ -413,8 +455,8 @@ def main():
                     'num_layers': 2,
                     'nhead': 8,
                     'dim_feedforward': 512,
-                    'architecture': 'direct',
-                    'rotation_loss': 'geodesic'
+                    'architecture': 'stable',
+                    'features': 'input_norm,pre_norm,huber_loss,smooth_geodesic'
                 }
             }
             torch.save(checkpoint, checkpoint_dir / 'best_model.pt')

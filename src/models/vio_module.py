@@ -28,10 +28,6 @@ class VIOLitModule(LightningModule):
         self.criterion = criterion
         self.tester = tester
         self.metrics_calculator = metrics_calculator
-        
-        # Initialize metrics
-        self.train_loss = MeanMetric()
-        self.val_loss = MeanMetric()
 
 
     def forward(self, x, target):
@@ -66,17 +62,14 @@ class VIOLitModule(LightningModule):
         pass
 
     def on_test_epoch_end(self):
-        # Only run custom testing if tester is available
-        if self.tester is not None:
-            results = self.tester.test(self.net)
-            
-            if self.metrics_calculator is not None:
-                metrics = self.metrics_calculator.calculate_metrics(results)
-                for name, value in metrics.items():
-                    self.log(f"test/{name}", value)
-            
-            save_dir = self.trainer.logger.log_dir
-            self.tester.save_results(results, save_dir)
+        results = self.tester.test(self.net)
+        metrics = self.metrics_calculator.calculate_metrics(results)
+        
+        for name, value in metrics.items():
+            self.log(f"test/{name}", value)
+        
+        save_dir = self.trainer.logger.log_dir
+        self.tester.save_results(results, save_dir)
 
     def setup(self, stage):
         """Lightning hook that is called at the beginning of fit (train + validate), validate,

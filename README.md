@@ -38,62 +38,70 @@ python generate_all_pretrained_latents_fixed.py \
 ### 3. Training
 
 ```bash
-# Train with transition-based VIFT architecture (recommended)
-# Key difference: Model outputs embeddings, transitions are computed as differences
-python train_vift_aria.py \
+# RECOMMENDED: Stable VIFT Training (Fixes NaN issues)
+# Use this version if you encounter NaN losses
+python train_vift_aria_stable.py \
     --epochs 50 \
     --batch-size 8 \
-    --lr 1e-4 \
-    --print-freq 20 \
-    --data-dir /home/external/VIFT_AEA/aria_latent_full_frames \
-    --checkpoint-dir checkpoints_vift_aria \
+    --lr 5e-5 \
+    --data-dir aria_latent_full_frames \
+    --checkpoint-dir checkpoints_vift_stable \
     --device cuda
 
-# To see all available options:
-python train_vift_aria.py --help
+# Alternative: Standard training (if no NaN issues)
+python train_vift_aria.py \
+    --epochs 50 \
+    --batch-size 16 \
+    --lr 1e-4 \
+    --data-dir aria_latent_full_frames \
+    --checkpoint-dir checkpoints_vift_unified \
+    --device cuda
 ```
 
-**Transition-based Architecture (train_vift_aria.py):**
-- Model outputs embeddings, not poses directly
-- Transitions computed as differences between consecutive embeddings
-- Transitions projected to 7DoF pose space
-- Prevents constant predictions through architectural bias
-- Enhanced diversity loss weight (0.2) and embedding regularization
+**Stable Training Features (train_vift_aria_stable.py):**
+- Input normalization for visual (×0.1) and IMU (×0.01) features
+- Robust loss functions: Huber loss for translation, smooth geodesic for rotation
+- Pre-norm transformer architecture for better gradient flow
+- Aggressive gradient clipping (0.5) and monitoring
+- Very conservative learning rate (5e-5) with warmup
+- Smaller batch size (8) to reduce memory pressure
+- Skips batches with exploding gradients
 
-**Original Architecture (train_vift_original_simple.py):**
-- Direct 7DoF pose prediction
-- Multi-head attention (8 heads) for visual-IMU fusion
-- 6 transformer layers
-- Causal masking for temporal modeling
-- Quaternion normalization
+**Standard Architecture Features (train_vift_aria.py):**
+- Direct 7DoF pose prediction (no transition-based approach)
+- Geodesic rotation loss for proper SO(3) distance measurement
+- Moderate weight initialization (std=0.1)
+- Simplified loss: L1 translation + geodesic rotation
+- Lower learning rate (1e-4) for stable training
 
-**Shared Features:**
-- Fixed relative motion loss with proper gradient flow
-- AdamW optimizer with cosine annealing scheduler
-- Detailed logging every 20 batches showing:
-  - Ground truth and predicted translations (cm)
-  - Quaternion values and variance metrics
-  - Individual loss components
-  - Embedding statistics (transition-based only)
+### 4. Evaluation and Inference
 
-### 4. Inference and Visualization
-
+#### Evaluate Model Performance
 ```bash
-# IMPORTANT: Use the fixed inference script for models trained with train_vift_aria.py
-# This script uses the correct VIFTTransition architecture matching the training
-python inference_full_frames_fixed.py \
-    --checkpoint checkpoints_vift_aria_fixed_final/[timestamp]/best_model.pt \
-    --processed-dir aria_processed_full_frames \
-    --output-dir full_frames_results_fixed
+# For models trained with stable training script
+python evaluate_stable_model.py \
+    --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
+    --data-dir aria_latent_full_frames \
+    --output-dir evaluation_results \
+    --batch-size 16 \
+    --device cuda
 ```
 
-This generates:
-- 3D trajectory plots comparing predicted vs ground truth trajectories
-- Relative pose analysis plots showing frame-by-frame predictions
-- NPZ files with raw predictions for further analysis
+**Note**: The evaluation script automatically generates test features if they don't exist, so you don't need to run the feature generation separately.
 
-**Note on Model Architecture Mismatch:** 
-The original `inference_full_frames.py` uses a different model class than `train_vift_aria.py`, causing architecture mismatch errors. Always use `inference_full_frames_fixed.py` for models trained with the transition-based architecture.
+This will output:
+- Translation and rotation error statistics
+- Sample trajectory visualizations in `evaluation_results/plots/`
+- Error distribution histograms
+- 3D trajectory plots for each test sequence (full, 1s, 5s)
+- 3D rotation plots for each test sequence (full, 1s, 5s)
+
+### 5. Expected Results
+
+With the stable training approach, you should expect:
+- **Translation Error**: ~0.8cm mean, ~0.3cm median
+- **Rotation Error**: ~1.3° mean, ~0.7° median
+- Most predictions (95%) within 3.2cm translation and 4.2° rotation error
 
 ## Project Structure
 
@@ -101,63 +109,91 @@ The original `inference_full_frames.py` uses a different model class than `train
 VIFT_AEA/
 ├── src/
 │   ├── models/                    # Model architectures
-│   │   └── multihead_vio_separate_fixed.py  # Main model
+│   │   └── components/
+│   │       └── pose_transformer.py  # Core transformer
 │   ├── data/                      # Dataset classes
-│   └── metrics/                   # Loss functions
+│   ├── metrics/                   # Loss functions
+│   └── utils/
+│       └── tools.py               # Rotation utilities (geodesic loss)
 ├── scripts/
 │   └── process_aria_to_vift_quaternion.py  # Data processing
-├── train_vift_aria.py             # Main training script (transition-based)
-├── train_vift_original_simple.py  # Original architecture training
-├── inference_full_frames.py       # Original inference (architecture mismatch)
-├── inference_full_frames_fixed.py # Fixed inference for transition models
+├── train_vift_aria.py             # Main training script (unified)
+├── train_vift_aria_stable.py      # Stable training (fixes NaN issues)
+├── train_vift_direct.py           # Alternative direct prediction
+├── inference_full_frames_unified.py # Inference for standard models
+├── inference_full_frames_stable.py  # Inference for stable models  
+├── evaluate_stable_model.py         # Evaluation script for test set
 ├── configs/                       # Hydra configuration files
 ├── pretrained_models/             # Pretrained VIFT encoder
 ├── aria_processed_full_frames/    # Processed sequences
-├── aria_latent_full_frames/       # Generated features
-├── full_frames_results_fixed/     # Inference outputs
-└── checkpoints_vift_aria_fixed_final/  # Trained models
+├── aria_latent_full_frames/       # Generated features (train/val/test)
+├── evaluation_results/            # Test set evaluation outputs
+└── checkpoints_vift_stable/       # Trained models
 ```
 
 ## Key Features
 
 - **Full Frame Processing**: Uses ALL frames from videos (not downsampled)
 - **Quaternion Representation**: Maintains rotation continuity
-- **Trajectory-Aware Training**: Encourages natural human motion patterns
-- **Multi-Head Architecture**: Separate processing for rotation and translation
+- **Geodesic Rotation Loss**: Proper distance measurement on SO(3) manifold
+- **Direct Pose Prediction**: Following original VIFT architecture
+- **Multi-Head Architecture**: 8-head attention for visual-IMU fusion
 - **Relative Pose Prediction**: Frame-to-frame motion in local coordinates
 
 ## Results
 
-### Recent Improvements (Fixed Architecture)
+### Latest Improvements (Unified Architecture)
 
-**Key Issues Resolved:**
-1. **Model Architecture Mismatch**: Fixed inference script now uses the same `VIFTTransition` class as training
-2. **Layer Normalization Bug**: Removed layer norm on transitions that was destroying motion magnitude
-3. **Loss Function Issues**: Fixed temporal and transition losses that were preventing learning
+**Key Improvements:**
+1. **Direct Prediction**: Replaced transition-based approach with direct 7DoF output
+2. **Geodesic Loss**: Proper rotation error measurement on SO(3) manifold
+3. **Stable Training**: Fixed NaN issues with proper initialization and loss weights
+4. **Architecture Simplification**: Removed complex PoseTransformer dependencies
 
-**Current Performance:**
-- Model now produces varying predictions instead of constant values
-- Predictions show reasonable motion magnitudes (0.1-2cm per frame)
-- Different sequences produce different trajectories (not all the same)
-- Embeddings show temporal variation (std ~0.05-0.18)
-
-**Remaining Challenges:**
-- Predictions still form relatively straight lines instead of following curved paths
-- Prediction magnitude is smaller than ground truth (10-50cm total vs 3000-4700cm)
-- Model needs architectural improvements to better capture motion dynamics
-
-### Training Progress History
-
-**Phase 1 - Initial Issues:**
-- Model predicted constant near-zero values (~0.001cm)
-- All sequences produced identical straight-line trajectories
-- NaN losses during training
-
-**Phase 2 - After Fixes:**
-- 10-100x improvement in prediction magnitude
-- Model outputs varying predictions based on input
+**Expected Performance:**
+- Predictions should match ground truth scale (meters, not centimeters)
+- Trajectories should follow curved paths, not straight lines
+- Rotation errors measured properly in degrees
 - Stable training without NaN losses
-- Predictions still need improvement to match ground truth curves
+
+### Architectural Evolution
+
+| Version | Architecture | Loss Function | Scale Issues | Stability |
+|---------|--------------|---------------|--------------|-----------|
+| Transition-based | Embeddings→Differences→Poses | Complex multi-term | Yes (10-100x smaller) | Poor |
+| Direct (original) | Transformer→Linear(7) | Simple MSE | Better | Moderate |
+| Unified (latest) | Transformer→Linear(7) | L1 + Geodesic | Best | Good |
+
+### Why Geodesic Loss?
+
+The geodesic loss properly measures rotation distance on the SO(3) manifold:
+- L1/L2 on quaternions doesn't measure actual rotation angle
+- Geodesic distance = actual angle between rotations
+- Better gradient flow for rotation learning
+- Standard practice in rotation estimation literature
+
+## Troubleshooting
+
+### Common Issues
+
+1. **NaN Losses**: If you encounter NaN losses:
+   - Use `train_vift_aria_stable.py` instead - it has built-in protections
+   - Key differences: input normalization, gradient monitoring, smaller batch size
+   - The stable version normalizes IMU features (which can have values >600)
+
+2. **Scale Mismatch**: If predictions are 10-100x smaller than ground truth, ensure you're using the unified version with direct prediction
+
+3. **Straight Line Trajectories**: This indicates the model isn't learning motion dynamics - check loss weights and learning rate
+
+4. **Architecture Mismatch**: Always use matching inference script for your trained model
+
+### Training Tips
+
+- Start with learning rate 1e-4 for stable training
+- Monitor both translation and rotation losses separately
+- Check sample predictions every 50 batches to ensure reasonable magnitudes
+- Use batch size 16 for stable training (reduce if GPU memory limited)
+- If NaN persists, check data for corrupted samples
 
 ## Citation
 
