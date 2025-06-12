@@ -38,45 +38,50 @@ python generate_all_pretrained_latents_fixed.py \
 ### 3. Training
 
 ```bash
-# Train with original VIFT architecture (simple and stable)
-# Uses the existing correct implementation, just changes output to 7DoF quaternions
-python train_vift_original_simple.py \
+# Train with transition-based VIFT architecture (recommended)
+# Key difference: Model outputs embeddings, transitions are computed as differences
+python train_vift_aria.py \
     --epochs 50 \
     --batch-size 8 \
     --lr 1e-4 \
     --print-freq 20 \
     --data-dir /home/external/VIFT_AEA/aria_latent_full_frames \
-    --checkpoint-dir checkpoints_vift_simple \
+    --checkpoint-dir checkpoints_vift_aria \
     --device cuda
 
 # To see all available options:
-python train_vift_original_simple.py --help
+python train_vift_aria.py --help
 ```
 
-The model uses:
-- Original VIFT unified transformer architecture with 7DoF output
+**Transition-based Architecture (train_vift_aria.py):**
+- Model outputs embeddings, not poses directly
+- Transitions computed as differences between consecutive embeddings
+- Transitions projected to 7DoF pose space
+- Prevents constant predictions through architectural bias
+- Enhanced diversity loss weight (0.2) and embedding regularization
+
+**Original Architecture (train_vift_original_simple.py):**
+- Direct 7DoF pose prediction
 - Multi-head attention (8 heads) for visual-IMU fusion
 - 6 transformer layers
-- Fixed relative motion loss with proper gradient flow
-- Quaternion representation for rotations (x, y, z, w)
-- AdamW optimizer with OneCycleLR scheduler
-- Detailed 7-DoF logging every 20 batches showing:
-  - Ground truth translation (cm) and quaternion values
-  - Predicted translation (cm) and quaternion values
-  - Loss values and rotation variance metrics
+- Causal masking for temporal modeling
+- Quaternion normalization
 
-**Key Training Improvements:**
-- Loss function encourages minimum motion (5cm) to prevent zero predictions
-- Soft target for typical human motion (~50cm per frame)
-- No conversion to meters in loss computation (maintains gradient scale)
-- Diagnostic printing every 20 batches to monitor convergence
+**Shared Features:**
+- Fixed relative motion loss with proper gradient flow
+- AdamW optimizer with cosine annealing scheduler
+- Detailed logging every 20 batches showing:
+  - Ground truth and predicted translations (cm)
+  - Quaternion values and variance metrics
+  - Individual loss components
+  - Embedding statistics (transition-based only)
 
 ### 4. Inference and Visualization
 
 ```bash
 # Run inference on test sequences and generate 3D plots
 python inference_full_frames.py \
-    --checkpoint full_frames_checkpoints/[timestamp]/best_model_epoch_X.pt \
+    --checkpoint checkpoints_vift_aria/[timestamp]/best_model.pt \
     --processed-dir aria_processed_full_frames \
     --output-dir full_frames_results
 ```

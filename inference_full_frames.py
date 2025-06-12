@@ -24,14 +24,14 @@ from src.models.components.pose_transformer import PoseTransformer
 from generate_all_pretrained_latents_fixed import process_sequence, load_pretrained_model
 
 
-class VIFTQuaternion(nn.Module):
-    """Simple VIFT model with quaternion output - matching training architecture"""
+class VIFT(nn.Module):
+    """VIFT model with 7DoF output (original VIFT architecture with quaternion output)"""
     
     def __init__(self, input_dim=768, embedding_dim=128, num_layers=2, 
                  nhead=8, dim_feedforward=512, dropout=0.1):
         super().__init__()
         
-        # Use the existing PoseTransformer but replace output
+        # Use the existing PoseTransformer
         self.pose_transformer = PoseTransformer(
             input_dim=input_dim,
             embedding_dim=embedding_dim,
@@ -41,24 +41,38 @@ class VIFTQuaternion(nn.Module):
             dropout=dropout
         )
         
-        # Replace the 6DoF output with 7DoF quaternion output
+        # Output embeddings (not poses directly)
         self.pose_transformer.fc2 = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
-            nn.LeakyReLU(0.1),
+            nn.LayerNorm(embedding_dim),
+            nn.GELU()
+        )
+        
+        # Transition to pose projection (embeddings -> 7DoF poses)
+        self.transition_to_pose = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.LayerNorm(embedding_dim),
+            nn.GELU(),
             nn.Linear(embedding_dim, 7)  # 3 translation + 4 quaternion
         )
         
     def forward(self, x, gt=None):
         # x shape: [batch_size, seq_len, input_dim]
-        # PoseTransformer expects a tuple (features, _, _) and gt
         batch = (x, None, None)
-        output = self.pose_transformer(batch, gt)
         
-        # Split into translation and quaternion
-        translation = output[..., :3]
-        quaternion = output[..., 3:7]
+        # Get embeddings from transformer
+        embeddings = self.pose_transformer(batch, gt)
         
-        # Normalize quaternion
+        # Compute transitions as differences between consecutive embeddings
+        # This is the key part of VIFT architecture
+        transitions = embeddings[:, 1:] - embeddings[:, :-1]
+        
+        # Project transitions to pose space
+        pose_predictions = self.transition_to_pose(transitions)
+        
+        # Split and normalize quaternions
+        translation = pose_predictions[..., :3]
+        quaternion = pose_predictions[..., 3:7]
         quaternion = torch.nn.functional.normalize(quaternion, p=2, dim=-1)
         
         return torch.cat([translation, quaternion], dim=-1)
@@ -71,8 +85,8 @@ def load_checkpoint(checkpoint_path):
     # Extract model configuration
     config = checkpoint.get('config', {})
     
-    # Initialize model with VIFTQuaternion architecture
-    model = VIFTQuaternion(
+    # Initialize model with VIFT architecture (transition-based)
+    model = VIFT(
         input_dim=config.get('input_dim', 768),
         embedding_dim=config.get('embedding_dim', 128),
         num_layers=config.get('num_layers', 2),
@@ -127,14 +141,16 @@ def run_inference_on_sequence(model, vift_model, sequence_path, window_size=11, 
             output = model(input_batch, gt=None)
             
             # Get predictions (already in cm)
-            # Output is [batch_size, seq_len, 7] where 7 = 3 trans + 4 quat
+            # Model outputs seq_len-1 predictions due to transition computation
             pred_poses = output.squeeze(0).cpu().numpy()
             pred_trans = pred_poses[:, :3]
             pred_rot = pred_poses[:, 3:]
             
             # Get ground truth (already in cm from dataset)
-            gt_trans = gt_poses[:, :3].numpy()
-            gt_rot = gt_poses[:, 3:].numpy()
+            # Skip the first frame (which is always [0,0,0] and identity quaternion)
+            # to align with model predictions
+            gt_trans = gt_poses[1:, :3].numpy()  # Skip first frame
+            gt_rot = gt_poses[1:, 3:].numpy()
             
             # Debug: Print detailed predictions for all windows
             print(f"\n{'='*80}")
@@ -173,7 +189,9 @@ def run_inference_on_sequence(model, vift_model, sequence_path, window_size=11, 
             # Store predictions and ground truth
             pred_poses = np.concatenate([pred_trans, pred_rot], axis=-1)
             all_predictions.append(pred_poses)
-            all_ground_truth.append(gt_poses)
+            # Store aligned ground truth (already has first frame skipped)
+            gt_poses_aligned = np.concatenate([gt_trans, gt_rot], axis=-1)
+            all_ground_truth.append(gt_poses_aligned)
     
     return {
         'predictions': all_predictions,
@@ -290,6 +308,78 @@ def plot_relative_poses(pred_poses, gt_poses, output_path, title="Relative Pose 
     plt.close()
     
     print(f"Saved relative pose plot to {output_path}")
+
+
+def plot_3d_trajectory_short(pred_trajectory, gt_trajectory, output_path, title="First 5 Seconds", 
+                             frames_per_second=20, duration_seconds=5):
+    """Create 3D trajectory plot for first N seconds only"""
+    # Calculate number of frames for desired duration
+    num_frames = min(frames_per_second * duration_seconds, len(pred_trajectory))
+    
+    # Slice trajectories
+    pred_short = pred_trajectory[:num_frames]
+    gt_short = gt_trajectory[:num_frames]
+    
+    fig = plt.figure(figsize=(15, 10))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Plot trajectories
+    ax.plot(gt_short[:, 0], gt_short[:, 1], gt_short[:, 2], 
+            'b-', linewidth=2, label='Ground Truth', alpha=0.8)
+    ax.plot(pred_short[:, 0], pred_short[:, 1], pred_short[:, 2], 
+            'r--', linewidth=2, label='Prediction', alpha=0.8)
+    
+    # Mark every second with dots
+    for i in range(0, num_frames, frames_per_second):
+        ax.scatter(gt_short[i, 0], gt_short[i, 1], gt_short[i, 2], 
+                  color='blue', s=50, alpha=0.5)
+        ax.scatter(pred_short[i, 0], pred_short[i, 1], pred_short[i, 2], 
+                  color='red', s=50, alpha=0.5)
+        # Add time labels
+        ax.text(gt_short[i, 0], gt_short[i, 1], gt_short[i, 2], f'{i//frames_per_second}s', 
+                fontsize=8, color='blue', alpha=0.7)
+    
+    # Mark start and end
+    ax.scatter(*gt_short[0], color='green', s=100, marker='o', label='Start')
+    ax.scatter(*gt_short[-1], color='purple', s=100, marker='x', label='End')
+    
+    # Calculate trajectory length
+    gt_length = np.sum(np.linalg.norm(np.diff(gt_short, axis=0), axis=1))
+    pred_length = np.sum(np.linalg.norm(np.diff(pred_short, axis=0), axis=1))
+    
+    # Calculate final position error
+    final_error = np.linalg.norm(pred_short[-1] - gt_short[-1])
+    
+    # Set labels and title
+    ax.set_xlabel('X (cm)')
+    ax.set_ylabel('Y (cm)')
+    ax.set_zlabel('Z (cm)')
+    ax.set_title(f'{title} - {duration_seconds} seconds ({num_frames} frames)\n'
+                 f'GT Length: {gt_length:.1f}cm, Pred Length: {pred_length:.1f}cm, '
+                 f'Final Error: {final_error:.1f}cm')
+    ax.legend()
+    
+    # Set equal aspect ratio
+    max_range = np.array([
+        gt_short[:, 0].max() - gt_short[:, 0].min(),
+        gt_short[:, 1].max() - gt_short[:, 1].min(),
+        gt_short[:, 2].max() - gt_short[:, 2].min()
+    ]).max() / 2.0
+    
+    if max_range > 0:
+        mid_x = (gt_short[:, 0].max() + gt_short[:, 0].min()) * 0.5
+        mid_y = (gt_short[:, 1].max() + gt_short[:, 1].min()) * 0.5
+        mid_z = (gt_short[:, 2].max() + gt_short[:, 2].min()) * 0.5
+        
+        ax.set_xlim(mid_x - max_range, mid_x + max_range)
+        ax.set_ylim(mid_y - max_range, mid_y + max_range)
+        ax.set_zlim(mid_z - max_range, mid_z + max_range)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    
+    print(f"Saved short trajectory plot to {output_path}")
 
 
 def plot_3d_trajectory(pred_trajectory, gt_trajectory, output_path, title="Trajectory Comparison"):
@@ -564,13 +654,33 @@ def main():
             title=f"Sequence {seq_id}"
         )
         
-        # Generate trajectory plot
+        # Generate relative pose plot for first 5 seconds
+        relative_pose_short_path = output_dir / f'relative_poses_{seq_id}_5sec.png'
+        plot_relative_poses(
+            all_pred_poses[:100],  # First 100 frames = 5 seconds at 20 FPS
+            all_gt_poses[:100],
+            relative_pose_short_path,
+            title=f"Sequence {seq_id} - First 5 Seconds"
+        )
+        
+        # Generate full trajectory plot
         plot_path = output_dir / f'trajectory_3d_{seq_id}.png'
         plot_3d_trajectory(
             pred_trajectory, 
             gt_trajectory, 
             plot_path,
             title=f"Sequence {seq_id} - Full Frame Model"
+        )
+        
+        # Generate short (5 second) trajectory plot for detailed analysis
+        short_plot_path = output_dir / f'trajectory_3d_{seq_id}_5sec.png'
+        plot_3d_trajectory_short(
+            pred_trajectory, 
+            gt_trajectory, 
+            short_plot_path,
+            title=f"Sequence {seq_id} - First 5 Seconds",
+            frames_per_second=20,  # Aria camera FPS
+            duration_seconds=5
         )
         
         # Generate rotation plots
