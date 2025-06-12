@@ -58,10 +58,13 @@ class VIFTTransition(nn.Module):
             nn.Linear(embedding_dim, 7)  # 3 translation + 4 quaternion
         )
         
-        # Initialize projection to small values
+        # Initialize projection with reasonable values
         with torch.no_grad():
-            self.transition_to_pose[-1].weight.data *= 0.01
-            self.transition_to_pose[-1].bias.data.zero_()
+            # Initialize last layer with normal distribution
+            nn.init.normal_(self.transition_to_pose[-1].weight, mean=0.0, std=0.1)
+            # Initialize bias to typical motion values (in cm)
+            self.transition_to_pose[-1].bias.data[:3] = torch.tensor([0.0, 1.0, -1.0])  # Typical forward motion
+            self.transition_to_pose[-1].bias.data[3:] = torch.tensor([0.0, 0.0, 0.0, 1.0])  # Identity quaternion
     
     def forward(self, batch):
         # Combine visual and IMU features
@@ -80,17 +83,32 @@ class VIFTTransition(nn.Module):
         mask = self.pose_transformer.generate_square_subsequent_mask(seq_len, combined.device)
         
         # Pass through transformer with causal mask
-        embeddings = self.pose_transformer.transformer_encoder(combined, mask=mask, is_causal=True)
+        transformer_output = self.pose_transformer.transformer_encoder(combined, mask=mask, is_causal=True)
         
         # Get embeddings (not poses!)
-        embeddings = self.pose_transformer.fc2(embeddings)  # [B, seq_len, embedding_dim]
+        embeddings = self.pose_transformer.fc2(transformer_output)  # [B, seq_len, embedding_dim]
+        
+        # Add noise during training to prevent constant embeddings
+        if self.training:
+            noise_scale = 0.05  # Reduced noise to 5% for stability
+            noise = torch.randn_like(embeddings) * noise_scale
+            embeddings = embeddings + noise
         
         # CRITICAL: Compute transitions as differences between consecutive embeddings
         # This is the KEY difference from our previous implementation
         transitions = embeddings[:, 1:] - embeddings[:, :-1]  # [B, seq_len-1, embedding_dim]
         
+        # Apply layer norm to transitions to stabilize training
+        transitions = nn.functional.layer_norm(transitions, transitions.shape[-1:])
+        
         # Project transitions to pose space
         pose_predictions = self.transition_to_pose(transitions)  # [B, seq_len-1, 7]
+        
+        # Add minimum magnitude to prevent near-zero predictions
+        if self.training:
+            # Add small random offset to prevent collapse to zero
+            min_trans = 0.1  # Minimum 0.1 cm motion
+            pose_predictions[:, :, :3] = pose_predictions[:, :, :3] + torch.randn_like(pose_predictions[:, :, :3]) * min_trans
         
         # Split and normalize quaternions
         translation = pose_predictions[:, :, :3]
@@ -109,7 +127,8 @@ class VIFTTransition(nn.Module):
 
 
 def compute_loss(predictions, batch, trans_weight=1.0, rot_weight=10.0, 
-                smooth_weight=0.1, diversity_weight=0.2, embed_reg_weight=0.01):
+                smooth_weight=0.1, diversity_weight=0.5, embed_reg_weight=0.01,
+                temporal_weight=1.0, transition_weight=0.5):
     """
     Enhanced loss computation for transition-based predictions.
     
@@ -164,12 +183,26 @@ def compute_loss(predictions, batch, trans_weight=1.0, rot_weight=10.0,
     # 5. NEW: Embedding regularization - prevent embeddings from growing too large
     embed_reg_loss = embeddings.pow(2).mean()
     
+    # 6. NEW: Temporal variation loss - encourage embeddings to change over time
+    # Compute temporal standard deviation for each embedding dimension
+    temporal_std = embeddings.std(dim=1).mean()  # Average std across batch and dims
+    # We want this to be high (embeddings should vary over time)
+    # More reasonable penalty
+    temporal_loss = torch.relu(0.1 - temporal_std) * 2.0  # Reduced threshold and weight
+    
+    # 7. NEW: Transition magnitude loss - ensure transitions have reasonable magnitude
+    transitions = predictions['transitions']
+    transition_norms = transitions.norm(dim=-1)
+    transition_loss = torch.relu(0.1 - transition_norms.mean()) * 2.0  # Penalize if mean norm < 0.1
+    
     # Combined loss
     total_loss = (trans_weight * trans_loss + 
                   rot_weight * rot_loss + 
                   smooth_weight * smooth_loss +
                   diversity_weight * diversity_loss +
-                  embed_reg_weight * embed_reg_loss)
+                  embed_reg_weight * embed_reg_loss +
+                  temporal_weight * temporal_loss +
+                  transition_weight * transition_loss)
     
     return {
         'total_loss': total_loss,
@@ -177,11 +210,13 @@ def compute_loss(predictions, batch, trans_weight=1.0, rot_weight=10.0,
         'rot_loss': rot_loss,
         'smooth_loss': smooth_loss,
         'diversity_loss': diversity_loss,
-        'embed_reg_loss': embed_reg_loss
+        'embed_reg_loss': embed_reg_loss,
+        'temporal_loss': temporal_loss,
+        'transition_loss': transition_loss
     }
 
 
-def train_epoch(model, dataloader, optimizer, device, epoch, print_freq=20):
+def train_epoch(model, dataloader, optimizer, scheduler, device, epoch, print_freq=20):
     """Train for one epoch"""
     model.train()
     total_loss = 0
@@ -201,9 +236,9 @@ def train_epoch(model, dataloader, optimizer, device, epoch, print_freq=20):
         loss_dict = compute_loss(predictions, batch_gpu)
         loss = loss_dict['total_loss']
         
-        # Check for NaN
-        if torch.isnan(loss):
-            print(f"NaN loss at batch {batch_idx}, skipping...")
+        # Check for NaN or very large loss
+        if torch.isnan(loss) or loss.item() > 100:
+            print(f"Invalid loss at batch {batch_idx} (loss={loss.item():.2f}), skipping...")
             continue
         
         # Backward pass
@@ -215,6 +250,9 @@ def train_epoch(model, dataloader, optimizer, device, epoch, print_freq=20):
         
         optimizer.step()
         
+        # Step the scheduler after each batch (for OneCycleLR)
+        scheduler.step()
+        
         # Update metrics
         total_loss += loss.item()
         num_batches += 1
@@ -223,10 +261,8 @@ def train_epoch(model, dataloader, optimizer, device, epoch, print_freq=20):
         progress_bar.set_postfix({
             'loss': f"{loss.item():.4f}",
             'trans': f"{loss_dict['trans_loss'].item():.4f}",
-            'rot': f"{loss_dict['rot_loss'].item():.4f}",
-            'smooth': f"{loss_dict['smooth_loss'].item():.4f}",
-            'div': f"{loss_dict['diversity_loss'].item():.4f}",
-            'embed': f"{loss_dict['embed_reg_loss'].item():.4f}"
+            'temporal': f"{loss_dict['temporal_loss'].item():.4f}",
+            'transition': f"{loss_dict['transition_loss'].item():.4f}"
         })
         
         # Detailed logging
@@ -238,6 +274,8 @@ def train_epoch(model, dataloader, optimizer, device, epoch, print_freq=20):
             print(f"  Smooth loss: {loss_dict['smooth_loss'].item():.6f}")
             print(f"  Diversity loss: {loss_dict['diversity_loss'].item():.6f}")
             print(f"  Embed reg loss: {loss_dict['embed_reg_loss'].item():.6f}")
+            print(f"  Temporal loss: {loss_dict['temporal_loss'].item():.6f}")
+            print(f"  Transition loss: {loss_dict['transition_loss'].item():.6f}")
             
             # Sample predictions
             with torch.no_grad():
@@ -251,9 +289,29 @@ def train_epoch(model, dataloader, optimizer, device, epoch, print_freq=20):
                 print(f"  GT variance: {gt_var}")
                 
                 # Check embedding statistics
-                embed_mean = predictions['embeddings'][0].mean().item()
-                embed_std = predictions['embeddings'][0].std().item()
-                print(f"  Embedding mean: {embed_mean:.4f}, std: {embed_std:.4f}")
+                embeddings = predictions['embeddings'][0].detach().cpu().numpy()  # [seq_len, embed_dim]
+                embed_mean = embeddings.mean()
+                embed_std = embeddings.std()
+                
+                # Check temporal variation in embeddings
+                temporal_std = embeddings.std(axis=0).mean()  # Std across time for each dimension
+                spatial_std = embeddings.std(axis=1).mean()   # Std across dimensions for each timestep
+                
+                # Check if embeddings are changing over time
+                embedding_diffs = np.diff(embeddings, axis=0)  # Differences between consecutive embeddings
+                diff_magnitudes = np.linalg.norm(embedding_diffs, axis=1)
+                
+                print(f"  Embedding stats:")
+                print(f"    Overall mean: {embed_mean:.4f}, std: {embed_std:.4f}")
+                print(f"    Temporal std (avg across dims): {temporal_std:.4f}")
+                print(f"    Spatial std (avg across time): {spatial_std:.4f}")
+                print(f"    Embedding diff magnitudes: min={diff_magnitudes.min():.4f}, max={diff_magnitudes.max():.4f}, mean={diff_magnitudes.mean():.4f}")
+                
+                # Check first and last embeddings to see if they differ
+                first_embed = embeddings[0]
+                last_embed = embeddings[-1]
+                embed_distance = np.linalg.norm(last_embed - first_embed)
+                print(f"    Distance between first and last embedding: {embed_distance:.4f}")
                 
                 # Check transition magnitudes
                 trans_mag = predictions['transitions'][0].norm(dim=-1).cpu().numpy()[:5]
@@ -360,11 +418,18 @@ def main():
     print(f"  Total: {total_params:,}")
     print(f"  Trainable: {trainable_params:,}")
     
-    # Optimizer
+    # Optimizer with normal learning rate
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     
-    # Learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    # Learning rate scheduler - OneCycleLR for better training dynamics
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer, 
+        max_lr=args.lr * 3,  # Peak at 3x base lr (more stable)
+        epochs=args.epochs,
+        steps_per_epoch=len(train_loader),
+        pct_start=0.2,  # 20% warmup for stability
+        anneal_strategy='cos'
+    )
     
     # Training loop
     best_val_loss = float('inf')
@@ -376,7 +441,7 @@ def main():
         print(f"{'='*60}")
         
         # Train
-        train_loss = train_epoch(model, train_loader, optimizer, device, 
+        train_loss = train_epoch(model, train_loader, optimizer, scheduler, device, 
                                epoch + 1, args.print_freq)
         
         # Validate
@@ -400,8 +465,7 @@ def main():
             torch.save(checkpoint, checkpoint_dir / 'best_model.pt')
             print(f"  ✓ New best model saved")
         
-        # Step scheduler
-        scheduler.step()
+        # Scheduler is stepped in train_epoch for OneCycleLR
     
     print(f"\nTraining complete! Best val loss: {best_val_loss:.6f}")
     print(f"Checkpoints saved to: {checkpoint_dir}")

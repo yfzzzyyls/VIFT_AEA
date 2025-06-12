@@ -80,7 +80,8 @@ class VIFT(nn.Module):
 
 def load_checkpoint(checkpoint_path):
     """Load model from checkpoint"""
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    # PyTorch 2.6 compatibility - set weights_only=False for loading our own checkpoints
+    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     
     # Extract model configuration
     config = checkpoint.get('config', {})
