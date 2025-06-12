@@ -62,8 +62,8 @@ class VIFTTransition(nn.Module):
         with torch.no_grad():
             # Initialize last layer with normal distribution
             nn.init.normal_(self.transition_to_pose[-1].weight, mean=0.0, std=0.1)
-            # Initialize bias to typical motion values (in cm)
-            self.transition_to_pose[-1].bias.data[:3] = torch.tensor([0.0, 1.0, -1.0])  # Typical forward motion
+            # Initialize bias to zero for translations, identity for quaternion
+            self.transition_to_pose[-1].bias.data[:3] = torch.tensor([0.0, 0.0, 0.0])  # Zero translation bias
             self.transition_to_pose[-1].bias.data[3:] = torch.tensor([0.0, 0.0, 0.0, 1.0])  # Identity quaternion
     
     def forward(self, batch):
@@ -88,9 +88,9 @@ class VIFTTransition(nn.Module):
         # Get embeddings (not poses!)
         embeddings = self.pose_transformer.fc2(transformer_output)  # [B, seq_len, embedding_dim]
         
-        # Add noise during training to prevent constant embeddings
+        # Add small noise during training to prevent constant embeddings
         if self.training:
-            noise_scale = 0.05  # Reduced noise to 5% for stability
+            noise_scale = 0.01  # Very small noise (1%) for stability
             noise = torch.randn_like(embeddings) * noise_scale
             embeddings = embeddings + noise
         
@@ -98,17 +98,16 @@ class VIFTTransition(nn.Module):
         # This is the KEY difference from our previous implementation
         transitions = embeddings[:, 1:] - embeddings[:, :-1]  # [B, seq_len-1, embedding_dim]
         
-        # Apply layer norm to transitions to stabilize training
-        transitions = nn.functional.layer_norm(transitions, transitions.shape[-1:])
+        # Remove layer norm - it destroys motion magnitude information!
+        # transitions = nn.functional.layer_norm(transitions, transitions.shape[-1:])
         
         # Project transitions to pose space
         pose_predictions = self.transition_to_pose(transitions)  # [B, seq_len-1, 7]
         
-        # Add minimum magnitude to prevent near-zero predictions
-        if self.training:
-            # Add small random offset to prevent collapse to zero
-            min_trans = 0.1  # Minimum 0.1 cm motion
-            pose_predictions[:, :, :3] = pose_predictions[:, :, :3] + torch.randn_like(pose_predictions[:, :, :3]) * min_trans
+        # Scale up predictions to reasonable motion range
+        # This helps prevent collapse to near-zero predictions
+        translation_scale = 5.0  # Scale factor for translations
+        pose_predictions[:, :, :3] = pose_predictions[:, :, :3] * translation_scale
         
         # Split and normalize quaternions
         translation = pose_predictions[:, :, :3]
@@ -126,9 +125,9 @@ class VIFTTransition(nn.Module):
         }
 
 
-def compute_loss(predictions, batch, trans_weight=1.0, rot_weight=10.0, 
-                smooth_weight=0.1, diversity_weight=0.5, embed_reg_weight=0.01,
-                temporal_weight=1.0, transition_weight=0.5):
+def compute_loss(predictions, batch, trans_weight=1.0, rot_weight=1.0, 
+                smooth_weight=0.1, diversity_weight=0.1, embed_reg_weight=0.001,
+                temporal_weight=0.5, transition_weight=0.5):
     """
     Enhanced loss computation for transition-based predictions.
     
@@ -184,16 +183,18 @@ def compute_loss(predictions, batch, trans_weight=1.0, rot_weight=10.0,
     embed_reg_loss = embeddings.pow(2).mean()
     
     # 6. NEW: Temporal variation loss - encourage embeddings to change over time
-    # Compute temporal standard deviation for each embedding dimension
-    temporal_std = embeddings.std(dim=1).mean()  # Average std across batch and dims
-    # We want this to be high (embeddings should vary over time)
-    # More reasonable penalty
-    temporal_loss = torch.relu(0.1 - temporal_std) * 2.0  # Reduced threshold and weight
+    # Compute temporal differences to ensure embeddings actually change
+    embed_diffs = embeddings[:, 1:] - embeddings[:, :-1]
+    embed_diff_norms = embed_diffs.norm(dim=-1).mean()
+    # We want embedding differences to be meaningful (not too small)
+    temporal_loss = torch.relu(1.0 - embed_diff_norms) * 5.0  # Penalize if diff < 1.0
     
     # 7. NEW: Transition magnitude loss - ensure transitions have reasonable magnitude
     transitions = predictions['transitions']
     transition_norms = transitions.norm(dim=-1)
-    transition_loss = torch.relu(0.1 - transition_norms.mean()) * 2.0  # Penalize if mean norm < 0.1
+    # Encourage reasonable transition magnitudes (0.5 to 5.0 cm range)
+    transition_loss = (torch.relu(0.5 - transition_norms.mean()) + 
+                      torch.relu(transition_norms.mean() - 5.0)) * 2.0
     
     # Combined loss
     total_loss = (trans_weight * trans_loss + 
