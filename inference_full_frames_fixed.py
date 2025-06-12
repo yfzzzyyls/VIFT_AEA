@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from tqdm import tqdm
 import argparse
+from scipy.spatial.transform import Rotation as R
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -227,6 +228,70 @@ def plot_relative_poses(pred_poses, gt_poses, output_path, title="Relative Pose 
     print(f"Saved relative poses plot to {output_path}")
 
 
+def plot_rotation_3d(pred_rotations, gt_rotations, sequence_name, output_path):
+    """Create 3D rotation trajectory visualization in axis-angle space"""
+    fig = plt.figure(figsize=(12, 10))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Convert quaternions to axis-angle representation
+    # This maps rotations to 3D space where direction = rotation axis, magnitude = rotation angle
+    gt_axis_angles = np.array([R.from_quat(q).as_rotvec() for q in gt_rotations])
+    pred_axis_angles = np.array([R.from_quat(q).as_rotvec() for q in pred_rotations])
+    
+    # Downsample for clarity if sequence is very long
+    stride = max(1, len(gt_axis_angles) // 1000)
+    
+    # Plot rotation trajectories
+    ax.plot(gt_axis_angles[::stride, 0], gt_axis_angles[::stride, 1], gt_axis_angles[::stride, 2], 
+            'b-', linewidth=2, label='Ground Truth', alpha=0.8)
+    ax.plot(pred_axis_angles[::stride, 0], pred_axis_angles[::stride, 1], pred_axis_angles[::stride, 2], 
+            'r--', linewidth=2, label='Prediction', alpha=0.8)
+    
+    # Mark start and end points
+    ax.scatter(*gt_axis_angles[0], color='green', s=100, marker='o', label='Start')
+    ax.scatter(*gt_axis_angles[-1], color='red', s=100, marker='x', label='End')
+    
+    # Calculate rotation statistics
+    rot_errors = []
+    for pred_q, gt_q in zip(pred_rotations, gt_rotations):
+        gt_rot = R.from_quat(gt_q)
+        pred_rot = R.from_quat(pred_q)
+        rel_rot = gt_rot.inv() * pred_rot
+        angle_error = np.abs(rel_rot.magnitude() * 180 / np.pi)
+        rot_errors.append(angle_error)
+    
+    mean_error = np.mean(rot_errors)
+    max_error = np.max(rot_errors)
+    
+    # Set labels and title
+    ax.set_xlabel('X (rad)')
+    ax.set_ylabel('Y (rad)')
+    ax.set_zlabel('Z (rad)')
+    ax.set_title(f'Sequence {sequence_name} - Rotation Trajectory\n'
+                 f'Mean Error: {mean_error:.2f}°, Max Error: {max_error:.2f}°')
+    ax.legend()
+    
+    # Set equal aspect ratio for better visualization
+    max_range = np.array([
+        gt_axis_angles[:, 0].max() - gt_axis_angles[:, 0].min(),
+        gt_axis_angles[:, 1].max() - gt_axis_angles[:, 1].min(),
+        gt_axis_angles[:, 2].max() - gt_axis_angles[:, 2].min()
+    ]).max() / 2.0
+    
+    mid_x = (gt_axis_angles[:, 0].max() + gt_axis_angles[:, 0].min()) * 0.5
+    mid_y = (gt_axis_angles[:, 1].max() + gt_axis_angles[:, 1].min()) * 0.5
+    mid_z = (gt_axis_angles[:, 2].max() + gt_axis_angles[:, 2].min()) * 0.5
+    
+    ax.set_xlim(mid_x - max_range, mid_x + max_range)
+    ax.set_ylim(mid_y - max_range, mid_y + max_range)
+    ax.set_zlim(mid_z - max_range, mid_z + max_range)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    print(f"Saved 3D rotation plot to {output_path}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--checkpoint', type=str, required=True,
@@ -325,6 +390,18 @@ def main():
             all_gt,
             output_dir / f'relative_poses_{seq_name}.png',
             title=f'Sequence {seq_name} - Relative Poses'
+        )
+        
+        # Plot rotation analysis
+        # Extract rotations (quaternions) from the full poses
+        pred_rotations = all_pred[:, 3:7]  # Quaternions are in columns 3-6
+        gt_rotations = all_gt[:, 3:7]
+        
+        plot_rotation_3d(
+            pred_rotations,
+            gt_rotations,
+            seq_name,
+            output_dir / f'rotation_3d_{seq_name}.png'
         )
         
         print(f"Results saved for {seq_name}")
