@@ -1,0 +1,80 @@
+/home/external/venv/py39/lib64/python3.9/site-packages/torch/nn/modules/transformer.py:382: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+
+🖥️  Using device: cuda
+✅ Test features found in: aria_latent/test
+   Found 396 test samples
+
+📊 Model Information:
+   Loaded checkpoint from epoch 47
+   Validation loss: 0.3147
+   Val translation error: 1.018 m
+   Val rotation error: 2.37°
+
+📁 Test dataset loaded: 396 samples
+
+🔍 Evaluating on test sequences...
+Processing batches:   0%|          | 0/25 [00:00<?, ?it/s]Processing batches:   4%|▍         | 1/25 [00:00<00:06,  3.86it/s]Processing batches: 100%|██████████| 25/25 [00:00<00:00, 87.55it/s]Processing batches: 100%|██████████| 25/25 [00:00<00:00, 66.66it/s]
+
+==================================================
+📊 EVALUATION RESULTS
+==================================================
+
+📏 Translation Error (cm):
+   Mean:   152.711
+   Std:    116.648
+   Median: 108.549
+   95%:    423.913
+   Max:    465.493
+
+🔄 Rotation Error (degrees):
+   Mean:   9.371
+   Std:    13.458
+   Median: 6.151
+   95%:    29.938
+   Max:    130.997
+==================================================
+
+📊 Plots saved to: evaluation_results/plots/
+   - test_trajectories_2d.png
+   - error_distributions.png
+
+📊 Generating 3D trajectory and rotation plots...
+Saved 3D trajectory plot to evaluation_results/trajectory_3d_016.png
+Saved 3D rotation plot to evaluation_results/rotation_3d_016.png
+Saved 3D trajectory plot to evaluation_results/trajectory_3d_016_1s.png
+Saved 3D rotation plot to evaluation_results/rotation_3d_016_1s.png
+Saved 3D trajectory plot to evaluation_results/trajectory_3d_016_5s.png
+Saved 3D rotation plot to evaluation_results/rotation_3d_016_5s.png
+Saved 3D trajectory plot to evaluation_results/trajectory_3d_017.png
+Saved 3D rotation plot to evaluation_results/rotation_3d_017.png
+Saved 3D trajectory plot to evaluation_results/trajectory_3d_017_1s.png
+Saved 3D rotation plot to evaluation_results/rotation_3d_017_1s.png
+Saved 3D trajectory plot to evaluation_results/trajectory_3d_017_5s.png
+Saved 3D rotation plot to evaluation_results/rotation_3d_017_5s.png
+Saved 3D trajectory plot to evaluation_results/trajectory_3d_018.png
+Saved 3D rotation plot to evaluation_results/rotation_3d_018.png
+Saved 3D trajectory plot to evaluation_results/trajectory_3d_018_1s.png
+Saved 3D rotation plot to evaluation_results/rotation_3d_018_1s.png
+Saved 3D trajectory plot to evaluation_results/trajectory_3d_018_5s.png
+Saved 3D rotation plot to evaluation_results/rotation_3d_018_5s.png
+Saved 3D trajectory plot to evaluation_results/trajectory_3d_019.png
+Saved 3D rotation plot to evaluation_results/rotation_3d_019.png
+Saved 3D trajectory plot to evaluation_results/trajectory_3d_019_1s.png
+Saved 3D rotation plot to evaluation_results/rotation_3d_019_1s.png
+Saved 3D trajectory plot to evaluation_results/trajectory_3d_019_5s.png
+Saved 3D rotation plot to evaluation_results/rotation_3d_019_5s.png
+
+💾 Results saved to: evaluation_results/evaluation_metrics.txt
+
+📊 Generated 3D plots:
+   - trajectory_3d_016.png, trajectory_3d_016_1s.png, trajectory_3d_016_5s.png
+   - rotation_3d_016.png, rotation_3d_016_1s.png, rotation_3d_016_5s.png
+   - trajectory_3d_017.png, trajectory_3d_017_1s.png, trajectory_3d_017_5s.png
+   - rotation_3d_017.png, rotation_3d_017_1s.png, rotation_3d_017_5s.png
+   - trajectory_3d_018.png, trajectory_3d_018_1s.png, trajectory_3d_018_5s.png
+   - rotation_3d_018.png, rotation_3d_018_1s.png, rotation_3d_018_5s.png
+   - trajectory_3d_019.png, trajectory_3d_019_1s.png, trajectory_3d_019_5s.png
+   - rotation_3d_019.png, rotation_3d_019_1s.png, rotation_3d_019_5s.png
+
+✅ Evaluation complete!

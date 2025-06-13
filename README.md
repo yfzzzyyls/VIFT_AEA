@@ -22,16 +22,15 @@ pip install -r requirements.txt
 ./process_full_dataset_optimal.sh
 ```
 
-This script processes 20 sequences from 4 different locations, extracting ALL frames (not downsampled). Output will be in `aria_processed_full_frames/`.
+This script processes 20 sequences from 4 different locations, extracting ALL frames (not downsampled). Output will be in `aria_processed/`.
 
 #### Generate Latent Features
 ```bash
 # Generate latent features with stride 10
 python generate_all_pretrained_latents_fixed.py \
-    --processed-dir aria_processed_full_frames \
+    --processed-dir aria_processed \
     --output-dir aria_latent \
     --stride 10 \
-    --pose-scale 100.0 \
     --skip-test
 ```
 
@@ -40,13 +39,6 @@ python generate_all_pretrained_latents_fixed.py \
 #### Stable Version
 
 ```bash
-# # Step 1: Generate latent features (if not already done)
-# python generate_all_pretrained_latents_fixed.py \
-#     --processed-dir aria_processed_full_frames \
-#     --output-dir aria_latent_full_frames \
-#     --stride 10 \
-#     --pose-scale 100.0
-
 # Step 2: Train the stable model
 python train_vift_aria_stable.py \
     --epochs 50 \
@@ -150,7 +142,7 @@ VIFT_AEA/
 ├── evaluate_stable_model.py         # Evaluation script for test set
 ├── configs/                       # Hydra configuration files
 ├── pretrained_models/             # Pretrained VIFT encoder
-├── aria_processed_full_frames/    # Processed sequences
+├── aria_processed/    # Processed sequences
 ├── aria_latent/                    # Generated features (train/val/test)
 ├── evaluation_results/            # Test set evaluation outputs
 └── checkpoints_vift_stable/       # Trained models
