@@ -69,7 +69,8 @@ def load_checkpoint(checkpoint_path, device):
     checkpoint = torch.load(checkpoint_path, map_location=device)
     
     model = VIFTStable().to(device)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    # Load with strict=False to ignore the output_norm layer from old checkpoint
+    model.load_state_dict(checkpoint['model_state_dict'], strict=False)
     model.eval()
     
     print(f"\n📊 Model Information:")

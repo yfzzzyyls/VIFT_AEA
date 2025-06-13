@@ -79,9 +79,6 @@ class VIFTStable(nn.Module):
             nn.Linear(embedding_dim, 7)
         )
         
-        # Output normalization (learnable)
-        self.output_norm = nn.BatchNorm1d(7)
-        
         # Very careful initialization
         with torch.no_grad():
             # Small weights for final layer
@@ -133,15 +130,10 @@ class VIFTStable(nn.Module):
         
         # Project to 7DoF
         output = self.fc2(output)
-        
-        # Normalize outputs to stabilize scale
-        B,S,_ = output.shape
-        output_flat = output.view(-1, 7)
-        output_normed = self.output_norm(output_flat).view(B, S, 7)
-        
+
         # For relative poses between consecutive frames
         # Use full sequence of relative pose outputs
-        predictions = output_normed  # shape [B, seq_len, 7]
+        predictions = output  # shape [B, seq_len, 7]
         
         # Split and normalize quaternions
         translation = predictions[:, :, :3]
