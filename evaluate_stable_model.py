@@ -39,7 +39,6 @@ def check_and_generate_test_features(data_dir, processed_dir):
             '--processed-dir', processed_dir,
             '--output-dir', data_dir,
             '--stride', '10',
-            '--pose-scale', '100.0',
             '--process-test'
         ]
         
