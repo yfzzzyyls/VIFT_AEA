@@ -126,11 +126,10 @@ class VIFTStable(nn.Module):
         pos_embedding = self.positional_embedding(seq_length, combined.device)
         features = features + pos_embedding * 0.1  # Scale down positional encoding
         
-        # Generate causal mask
+        # Generate and apply causal mask
         mask = self.generate_square_subsequent_mask(seq_length, combined.device)
-        
-        # Pass through transformer
-        output = self.transformer_encoder(features, mask=mask, is_causal=True)
+        # Pass through transformer with causal mask
+        output = self.transformer_encoder(features, mask=mask)
         
         # Project to 7DoF
         output = self.fc2(output)
