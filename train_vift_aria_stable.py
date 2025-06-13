@@ -81,11 +81,11 @@ class VIFTStable(nn.Module):
         
         # Proper initialization
         with torch.no_grad():
-            # Use default gain for final layer to avoid frozen outputs
-            nn.init.xavier_uniform_(self.fc2[-1].weight)  # default gain ≈ 1
+            # Initialize the output layer
+            nn.init.xavier_uniform_(self.fc2[-1].weight)
             
-            # Normal initialization for first layer
-            nn.init.xavier_uniform_(self.fc1[0].weight)
+            # Initialize the first layer with proper gain
+            nn.init.xavier_uniform_(self.fc1[0].weight, gain=1.0)
     
     def positional_embedding(self, seq_length, device):
         import math
@@ -150,7 +150,7 @@ class VIFTStable(nn.Module):
 
 
 def robust_geodesic_loss(pred_quat, gt_quat):
-    """More robust geodesic rotation loss"""
+    """Plain geodesic rotation loss for proper gradients"""
     # Reshape to [B*N, 4]
     pred_quat = pred_quat.reshape(-1, 4)
     gt_quat = gt_quat.reshape(-1, 4)
@@ -165,21 +165,16 @@ def robust_geodesic_loss(pred_quat, gt_quat):
     # Handle double cover with absolute value
     dot = torch.abs(dot)
     
-    # Clamp more conservatively
+    # Clamp conservatively to avoid numerical issues
     dot = torch.clamp(dot, min=-0.9999, max=0.9999)
     
-    # Use smooth approximation for small angles
-    # For small angles, acos can be approximated as: acos(x) ≈ π/2 - x
-    angle_error = torch.where(
-        dot > 0.95,
-        2.0 * (1.0 - dot),  # Small angle approximation: 2*acos(x) ≈ 2*(1-x) for x close to 1
-        2.0 * torch.acos(dot)
-    )
+    # Plain geodesic distance - no approximation
+    angle_error = 2.0 * torch.acos(dot)
     
     return angle_error.mean()
 
 
-def compute_stable_loss(predictions, batch, trans_weight=1.0, rot_weight=1.0):
+def compute_stable_loss(predictions, batch, trans_weight=100.0, rot_weight=1.0):
     """Stable loss computation with gradient-friendly formulation"""
     pred_poses = predictions['poses']  # [B, 1, 7] - only last prediction
     gt_poses = batch['poses']  # [B, seq_len, 7]
@@ -206,7 +201,7 @@ def compute_stable_loss(predictions, batch, trans_weight=1.0, rot_weight=1.0):
               f"rot: {rot_loss.item() if not torch.isnan(rot_loss) else 'nan'}")
         return None
     
-    # Combined loss with small rotation weight
+    # Combined loss with proper SI unit scaling (100x for meters to match radians)
     total_loss = trans_weight * trans_loss + rot_weight * rot_loss
     
     return {
@@ -381,6 +376,7 @@ def main():
     print("- Learning rate 1e-4 (matching paper)")
     print("- Causal masking with single-step prediction")
     print("- No output BatchNorm (fixed architectural issue)")
+    print("- Translation loss weight: 100.0 (meters to match radians)")
     print(f"{'='*60}\n")
     
     # Load datasets
