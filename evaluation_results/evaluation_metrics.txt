@@ -2,15 +2,15 @@ EVALUATION RESULTS
 ==================
 
 Translation Error (cm):
-  Mean:   1.422
-  Std:    1.095
-  Median: 0.792
-  95%:    3.827
-  Max:    4.166
+  Mean:   1.616
+  Std:    1.054
+  Median: 1.179
+  95%:    3.762
+  Max:    4.170
 
 Rotation Error (degrees):
-  Mean:   4.684
-  Std:    3.856
-  Median: 3.019
-  95%:    13.925
-  Max:    24.071
+  Mean:   15.960
+  Std:    19.092
+  Median: 7.836
+  95%:    48.290
+  Max:    157.611

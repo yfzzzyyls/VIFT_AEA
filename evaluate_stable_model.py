@@ -193,9 +193,10 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_
                 }
                 all_results.append(result)
                 
-                # Use sequence ID directly from the batch
+                # Use sequence ID and frame index for proper ordering
                 seq_id = batch['sequence_id'][i]
-                sequence_results[seq_id].append(result)
+                frame_idx = batch['frame_idx'][i].item() if torch.is_tensor(batch['frame_idx'][i]) else batch['frame_idx'][i]
+                sequence_results[seq_id].append((frame_idx, result))
     
     # Compute overall statistics
     all_trans_errors = np.concatenate([r['trans_errors'] for r in all_results])
@@ -230,8 +231,14 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_
         if seq_id not in sequence_results or not sequence_results[seq_id]:
             continue
             
-        # Concatenate all results for this sequence
-        seq_results = sequence_results[seq_id]
+        # Sort results by frame index to ensure chronological order
+        seq_results_with_idx = sequence_results[seq_id]
+        seq_results_with_idx.sort(key=lambda x: x[0])  # Sort by frame index
+        
+        # Extract just the results after sorting
+        seq_results = [r for _, r in seq_results_with_idx]
+        
+        # Concatenate all results for this sequence in proper temporal order
         all_pred = np.concatenate([r['pred_poses'] for r in seq_results], axis=0)
         all_gt = np.concatenate([r['gt_poses'] for r in seq_results], axis=0)
         

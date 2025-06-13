@@ -85,7 +85,8 @@ class AriaLatentDataset(Dataset):
             'imu_features': imu_features,
             'poses': relative_poses,  # Changed key to match training dataset
             'sequence_id': sequence_id,  # Add sequence ID for proper grouping
-            'file_prefix': file_prefix  # Keep for debugging
+            'file_prefix': file_prefix,  # Keep for debugging
+            'frame_idx': int(file_prefix)  # Add frame index for temporal ordering
         }
         
         return batch

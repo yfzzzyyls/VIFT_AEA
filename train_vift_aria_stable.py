@@ -79,14 +79,13 @@ class VIFTStable(nn.Module):
             nn.Linear(embedding_dim, 7)
         )
         
-        # Very careful initialization
+        # Proper initialization
         with torch.no_grad():
-            # Small weights for final layer
-            nn.init.xavier_uniform_(self.fc2[-1].weight, gain=0.01)
-            # Remove hard zero-bias on final layer
+            # Use default gain for final layer to avoid frozen outputs
+            nn.init.xavier_uniform_(self.fc2[-1].weight)  # default gain ≈ 1
             
-            # Small initialization for first layer too
-            nn.init.xavier_uniform_(self.fc1[0].weight, gain=0.1)
+            # Normal initialization for first layer
+            nn.init.xavier_uniform_(self.fc1[0].weight)
     
     def positional_embedding(self, seq_length, device):
         import math
