@@ -233,47 +233,18 @@ def train_epoch(model, dataloader, optimizer, device, epoch, grad_clip=10.0):
             'poses': batch['poses'].to(device)
         }
         
-        # Normalize input features (visual and IMU) per batch
-        vf = batch_gpu['visual_features']
-        batch_gpu['visual_features'] = (vf - vf.mean()) / (vf.std() + 1e-8)
-        imu = batch_gpu['imu_features']
-        batch_gpu['imu_features'] = (imu - imu.mean()) / (imu.std() + 1e-8)
-        # Normalize GT translation to zero mean/unit variance per batch
-        poses = batch_gpu['poses']
-        t = poses[:, :, :3]
-        rest = poses[:, :, 3:]
-        t_norm = (t - t.mean()) / (t.std() + 1e-8)
-        batch_gpu['poses'] = torch.cat([t_norm, rest], dim=-1)
-        # Inspect scale mismatch on first batch
+        # Keep raw features and centimeter-scale translations
+        # NO per-batch normalization - the dataset already handles normalization globally
+        # Debug first batch to verify data scales
         if batch_idx == 0:
-            # Feature stats
-            vf = batch_gpu['visual_features']  # [B, S, V]
-            imu = batch_gpu['imu_features']    # [B, S, I]
-            print(f"Visual features mean: {vf.mean().item():.6f}, std: {vf.std().item():.6f}")
-            print(f"IMU features mean: {imu.mean().item():.6f}, std: {imu.std().item():.6f}")
-            # Translation stats before denormalization
-            t_norm = batch_gpu['poses'][0, :, :3]
-            print(f"Normalized translation mean: {t_norm.mean().item():.6f}, std: {t_norm.std().item():.6f}")
-            # Denormalize using dataset stats
-            ds = dataloader.dataset
-            mean = ds.trans_mean.to(device)
-            std = ds.trans_std.to(device)
-            t_raw = t_norm * std + mean
-            print(f"Raw translation mean: {t_raw.mean().item():.6f}, std: {t_raw.std().item():.6f}")
-            # Print raw feature windows to inspect scale
-            raw_vf = batch_gpu['visual_features'][0]  # [S, V]
-            raw_imu = batch_gpu['imu_features'][0]    # [S, I]
-            print("Raw visual feature window (shape", raw_vf.shape, "):")
-            print(raw_vf.cpu().numpy())
-            print("Raw IMU feature window (shape", raw_imu.shape, "):")
-            print(raw_imu.cpu().numpy())
-            # Print raw ground-truth translation and quaternion window
-            print("Raw GT translation window (cm) shape:", t_raw.shape)
-            print(t_raw.cpu().numpy())
-            # Quaternion raw GT
-            q_raw = batch_gpu['poses'][0, :, 3:7]
-            print("Raw GT quaternion window shape:", q_raw.shape)
-            print(q_raw.cpu().numpy())
+            vf = batch_gpu['visual_features']
+            imu = batch_gpu['imu_features']
+            poses = batch_gpu['poses']
+            
+            print(f"Visual features - mean: {vf.mean().item():.6f}, std: {vf.std().item():.6f}")
+            print(f"IMU features - mean: {imu.mean().item():.6f}, std: {imu.std().item():.6f}")
+            print(f"GT translations (cm) - mean: {poses[:,:,:3].mean().item():.6f}, std: {poses[:,:,:3].std().item():.6f}")
+            print(f"GT quaternions - mean: {poses[:,:,3:].mean().item():.6f}, std: {poses[:,:,3:].std().item():.6f}")
         
         # Forward pass
         predictions = model(batch_gpu)
