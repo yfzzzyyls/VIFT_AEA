@@ -157,16 +157,12 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_
             # Get predictions
             predictions = model(batch_gpu)
             
-            # Get predictions and align ground truth to prediction length
-            pred_poses = predictions['poses'].cpu().numpy()  # [B, num_preds, 7]
-            num_preds = pred_poses.shape[1]
-            # Get all ground truths
-            gt_all = batch_gpu['poses'].cpu().numpy()  # [B, seq_len, 7]
-            # If full window with initial frame, skip it; otherwise align from start
-            if gt_all.shape[1] >= num_preds + 1:
-                gt_poses = gt_all[:, 1:num_preds+1, :]
-            else:
-                gt_poses = gt_all[:, :num_preds, :]  # [B, num_preds, 7]
+            # Get predictions - now only single step prediction [B, 1, 7]
+            pred_poses = predictions['poses'].cpu().numpy()  # [B, 1, 7]
+            
+            # For single-step prediction, we compare with the last ground truth pose
+            # This represents the transition from current frame to next frame
+            gt_poses = batch_gpu['poses'][:, -1:, :].cpu().numpy()  # [B, 1, 7]
             
             # Process each sequence in batch
             for i in range(pred_poses.shape[0]):
@@ -197,12 +193,8 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_
                 }
                 all_results.append(result)
                 
-                # Determine sequence ID from file prefix
-                # This assumes test files are ordered by sequence (e.g., 0-99 for seq 016, 100-199 for seq 017, etc.)
-                file_prefix = int(batch['file_prefix'][i])
-                samples_per_seq = len(test_dataset) // len(test_sequences)
-                seq_idx = min(file_prefix // samples_per_seq, len(test_sequences) - 1)
-                seq_id = test_sequences[seq_idx]
+                # Use sequence ID directly from the batch
+                seq_id = batch['sequence_id'][i]
                 sequence_results[seq_id].append(result)
     
     # Compute overall statistics

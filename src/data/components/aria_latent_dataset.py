@@ -52,6 +52,14 @@ class AriaLatentDataset(Dataset):
         # Get actual file prefix
         file_prefix = self.file_prefixes[idx]
         
+        # Determine sequence ID based on file ordering
+        # Assuming test files are ordered: 0-98 -> seq 016, 99-197 -> seq 017, etc.
+        test_sequences = ['016', '017', '018', '019']
+        file_idx = int(file_prefix)
+        samples_per_seq = 99  # 396 total files / 4 sequences
+        seq_idx = min(file_idx // samples_per_seq, len(test_sequences) - 1)
+        sequence_id = test_sequences[seq_idx]
+        
         # Load features
         visual_features = np.load(self.root_dir / f"{file_prefix}_visual.npy")  # [10, 512]
         imu_features = np.load(self.root_dir / f"{file_prefix}_imu.npy")        # [10, 256]
@@ -76,7 +84,8 @@ class AriaLatentDataset(Dataset):
             'visual_features': visual_features,
             'imu_features': imu_features,
             'poses': relative_poses,  # Changed key to match training dataset
-            'file_prefix': file_prefix  # Add file prefix for sequence identification
+            'sequence_id': sequence_id,  # Add sequence ID for proper grouping
+            'file_prefix': file_prefix  # Keep for debugging
         }
         
         return batch
