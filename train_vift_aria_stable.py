@@ -28,9 +28,9 @@ class InputNormalization(nn.Module):
     def __init__(self, visual_dim=512, imu_dim=256):
         super().__init__()
         # Learnable normalization parameters
-        self.visual_scale = nn.Parameter(torch.ones(visual_dim) * 0.1)
+        self.visual_scale = nn.Parameter(torch.ones(visual_dim) * 1.0)
         self.visual_bias = nn.Parameter(torch.zeros(visual_dim))
-        self.imu_scale = nn.Parameter(torch.ones(imu_dim) * 0.01)  # IMU has larger values
+        self.imu_scale = nn.Parameter(torch.ones(imu_dim) * 1.0)  # IMU has larger values
         self.imu_bias = nn.Parameter(torch.zeros(imu_dim))
     
     def forward(self, visual_features, imu_features):
@@ -189,7 +189,7 @@ def robust_geodesic_loss(pred_quat, gt_quat):
     return angle_error.mean()
 
 
-def compute_stable_loss(predictions, batch, trans_weight=1.0, rot_weight=0.1):
+def compute_stable_loss(predictions, batch, trans_weight=1.0, rot_weight=1.0):
     """Stable loss computation with gradient-friendly formulation"""
     pred_poses = predictions['poses']
     gt_poses = batch['poses']  # [B, seq_len, 7]
