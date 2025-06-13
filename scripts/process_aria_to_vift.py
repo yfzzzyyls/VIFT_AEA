@@ -17,12 +17,27 @@ import argparse
 from tqdm import tqdm
 import ffmpeg
 from typing import List, Dict, Tuple, Optional
+from scipy.spatial.transform import Rotation
+
+# Project Aria imports for VRS processing
+try:
+    from projectaria_tools.core import data_provider
+    from projectaria_tools.core.sensor_data import TimeDomain, TimeQueryOptions
+    from projectaria_tools.core.stream_id import StreamId
+    ARIA_TOOLS_AVAILABLE = True
+except ImportError:
+    print("ERROR: Project Aria tools not installed. Install with:")
+    print("pip install projectaria-tools")
+    ARIA_TOOLS_AVAILABLE = False
 
 
 class AriaToVIFTProcessor:
     """Process AriaEveryday dataset maintaining quaternions"""
     
     def __init__(self, aria_data_dir: str, output_dir: str, max_frames: int = 500, device: str = "auto"):
+        if not ARIA_TOOLS_AVAILABLE:
+            raise ImportError("Project Aria tools required. Install with: pip install projectaria-tools")
+        
         self.aria_data_dir = Path(aria_data_dir)
         self.output_dir = Path(output_dir)
         self.max_frames = max_frames
@@ -291,75 +306,109 @@ class AriaToVIFTProcessor:
             
         return None
     
-    def generate_imu_data(self, poses: List[Dict], num_frames: int) -> torch.Tensor:
-        """Generate realistic IMU data from SLAM trajectory using quaternions"""
-        print(f"📊 Generating IMU data from trajectory")
+    def extract_real_imu_data(self, sequence_path: Path, num_frames: int, timestamps: List[float]) -> Optional[torch.Tensor]:
+        """Extract real IMU data from recording.vrs file"""
+        print(f"📊 Extracting real IMU data from recording.vrs")
         
-        imu_frequency = 1000.0  # 1kHz IMU
-        camera_frequency = 20.0  # 20Hz camera
-        samples_per_frame = int(imu_frequency / camera_frequency)  # ~50 samples per frame
+        if not ARIA_TOOLS_AVAILABLE:
+            print("❌ Project Aria tools not available. Cannot extract real IMU data.")
+            return None
         
-        imu_data = []
+        # Look for recording.vrs file
+        vrs_path = sequence_path / "recording.vrs"
+        if not vrs_path.exists():
+            print(f"❌ No recording.vrs found in {sequence_path}")
+            return None
         
-        # Ensure we have enough poses
-        if len(poses) < num_frames:
-            poses = poses * (num_frames // len(poses) + 1)
-        
-        for i in range(num_frames):
-            current_pose = poses[i] if i < len(poses) else poses[-1]
-            next_pose = poses[i + 1] if i + 1 < len(poses) else poses[-1]
+        try:
+            # Create data provider
+            provider = data_provider.create_vrs_data_provider(str(vrs_path))
+            if not provider:
+                print(f"❌ Failed to open VRS file: {vrs_path}")
+                return None
             
-            # Compute motion between poses
-            dt = max(next_pose['timestamp'] - current_pose['timestamp'], 1.0 / camera_frequency)
+            # Get IMU stream IDs - Aria has left and right IMUs
+            imu_right_id = StreamId("1201-2")  # Right IMU (primary)
+            imu_left_id = StreamId("1201-1")   # Left IMU (backup)
             
-            # Position difference
-            dp = np.array(next_pose['translation']) - np.array(current_pose['translation'])
-            velocity = dp / dt
+            # Check which streams are available
+            available_streams = provider.get_available_stream_ids()
             
-            # Estimate acceleration (with gravity)
-            acceleration = velocity / dt if dt > 0 else np.zeros(3)
-            acceleration[2] += 9.81  # Add gravity in Z direction
+            # Select IMU stream
+            if imu_right_id in available_streams:
+                imu_stream = imu_right_id
+                print("✅ Using right IMU stream")
+            elif imu_left_id in available_streams:
+                imu_stream = imu_left_id
+                print("✅ Using left IMU stream")
+            else:
+                print("❌ No IMU streams found in VRS file")
+                return None
             
-            # Angular velocity from quaternions
-            q1 = np.array(current_pose['quaternion'])  # [qx, qy, qz, qw]
-            q2 = np.array(next_pose['quaternion'])
+            # Get IMU configuration
+            imu_config = provider.get_imu_configuration(imu_stream)
+            if imu_config:
+                print(f"📊 IMU sample rate: {imu_config.nominal_rate_hz} Hz")
             
-            # Compute relative rotation: q_rel = q1^(-1) * q2
-            q1_inv = np.array([-q1[0], -q1[1], -q1[2], q1[3]]) / np.dot(q1, q1)
+            # Extract IMU data for each frame
+            imu_data = []
+            samples_per_frame = 50  # 1000Hz IMU / 20Hz camera
             
-            # Quaternion multiplication
-            q_rel = np.array([
-                q1_inv[3]*q2[0] + q1_inv[0]*q2[3] + q1_inv[1]*q2[2] - q1_inv[2]*q2[1],
-                q1_inv[3]*q2[1] - q1_inv[0]*q2[2] + q1_inv[1]*q2[3] + q1_inv[2]*q2[0],
-                q1_inv[3]*q2[2] + q1_inv[0]*q2[1] - q1_inv[1]*q2[0] + q1_inv[2]*q2[3],
-                q1_inv[3]*q2[3] - q1_inv[0]*q2[0] - q1_inv[1]*q2[1] - q1_inv[2]*q2[2]
-            ])
-            
-            # Convert to angular velocity (simplified)
-            angular_velocity = 2.0 * np.array([q_rel[0], q_rel[1], q_rel[2]]) / dt
-            
-            # Create IMU sequence for this frame
-            frame_imu = []
-            for j in range(samples_per_frame):
-                # Add realistic noise
-                accel_noise = np.random.normal(0, 0.1, 3)
-                gyro_noise = np.random.normal(0, 0.05, 3)
+            for i in range(num_frames):
+                if i >= len(timestamps):
+                    break
+                    
+                frame_timestamp = timestamps[i]
+                frame_imu_samples = []
                 
-                imu_sample = torch.tensor([
-                    angular_velocity[0] + gyro_noise[0],
-                    angular_velocity[1] + gyro_noise[1],
-                    angular_velocity[2] + gyro_noise[2],
-                    acceleration[0] + accel_noise[0],
-                    acceleration[1] + accel_noise[1],
-                    acceleration[2] + accel_noise[2]
-                ], device=self.device)
+                # Get 50 IMU samples for this frame (2.5ms before and after frame time)
+                for j in range(samples_per_frame):
+                    # Calculate sample time (centered around frame time)
+                    sample_offset = (j - samples_per_frame/2) * 0.001  # 1ms per sample
+                    sample_time = frame_timestamp + sample_offset
+                    sample_time_ns = int(sample_time * 1e9)
+                    
+                    # Get IMU data at this timestamp
+                    imu_sample = provider.get_imu_data_by_time_ns(
+                        imu_stream,
+                        sample_time_ns,
+                        TimeDomain.DEVICE_TIME,
+                        TimeQueryOptions.CLOSEST
+                    )
+                    
+                    if imu_sample:
+                        # Format: [gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]
+                        # Note: Aria convention is [accel, gyro], but we need [gyro, accel]
+                        sample_data = torch.tensor([
+                            imu_sample.gyro_radsec[0],   # X angular velocity (rad/s)
+                            imu_sample.gyro_radsec[1],   # Y angular velocity (rad/s)
+                            imu_sample.gyro_radsec[2],   # Z angular velocity (rad/s)
+                            imu_sample.accel_msec2[0],   # X acceleration (m/s²)
+                            imu_sample.accel_msec2[1],   # Y acceleration (m/s²)
+                            imu_sample.accel_msec2[2],   # Z acceleration (m/s²)
+                        ], device=self.device, dtype=torch.float64)
+                        
+                        frame_imu_samples.append(sample_data)
+                    else:
+                        # If no sample at exact time, use zeros (shouldn't happen normally)
+                        frame_imu_samples.append(torch.zeros(6, device=self.device, dtype=torch.float64))
                 
-                frame_imu.append(imu_sample)
+                # Stack samples for this frame
+                if len(frame_imu_samples) == samples_per_frame:
+                    imu_data.append(torch.stack(frame_imu_samples))
+                else:
+                    print(f"⚠️ Frame {i}: Only got {len(frame_imu_samples)} IMU samples")
+                    # Pad with zeros if needed
+                    while len(frame_imu_samples) < samples_per_frame:
+                        frame_imu_samples.append(torch.zeros(6, device=self.device, dtype=torch.float64))
+                    imu_data.append(torch.stack(frame_imu_samples[:samples_per_frame]))
             
-            imu_data.append(torch.stack(frame_imu))  # Shape: [samples_per_frame, 6]
-        
-        print(f"✅ Generated IMU data for {num_frames} frames on {self.device}")
-        return torch.stack(imu_data)  # Shape: [T, samples_per_frame, 6]
+            print(f"✅ Extracted real IMU data for {len(imu_data)} frames")
+            return torch.stack(imu_data)  # Shape: [T, samples_per_frame, 6]
+            
+        except Exception as e:
+            print(f"❌ Error extracting IMU data: {e}")
+            return None
     
     def process_sequence(self, sequence_path: Path, sequence_id: str) -> bool:
         """Process a single AriaEveryday sequence with quaternions"""
@@ -386,8 +435,13 @@ class AriaToVIFTProcessor:
         poses = poses[:actual_frames]
         visual_data = visual_data[:actual_frames]
         
-        # Generate IMU data
-        imu_data = self.generate_imu_data(poses, actual_frames)
+        # Extract real IMU data from VRS file
+        timestamps = [pose['timestamp'] for pose in poses]
+        imu_data = self.extract_real_imu_data(sequence_path, actual_frames, timestamps)
+        
+        if imu_data is None:
+            print(f"❌ Failed to extract real IMU data for {sequence_path.name}")
+            return False
         
         # Save processed sequence
         seq_output_dir = self.output_dir / sequence_id
@@ -410,7 +464,9 @@ class AriaToVIFTProcessor:
             'visual_shape': list(visual_data.shape),
             'imu_shape': list(imu_data.shape),
             'slam_trajectory_type': 'mps_slam',
-            'rotation_format': 'quaternion_xyzw'
+            'rotation_format': 'quaternion_xyzw',
+            'imu_source': 'real_vrs_data',
+            'imu_frequency': 1000  # Hz
         }
         
         with open(seq_output_dir / "metadata.json", 'w') as f:

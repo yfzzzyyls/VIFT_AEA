@@ -8,7 +8,7 @@ echo ""
 # Configuration
 ARIA_PATH="/mnt/ssd_ext/incSeg-data/aria_everyday"
 OUTPUT_BASE="/home/external/VIFT_AEA"
-PROCESSED_DIR="$OUTPUT_BASE/aria_processed_full_frames"
+PROCESSED_DIR="$OUTPUT_BASE/aria_processed_real_imu"
 MAX_FRAMES=-1  # Process ALL frames
 NUM_WORKERS=4
 
@@ -19,29 +19,13 @@ mkdir -p $OUTPUT_BASE/logs_full_frames
 # Activate environment
 source ~/venv/py39/bin/activate
 
-# Selected 20 sequences from 4 locations
-SEQUENCES=(
-    "loc1_script1_seq1_rec1"
-    "loc1_script1_seq5_rec1"
-    "loc1_script2_seq3_rec1"
-    "loc1_script2_seq6_rec2"
-    "loc1_script3_seq2_rec1"
-    "loc2_script1_seq2_rec1"
-    "loc2_script1_seq4_rec1"
-    "loc2_script2_seq1_rec1"
-    "loc2_script2_seq3_rec1"
-    "loc2_script3_seq5_rec1"
-    "loc3_script1_seq1_rec1"
-    "loc3_script1_seq3_rec1"
-    "loc3_script2_seq2_rec1"
-    "loc3_script2_seq4_rec1"
-    "loc3_script3_seq1_rec1"
-    "loc4_script1_seq1_rec1"
-    "loc4_script1_seq3_rec1"
-    "loc4_script2_seq2_rec1"
-    "loc4_script2_seq4_rec1"
-    "loc4_script3_seq3_rec1"
-)
+# Automatically pick 20 random sequences from ARIA_PATH
+echo "Selecting 20 random sequences from $ARIA_PATH"
+mapfile -t SEQ_DIRS < <(find "$ARIA_PATH" -mindepth 1 -maxdepth 1 -type d | shuf -n 20)
+SEQUENCES=()
+for dir in "${SEQ_DIRS[@]}"; do
+    SEQUENCES+=("$(basename "$dir")")
+done
 
 # Create sequence mapping file
 echo "Creating sequence mapping..."
@@ -85,14 +69,19 @@ process_sequences() {
             
             echo "[Worker $((worker_id+1))] Processing $seq_name -> $output_idx" >> $OUTPUT_BASE/logs_full_frames/worker_$((worker_id+1)).log
             
-            # Process single sequence using wrapper
-            python process_single_aria_sequence.py \
-                --sequence-name "$seq_name" \
-                --aria-path "$ARIA_PATH" \
+            # Process single sequence using real IMU script
+            python scripts/process_aria_raw_with_real_imu.py \
+                --input-dir "$ARIA_PATH" \
                 --output-dir "$PROCESSED_DIR" \
-                --output-idx "$output_idx" \
+                --sequences "$seq_name" \
                 --max-frames $MAX_FRAMES \
                 >> $OUTPUT_BASE/logs_full_frames/worker_$((worker_id+1)).log 2>&1
+            
+            # Rename output folder to match expected index
+            if [ -d "$PROCESSED_DIR/$seq_name" ]; then
+                mv "$PROCESSED_DIR/$seq_name" "$PROCESSED_DIR/$output_idx"
+                echo "[Worker $((worker_id+1))] Renamed $seq_name to $output_idx" >> $OUTPUT_BASE/logs_full_frames/worker_$((worker_id+1)).log
+            fi
             
             # Check if successful
             if [ -f "$PROCESSED_DIR/$output_idx/poses_quaternion.json" ]; then
@@ -152,7 +141,7 @@ echo "Next steps:"
 echo "1. Generate latent features with stride 10:"
 echo "   python generate_all_pretrained_latents_fixed.py \\"
 echo "       --processed-dir $PROCESSED_DIR \\"
-echo "       --output-dir $OUTPUT_BASE/aria_latent_full_frames \\"
+echo "       --output-dir $OUTPUT_BASE/aria_latent_real_imu \\"
 echo "       --stride 10 \\"
 echo "       --pose-scale 100.0 \\"
 echo "       --skip-test"
