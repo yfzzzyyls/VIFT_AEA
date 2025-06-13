@@ -132,8 +132,8 @@ class VIFTStable(nn.Module):
         output = self.fc2(output)
 
         # For relative poses between consecutive frames
-        # Use full sequence of relative pose outputs
-        predictions = output  # shape [B, seq_len, 7]
+        # Take only the last prediction (current -> next frame) to match paper
+        predictions = output[:, -1:, :]  # shape [B, 1, 7]
         
         # Split and normalize quaternions
         translation = predictions[:, :, :3]
@@ -182,14 +182,12 @@ def robust_geodesic_loss(pred_quat, gt_quat):
 
 def compute_stable_loss(predictions, batch, trans_weight=1.0, rot_weight=1.0):
     """Stable loss computation with gradient-friendly formulation"""
-    pred_poses = predictions['poses']
+    pred_poses = predictions['poses']  # [B, 1, 7] - only last prediction
     gt_poses = batch['poses']  # [B, seq_len, 7]
     
-    # Ensure shapes match
-    if pred_poses.shape[1] != gt_poses.shape[1]:
-        min_len = min(pred_poses.shape[1], gt_poses.shape[1])
-        pred_poses = pred_poses[:, :min_len, :]
-        gt_poses = gt_poses[:, :min_len, :]
+    # For causal prediction, we compare the last prediction with the last ground truth
+    # This represents the transition from current to next frame
+    gt_poses = gt_poses[:, -1:, :]  # Take only the last ground truth pose
     
     # Split predictions and ground truth
     pred_trans = pred_poses[:, :, :3]
