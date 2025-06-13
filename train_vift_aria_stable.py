@@ -230,6 +230,12 @@ def compute_stable_loss(predictions, batch, trans_weight=100.0, rot_weight=1.0):
     gt_trans = gt_poses[:, :, :3]
     gt_rot = gt_poses[:, :, 3:]
     
+    # Debug: print GT translation magnitudes to verify scale
+    if torch.rand(1).item() < 0.01:  # Print 1% of the time
+        trans_magnitudes = torch.norm(gt_trans, dim=-1)
+        print(f"GT relative translation magnitudes: min={trans_magnitudes.min().item():.4f}, "
+              f"max={trans_magnitudes.max().item():.4f}, mean={trans_magnitudes.mean().item():.4f} m")
+    
     # Use Huber loss for translation (more robust to outliers)
     trans_loss = F.smooth_l1_loss(pred_trans, gt_trans)
     
