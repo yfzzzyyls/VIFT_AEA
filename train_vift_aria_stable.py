@@ -43,8 +43,8 @@ class InputNormalization(nn.Module):
 class VIFTStable(nn.Module):
     """Stable VIFT model with normalization and careful initialization"""
     
-    def __init__(self, input_dim=768, embedding_dim=128, num_layers=2, 
-                 nhead=8, dim_feedforward=512, dropout=0.1):
+    def __init__(self, input_dim=768, embedding_dim=256, num_layers=4, 
+                 nhead=8, dim_feedforward=1024, dropout=0.1):
         super().__init__()
         
         # Input normalization
@@ -242,7 +242,7 @@ def train_epoch(model, dataloader, optimizer, device, epoch, grad_clip=10.0):
             
             print(f"Visual features - mean: {vf.mean().item():.6f}, std: {vf.std().item():.6f}")
             print(f"IMU features - mean: {imu.mean().item():.6f}, std: {imu.std().item():.6f}")
-            print(f"GT translations (cm) - mean: {poses[:,:,:3].mean().item():.6f}, std: {poses[:,:,:3].std().item():.6f}")
+            print(f"GT translations (m) - mean: {poses[:,:,:3].mean().item():.6f}, std: {poses[:,:,:3].std().item():.6f}")
             print(f"GT quaternions - mean: {poses[:,:,3:].mean().item():.6f}, std: {poses[:,:,3:].std().item():.6f}")
         
         # Forward pass
@@ -439,7 +439,7 @@ def main():
         print(f"\nEpoch {epoch + 1} Summary:")
         print(f"  Train Loss: {train_loss:.6f}")
         print(f"  Val Loss: {val_metrics['loss']:.6f}")
-        print(f"  Val Trans Error: {val_metrics['trans_error']:.4f} cm")
+        print(f"  Val Trans Error: {val_metrics['trans_error']:.4f} m")
         print(f"  Val Rot Error: {val_metrics['rot_error_deg']:.2f} degrees")
         
         # Save checkpoint
@@ -453,12 +453,12 @@ def main():
                 'val_metrics': val_metrics,
                 'config': {
                     'input_dim': 768,
-                    'embedding_dim': 128,
-                    'num_layers': 2,
+                    'embedding_dim': 256,
+                    'num_layers': 4,
                     'nhead': 8,
-                    'dim_feedforward': 512,
-                    'architecture': 'stable',
-                    'features': 'input_norm,pre_norm,huber_loss,smooth_geodesic'
+                    'dim_feedforward': 1024,
+                    'architecture': 'original',
+                    'features': 'matching_paper_architecture,single_step_prediction,proper_init'
                 }
             }
             torch.save(checkpoint, checkpoint_dir / 'best_model.pt')

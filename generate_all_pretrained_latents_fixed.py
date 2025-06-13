@@ -210,8 +210,8 @@ def process_sequence(seq_dir, model, device, window_size=11, stride=1, pose_scal
         # Convert absolute poses to relative poses with FIXED coordinate transformation
         window_relative_poses = convert_absolute_to_relative_fixed(window_absolute_poses)
         
-        # Scale translation from meters to centimeters
-        window_relative_poses[:, :3] *= pose_scale
+        # Keep translation in meters (standard VIO unit)
+        # Note: pose_scale parameter is now ignored to maintain consistency
         
         # Resize images to 256x512 (model expects this size)
         window_visual_resized = F.interpolate(
@@ -388,7 +388,7 @@ def generate_split_data(processed_dir, output_dir, model, device, pose_scale=100
         print(f"  Max:  {np.max(rotation_angles):.4f}")
         print(f"  95%:  {np.percentile(rotation_angles, 95):.4f}")
         
-        print(f"\nTranslation norms (cm):")
+        print(f"\nTranslation norms (m):")
         print(f"  Mean: {np.mean(translation_norms):.4f}")
         print(f"  Std:  {np.std(translation_norms):.4f}")
         print(f"  Max:  {np.max(translation_norms):.4f}")

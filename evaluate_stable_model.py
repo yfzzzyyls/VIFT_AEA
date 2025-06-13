@@ -79,7 +79,7 @@ def load_checkpoint(checkpoint_path, device):
     if 'val_metrics' in checkpoint:
         metrics = checkpoint['val_metrics']
         if 'trans_error' in metrics:
-            print(f"   Val translation error: {metrics['trans_error']:.3f} cm")
+            print(f"   Val translation error: {metrics['trans_error']:.3f} m")
         if 'rot_error_deg' in metrics:
             print(f"   Val rotation error: {metrics['rot_error_deg']:.2f}°")
     
@@ -206,11 +206,11 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_
     print("📊 EVALUATION RESULTS")
     print("="*50)
     print(f"\n📏 Translation Error (cm):")
-    print(f"   Mean:   {np.mean(all_trans_errors):.3f}")
-    print(f"   Std:    {np.std(all_trans_errors):.3f}")
-    print(f"   Median: {np.median(all_trans_errors):.3f}")
-    print(f"   95%:    {np.percentile(all_trans_errors, 95):.3f}")
-    print(f"   Max:    {np.max(all_trans_errors):.3f}")
+    print(f"   Mean:   {np.mean(all_trans_errors) * 100:.3f}")
+    print(f"   Std:    {np.std(all_trans_errors) * 100:.3f}")
+    print(f"   Median: {np.median(all_trans_errors) * 100:.3f}")
+    print(f"   95%:    {np.percentile(all_trans_errors, 95) * 100:.3f}")
+    print(f"   Max:    {np.max(all_trans_errors) * 100:.3f}")
     
     print(f"\n🔄 Rotation Error (degrees):")
     print(f"   Mean:   {np.mean(all_rot_errors):.3f}")
@@ -312,11 +312,11 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_
         f.write("EVALUATION RESULTS\n")
         f.write("==================\n\n")
         f.write("Translation Error (cm):\n")
-        f.write(f"  Mean:   {np.mean(all_trans_errors):.3f}\n")
-        f.write(f"  Std:    {np.std(all_trans_errors):.3f}\n")
-        f.write(f"  Median: {np.median(all_trans_errors):.3f}\n")
-        f.write(f"  95%:    {np.percentile(all_trans_errors, 95):.3f}\n")
-        f.write(f"  Max:    {np.max(all_trans_errors):.3f}\n\n")
+        f.write(f"  Mean:   {np.mean(all_trans_errors) * 100:.3f}\n")
+        f.write(f"  Std:    {np.std(all_trans_errors) * 100:.3f}\n")
+        f.write(f"  Median: {np.median(all_trans_errors) * 100:.3f}\n")
+        f.write(f"  95%:    {np.percentile(all_trans_errors, 95) * 100:.3f}\n")
+        f.write(f"  Max:    {np.max(all_trans_errors) * 100:.3f}\n\n")
         f.write("Rotation Error (degrees):\n")
         f.write(f"  Mean:   {np.mean(all_rot_errors):.3f}\n")
         f.write(f"  Std:    {np.std(all_rot_errors):.3f}\n")
@@ -338,19 +338,23 @@ def plot_trajectory_3d(pred_positions, gt_positions, sequence_name, output_path,
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
     
+    # Convert from meters to centimeters for display
+    pred_positions_cm = pred_positions * 100
+    gt_positions_cm = gt_positions * 100
+    
     # Plot trajectories
-    ax.plot(gt_positions[:, 0], gt_positions[:, 1], gt_positions[:, 2], 
+    ax.plot(gt_positions_cm[:, 0], gt_positions_cm[:, 1], gt_positions_cm[:, 2], 
             'b-', linewidth=2, label='Ground Truth')
-    ax.plot(pred_positions[:, 0], pred_positions[:, 1], pred_positions[:, 2], 
+    ax.plot(pred_positions_cm[:, 0], pred_positions_cm[:, 1], pred_positions_cm[:, 2], 
             'r--', linewidth=2, label='Prediction', alpha=0.8)
     
     # Mark start and end
-    ax.scatter(*gt_positions[0], color='green', s=100, marker='o', label='Start')
-    ax.scatter(*gt_positions[-1], color='red', s=100, marker='x', label='End')
+    ax.scatter(*gt_positions_cm[0], color='green', s=100, marker='o', label='Start')
+    ax.scatter(*gt_positions_cm[-1], color='red', s=100, marker='x', label='End')
     
-    # Calculate path lengths
-    gt_length = np.sum(np.linalg.norm(np.diff(gt_positions, axis=0), axis=1))
-    pred_length = np.sum(np.linalg.norm(np.diff(pred_positions, axis=0), axis=1))
+    # Calculate path lengths (convert to cm)
+    gt_length = np.sum(np.linalg.norm(np.diff(gt_positions, axis=0), axis=1)) * 100
+    pred_length = np.sum(np.linalg.norm(np.diff(pred_positions, axis=0), axis=1)) * 100
     
     ax.set_xlabel('X (cm)')
     ax.set_ylabel('Y (cm)')
@@ -455,17 +459,21 @@ def plot_sample_trajectories(results, output_dir):
         pred_positions, _ = integrate_trajectory(result['pred_poses'])
         gt_positions, _ = integrate_trajectory(result['gt_poses'])
         
+        # Convert to cm for display
+        gt_positions_cm = gt_positions * 100
+        pred_positions_cm = pred_positions * 100
+        
         # Plot 2D trajectories
-        ax.plot(gt_positions[:, 0], gt_positions[:, 1], 'b-', label='Ground Truth', linewidth=2)
-        ax.plot(pred_positions[:, 0], pred_positions[:, 1], 'r--', label='Prediction', linewidth=2)
+        ax.plot(gt_positions_cm[:, 0], gt_positions_cm[:, 1], 'b-', label='Ground Truth', linewidth=2)
+        ax.plot(pred_positions_cm[:, 0], pred_positions_cm[:, 1], 'r--', label='Prediction', linewidth=2)
         
-        ax.scatter(gt_positions[0, 0], gt_positions[0, 1], c='green', s=100, marker='o', label='Start')
-        ax.scatter(gt_positions[-1, 0], gt_positions[-1, 1], c='black', s=100, marker='x', label='GT End')
-        ax.scatter(pred_positions[-1, 0], pred_positions[-1, 1], c='red', s=100, marker='x', label='Pred End')
+        ax.scatter(gt_positions_cm[0, 0], gt_positions_cm[0, 1], c='green', s=100, marker='o', label='Start')
+        ax.scatter(gt_positions_cm[-1, 0], gt_positions_cm[-1, 1], c='black', s=100, marker='x', label='GT End')
+        ax.scatter(pred_positions_cm[-1, 0], pred_positions_cm[-1, 1], c='red', s=100, marker='x', label='Pred End')
         
-        # Compute trajectory length
-        gt_length = np.sum(np.linalg.norm(np.diff(gt_positions, axis=0), axis=1))
-        pred_length = np.sum(np.linalg.norm(np.diff(pred_positions, axis=0), axis=1))
+        # Compute trajectory length (convert to cm)
+        gt_length = np.sum(np.linalg.norm(np.diff(gt_positions, axis=0), axis=1)) * 100
+        pred_length = np.sum(np.linalg.norm(np.diff(pred_positions, axis=0), axis=1)) * 100
         
         ax.set_xlabel('X (cm)')
         ax.set_ylabel('Y (cm)')
@@ -484,15 +492,16 @@ def plot_sample_trajectories(results, output_dir):
     all_trans_errors = np.concatenate([r['trans_errors'] for r in results])
     all_rot_errors = np.concatenate([r['rot_errors'] for r in results])
     
-    # Translation error histogram
-    ax1.hist(all_trans_errors, bins=50, alpha=0.7, color='blue', edgecolor='black')
+    # Translation error histogram (convert to cm for display)
+    all_trans_errors_cm = all_trans_errors * 100
+    ax1.hist(all_trans_errors_cm, bins=50, alpha=0.7, color='blue', edgecolor='black')
     ax1.set_xlabel('Translation Error (cm)')
     ax1.set_ylabel('Count')
     ax1.set_title('Translation Error Distribution')
-    ax1.axvline(np.mean(all_trans_errors), color='red', linestyle='--', 
-                label=f'Mean: {np.mean(all_trans_errors):.2f}cm')
-    ax1.axvline(np.median(all_trans_errors), color='green', linestyle='--', 
-                label=f'Median: {np.median(all_trans_errors):.2f}cm')
+    ax1.axvline(np.mean(all_trans_errors_cm), color='red', linestyle='--', 
+                label=f'Mean: {np.mean(all_trans_errors_cm):.2f}cm')
+    ax1.axvline(np.median(all_trans_errors_cm), color='green', linestyle='--', 
+                label=f'Median: {np.median(all_trans_errors_cm):.2f}cm')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     

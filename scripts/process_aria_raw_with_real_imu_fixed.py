@@ -19,15 +19,10 @@ import torch
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
-# Try to import Aria tools
-try:
-    from projectaria_tools.core import data_provider
-    from projectaria_tools.core.stream_id import StreamId
-    from projectaria_tools.core.vrs import TimeDomain, TimeQueryOptions
-    ARIA_TOOLS_AVAILABLE = True
-except ImportError:
-    ARIA_TOOLS_AVAILABLE = False
-    print("⚠️ projectaria_tools not available - functionality limited")
+# Import Aria tools (required)
+from projectaria_tools.core import data_provider
+from projectaria_tools.core.stream_id import StreamId
+from projectaria_tools.core.sensor_data import TimeDomain, TimeQueryOptions
 
 # Try alternative VRS reader
 try:
@@ -38,10 +33,10 @@ except ImportError:
 
 
 class AriaRawProcessor:
-    def __init__(self, input_dir: str, output_dir: str, max_frames: int = -1):
+    def __init__(self, input_dir: str, output_dir: str, max_frames: int = 1000):
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
-        self.max_frames = max_frames
+        self.max_frames = max_frames  # Default 1000 frames
         self.output_dir.mkdir(exist_ok=True)
         
         # Check device
@@ -118,77 +113,52 @@ class AriaRawProcessor:
         raw_distance = np.sum(np.linalg.norm(np.diff(raw_positions, axis=0), axis=1))
         print(f"📊 Raw SLAM: {raw_duration:.1f}s duration, {raw_distance:.2f}m total movement")
         
-        # Resample to camera frame rate (20 fps)
-        camera_fps = 20.0
-        frame_interval = 1.0 / camera_fps
+        # Evenly sample frames across the trajectory
+        total_frames = len(raw_poses)
         
-        # Start from first SLAM timestamp
-        start_time = raw_poses[0]['timestamp']
-        end_time = raw_poses[-1]['timestamp']
-        
-        # Create resampled poses at camera frame rate
-        resampled_poses = []
-        current_time = start_time
-        
-        print(f"📊 Resampling SLAM poses to {camera_fps} fps...")
-        
-        # Apply frame limit if specified
-        max_duration = None
-        if self.max_frames > 0:
-            max_duration = self.max_frames / camera_fps
-            print(f"📊 Limiting to {self.max_frames} frames ({max_duration:.1f}s)")
+        if self.max_frames > 0 and self.max_frames < total_frames:
+            # Evenly sample max_frames from the trajectory
+            print(f"📊 Evenly sampling {self.max_frames} frames from {total_frames} total poses...")
+            indices = np.linspace(0, total_frames - 1, self.max_frames, dtype=int)
+            resampled_poses = [raw_poses[i] for i in indices]
         else:
-            # If max_frames is -1, use reasonable limit for memory
-            MAX_REASONABLE_DURATION = 300.0  # 5 minutes
-            if raw_duration > MAX_REASONABLE_DURATION:
-                max_duration = MAX_REASONABLE_DURATION
-                print(f"⚠️ Sequence is {raw_duration:.1f}s, limiting to {max_duration:.1f}s to avoid memory issues")
-        
-        if max_duration:
-            end_time = min(end_time, start_time + max_duration)
-        
-        # Resample poses
-        while current_time <= end_time:
-            # Find the closest SLAM pose to this timestamp
-            min_diff = float('inf')
-            closest_pose = None
-            
-            for pose in raw_poses:
-                diff = abs(pose['timestamp'] - current_time)
-                if diff < min_diff:
-                    min_diff = diff
-                    closest_pose = pose
-                elif diff > min_diff:
-                    # Since poses are ordered by time, we can break early
-                    break
-            
-            if closest_pose and min_diff < frame_interval/2:  # Within half a frame interval
-                resampled_poses.append({
-                    'timestamp': current_time,  # Use exact frame time
-                    'translation': closest_pose['translation'],
-                    'quaternion': closest_pose['quaternion']
-                })
-            
-            current_time += frame_interval
+            # Use all frames
+            resampled_poses = raw_poses
+            print(f"📊 Using all {len(resampled_poses)} frames")
         
         if resampled_poses:
             # Calculate resampled statistics
             resampled_positions = np.array([p['translation'] for p in resampled_poses])
-            resampled_duration = len(resampled_poses) / camera_fps
+            resampled_duration = resampled_poses[-1]['timestamp'] - resampled_poses[0]['timestamp']
             resampled_distance = np.sum(np.linalg.norm(np.diff(resampled_positions, axis=0), axis=1))
             
-            print(f"✅ Resampled to {len(resampled_poses)} poses at {camera_fps} fps")
+            print(f"✅ Sampled {len(resampled_poses)} poses")
             print(f"📊 Duration: {resampled_duration:.1f}s, Movement: {resampled_distance:.2f}m")
             
         return resampled_poses if resampled_poses else None
     
     def extract_real_imu_data(self, vrs_path: Path, poses: List[Dict]) -> Optional[torch.Tensor]:
-        """Extract real IMU data from VRS file."""
+        """Extract real IMU data from VRS file - NO FALLBACKS."""
         print(f"📊 Extracting real IMU data from VRS...")
         
-        # Use original method since AriaVrsDataLoader is not available
-        if not ARIA_VRS_LOADER_AVAILABLE:
+        # Try AriaVrsDataLoader first if available
+        if ARIA_VRS_LOADER_AVAILABLE:
+            try:
+                result = self.extract_real_imu_data_alternative(vrs_path, poses)
+                if result is not None:
+                    return result
+            except Exception as e:
+                print(f"❌ AriaVrsDataLoader failed: {e}")
+        
+        # Try original method
+        try:
             return self.extract_real_imu_data_original(vrs_path, poses)
+        except Exception as e:
+            print(f"❌ Real IMU extraction failed: {e}")
+            raise RuntimeError(f"Failed to extract real IMU data: {e}")
+    
+    def extract_real_imu_data_alternative(self, vrs_path: Path, poses: List[Dict]) -> Optional[torch.Tensor]:
+        """Extract real IMU data using AriaVrsDataLoader."""
         
         try:
             # Use AriaVrsDataLoader for simpler IMU extraction
@@ -257,6 +227,8 @@ class AriaRawProcessor:
             if imu_data:
                 print(f"✅ Extracted real IMU data for {len(imu_data)} frames")
                 return torch.stack(imu_data).to(self.device)
+            else:
+                print("❌ No IMU data extracted")
             
         except Exception as e:
             print(f"❌ Error with AriaVrsDataLoader: {e}")
@@ -267,6 +239,7 @@ class AriaRawProcessor:
     
     def extract_real_imu_data_original(self, vrs_path: Path, poses: List[Dict]) -> Optional[torch.Tensor]:
         """Extract real IMU data from VRS file using original API."""
+        print("📊 Using original projectaria_tools method...")
         try:
             provider = data_provider.create_vrs_data_provider(str(vrs_path))
             if not provider:
@@ -321,12 +294,16 @@ class AriaRawProcessor:
                     sample_time_ns = int(sample_time * 1e9)
                     
                     # Get IMU data
-                    imu_sample = provider.get_imu_data_by_time_ns(
-                        imu_stream,
-                        sample_time_ns,
-                        TimeDomain.DEVICE_TIME,
-                        TimeQueryOptions.CLOSEST
-                    )
+                    try:
+                        imu_sample = provider.get_imu_data_by_time_ns(
+                            imu_stream,
+                            sample_time_ns,
+                            TimeDomain.DEVICE_TIME,
+                            TimeQueryOptions.CLOSEST
+                        )
+                    except Exception as e:
+                        print(f"⚠️ Error getting IMU sample: {e}")
+                        imu_sample = None
                     
                     if imu_sample:
                         # Format: [gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]
@@ -525,6 +502,7 @@ class AriaRawProcessor:
         print(f"✅ Successfully processed {sequence_path.name}: {min_frames} frames")
         return True
     
+    
     def process_dataset(self, sequences: Optional[List[str]] = None, max_sequences: Optional[int] = None):
         """Process multiple sequences."""
         print(f"🎯 Processing Raw AriaEveryday Dataset")
@@ -579,8 +557,8 @@ def main():
                        help='Path to raw AriaEveryday dataset')
     parser.add_argument('--output-dir', type=str, default='aria_processed_real_imu',
                        help='Output directory')
-    parser.add_argument('--max-frames', type=int, default=-1,
-                       help='Max frames per sequence (-1 for all frames, limited by memory)')
+    parser.add_argument('--max-frames', type=int, default=1000,
+                       help='Max frames per sequence (default: 1000, evenly sampled)')
     parser.add_argument('--sequences', nargs='+', help='Specific sequences to process')
     parser.add_argument('--max-sequences', type=int, help='Maximum number of sequences')
     

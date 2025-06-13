@@ -9,7 +9,7 @@ echo ""
 ARIA_PATH="/mnt/ssd_ext/incSeg-data/aria_everyday"
 OUTPUT_BASE="/home/external/VIFT_AEA"
 PROCESSED_DIR="$OUTPUT_BASE/aria_processed_real_imu"
-MAX_FRAMES=-1  # Process ALL frames
+MAX_FRAMES=1000  # Default 1000 frames evenly sampled
 NUM_WORKERS=4
 
 # Create directories
@@ -45,7 +45,7 @@ done
 echo "}" >> $PROCESSED_DIR/sequence_mapping.json
 
 echo "Processing ${#SEQUENCES[@]} sequences with $NUM_WORKERS workers"
-echo "Each sequence will have ALL frames extracted"
+echo "Each sequence will have $MAX_FRAMES frames extracted (evenly sampled)"
 echo ""
 
 # Function to process sequences for a worker
@@ -70,7 +70,7 @@ process_sequences() {
             echo "[Worker $((worker_id+1))] Processing $seq_name -> $output_idx" >> $OUTPUT_BASE/logs_full_frames/worker_$((worker_id+1)).log
             
             # Process single sequence using real IMU script
-            python scripts/process_aria_raw_with_real_imu.py \
+            python scripts/process_aria_raw_with_real_imu_fixed.py \
                 --input-dir "$ARIA_PATH" \
                 --output-dir "$PROCESSED_DIR" \
                 --sequences "$seq_name" \
@@ -143,7 +143,6 @@ echo "   python generate_all_pretrained_latents_fixed.py \\"
 echo "       --processed-dir $PROCESSED_DIR \\"
 echo "       --output-dir $OUTPUT_BASE/aria_latent_real_imu \\"
 echo "       --stride 10 \\"
-echo "       --pose-scale 100.0 \\"
 echo "       --skip-test"
 echo ""
 echo "2. Train model with full frame data"

@@ -72,7 +72,7 @@ class AriaLatentDataset(Dataset):
         imu_features = (imu_features - self.imu_mean.to(imu_features.device)) / self.imu_std.to(imu_features.device)
         relative_poses = torch.from_numpy(relative_poses).float()
         
-        # NOTE: GT files already contain poses in centimeters, no scaling needed!
+        # NOTE: GT files now contain poses in meters (standard VIO unit)
 
         # Normalize translation targets using dataset-wide stats
         t = relative_poses[:, :3]
