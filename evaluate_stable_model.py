@@ -132,7 +132,7 @@ def integrate_trajectory(relative_poses, initial_pose=None):
     return absolute_positions, absolute_rotations
 
 
-def evaluate_model(model, test_loader, device, output_dir, test_sequences):
+def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_dataset):
     """Evaluate model on test data"""
     os.makedirs(output_dir, exist_ok=True)
     
@@ -197,8 +197,11 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
                 }
                 all_results.append(result)
                 
-                # Assign to appropriate sequence (simple round-robin assumption)
-                seq_idx = (batch_idx * test_loader.batch_size + i) % len(test_sequences)
+                # Determine sequence ID from file prefix
+                # This assumes test files are ordered by sequence (e.g., 0-99 for seq 016, 100-199 for seq 017, etc.)
+                file_prefix = int(batch['file_prefix'][i])
+                samples_per_seq = len(test_dataset) // len(test_sequences)
+                seq_idx = min(file_prefix // samples_per_seq, len(test_sequences) - 1)
                 seq_id = test_sequences[seq_idx]
                 sequence_results[seq_id].append(result)
     
@@ -549,7 +552,7 @@ def main():
     test_sequences = ['016', '017', '018', '019']  # From test_sequences.txt
     
     # Evaluate
-    results = evaluate_model(model, test_loader, device, args.output_dir, test_sequences)
+    results = evaluate_model(model, test_loader, device, args.output_dir, test_sequences, test_dataset)
     
     print("\n✅ Evaluation complete!")
 

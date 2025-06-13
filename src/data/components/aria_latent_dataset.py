@@ -75,7 +75,8 @@ class AriaLatentDataset(Dataset):
         batch = {
             'visual_features': visual_features,
             'imu_features': imu_features,
-            'poses': relative_poses  # Changed key to match training dataset
+            'poses': relative_poses,  # Changed key to match training dataset
+            'file_prefix': file_prefix  # Add file prefix for sequence identification
         }
         
         return batch
