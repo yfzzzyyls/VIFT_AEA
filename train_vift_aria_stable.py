@@ -192,24 +192,37 @@ def quat_mul(q1, q2):
     
     return torch.stack([x, y, z, w], dim=-1)
 
+def quat_apply(q, v):
+    """Apply quaternion rotation to vector v"""
+    # Convert vector to quaternion form [vx, vy, vz, 0]
+    v_quat = torch.cat([v, torch.zeros_like(v[..., :1])], dim=-1)
+    
+    # Rotate: q * v * q^{-1}
+    q_conj = quat_inv(q)
+    v_rot = quat_mul(quat_mul(q, v_quat), q_conj)
+    
+    # Extract vector part
+    return v_rot[..., :3]
+
 def compute_stable_loss(predictions, batch, trans_weight=100.0, rot_weight=1.0):
     """Stable loss computation with gradient-friendly formulation"""
     pred_poses = predictions['poses']  # [B, 1, 7] - only last prediction
     
     # Compute relative ground truth from last two frames
-    last = batch['poses'][:, -1:, :]    # [B, 1, 7] pose_t
-    prev = batch['poses'][:, -2:-1, :]  # [B, 1, 7] pose_{t-1}
+    prev_q = batch['poses'][:, -2:-1, 3:]    # [B, 1, 4] q_{t-1}
+    prev_t = batch['poses'][:, -2:-1, :3]   # [B, 1, 3] p_{t-1}
+    last_q = batch['poses'][:, -1:, 3:]     # [B, 1, 4] q_t
+    last_t = batch['poses'][:, -1:, :3]     # [B, 1, 3] p_t
     
-    # Translational delta in meters
-    gt_trans = last[:, :, :3] - prev[:, :, :3]
+    # Relative rotation: q_rel = q_{t-1}^{-1} * q_t
+    q_rel = quat_mul(quat_inv(prev_q), last_q)
     
-    # Rotational delta: q_rel = q_prev^{-1} * q_last
-    q_prev = prev[:, :, 3:]
-    q_last = last[:, :, 3:]
-    q_rel = quat_mul(quat_inv(q_prev), q_last)
+    # Relative translation expressed in the PREVIOUS frame
+    world_delta = last_t - prev_t  # Translation in world frame
+    rel_trans = quat_apply(quat_inv(prev_q), world_delta)  # Transform to frame t-1
     
     # Combine into relative pose
-    gt_poses = torch.cat([gt_trans, q_rel], dim=-1)  # [B, 1, 7]
+    gt_poses = torch.cat([rel_trans, q_rel], dim=-1)  # [B, 1, 7]
     
     # Split predictions and ground truth
     pred_trans = pred_poses[:, :, :3]
