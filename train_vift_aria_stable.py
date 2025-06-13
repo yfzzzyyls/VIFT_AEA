@@ -217,7 +217,7 @@ def compute_stable_loss(predictions, batch, trans_weight=1.0, rot_weight=1.0):
     }
 
 
-def train_epoch(model, dataloader, optimizer, device, epoch, grad_clip=0.5):
+def train_epoch(model, dataloader, optimizer, device, epoch, grad_clip=10.0):
     """Train with gradient monitoring"""
     model.train()
     total_loss = 0
@@ -290,10 +290,10 @@ def train_epoch(model, dataloader, optimizer, device, epoch, grad_clip=0.5):
         
         loss = loss_dict['total_loss']
         
-        # Skip if loss is too large (likely to cause instability)
+        # Don't skip high-loss batches - they contain important learning signals
+        # Just log them for monitoring
         if loss.item() > 100.0:
-            print(f"Skipping batch {batch_idx} with large loss: {loss.item():.2f}")
-            continue
+            print(f"High loss batch {batch_idx}: {loss.item():.2f} (training continues)")
         
         # Backward pass
         optimizer.zero_grad()
@@ -385,7 +385,7 @@ def main():
     parser = argparse.ArgumentParser(description='Train VIFT with Stable Training')
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--batch-size', type=int, default=8)  # Smaller batch size
-    parser.add_argument('--lr', type=float, default=5e-5)  # Very small learning rate
+    parser.add_argument('--lr', type=float, default=1e-4)  # Match paper's learning rate
     parser.add_argument('--data-dir', type=str, default='/home/external/VIFT_AEA/aria_latent_full_frames')
     parser.add_argument('--checkpoint-dir', type=str, default='checkpoints_vift_stable')
     parser.add_argument('--device', type=str, default='cuda')
@@ -406,10 +406,11 @@ def main():
     print("Key features:")
     print("- Input normalization for visual and IMU features")
     print("- Robust loss functions (Huber + smooth geodesic)")
-    print("- Aggressive gradient clipping (0.5)")
+    print("- Gradient clipping at 10.0 (matching paper)")
     print("- Pre-norm transformer for stability")
-    print("- Very small learning rate (5e-5)")
-    print("- Small batch size (8)")
+    print("- Learning rate 1e-4 (matching paper)")
+    print("- Causal masking with single-step prediction")
+    print("- No output BatchNorm (fixed architectural issue)")
     print(f"{'='*60}\n")
     
     # Load datasets
