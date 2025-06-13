@@ -29,7 +29,7 @@ This script processes 20 sequences from 4 different locations, extracting ALL fr
 # Generate latent features with stride 10
 python generate_all_pretrained_latents_fixed.py \
     --processed-dir aria_processed_full_frames \
-    --output-dir aria_latent_full_frames \
+    --output-dir aria_latent \
     --stride 10 \
     --pose-scale 100.0 \
     --skip-test
@@ -40,26 +40,26 @@ python generate_all_pretrained_latents_fixed.py \
 #### Stable Version
 
 ```bash
-# Step 1: Generate latent features (if not already done)
-python generate_all_pretrained_latents_fixed.py \
-    --processed-dir aria_processed_full_frames \
-    --output-dir aria_latent_full_frames \
-    --stride 10 \
-    --pose-scale 100.0
+# # Step 1: Generate latent features (if not already done)
+# python generate_all_pretrained_latents_fixed.py \
+#     --processed-dir aria_processed_full_frames \
+#     --output-dir aria_latent_full_frames \
+#     --stride 10 \
+#     --pose-scale 100.0
 
 # Step 2: Train the stable model
 python train_vift_aria_stable.py \
     --epochs 50 \
     --batch-size 32 \
     --lr 5e-5 \
-    --data-dir aria_latent_full_frames \
+    --data-dir aria_latent \
     --checkpoint-dir checkpoints_vift_stable \
     --device cuda
 
 # Step 3: Evaluate (auto-generates test features if needed)
 python evaluate_stable_model.py \
     --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
-    --data-dir aria_latent_full_frames \
+    --data-dir aria_latent \
     --output-dir evaluation_results \
     --device cuda
 ```
@@ -69,27 +69,6 @@ python evaluate_stable_model.py \
 - Rotation Error: 1.302° (mean), 0.741° (median)
 - 95% of predictions within 3.192 cm and 4.288°
 
-#### Alternative: World-Frame Features with Scale Fixes
-```bash
-# Generate features with world-frame relative poses (prevents direction flips)
-python generate_all_pretrained_latents_world_frame.py \
-    --processed-dir aria_processed_full_frames \
-    --output-dir aria_latent_world_frame \
-    --stride 10 \
-    --pose-scale 100.0
-```
-
-#### Fixed Scale Training
-```bash
-# New training script that addresses scale and stability issues
-python train_vift_aria_fixed_scale.py \
-    --epochs 50 \
-    --batch-size 16 \
-    --lr 1e-4 \
-    --data-dir aria_latent_world_frame \
-    --checkpoint-dir checkpoints_vift_fixed \
-    --device cuda
-```
 
 **Key Improvements in Fixed Training:**
 - Learnable normalization that preserves motion scale
@@ -127,7 +106,7 @@ python train_vift_aria_fixed_scale.py \
 # For models trained with stable training script
 python evaluate_stable_model.py \
     --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
-    --data-dir aria_latent_full_frames \
+    --data-dir aria_latent \
     --output-dir evaluation_results \
     --batch-size 16 \
     --device cuda
@@ -172,7 +151,7 @@ VIFT_AEA/
 ├── configs/                       # Hydra configuration files
 ├── pretrained_models/             # Pretrained VIFT encoder
 ├── aria_processed_full_frames/    # Processed sequences
-├── aria_latent_full_frames/       # Generated features (train/val/test)
+├── aria_latent/                    # Generated features (train/val/test)
 ├── evaluation_results/            # Test set evaluation outputs
 └── checkpoints_vift_stable/       # Trained models
 ```
