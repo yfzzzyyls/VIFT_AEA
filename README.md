@@ -40,17 +40,17 @@ python generate_all_pretrained_latents_fixed.py \
 
 ```bash
 # Step 2: Train the stable model
-python train_vift_aria_stable.py \
+python train.py \
     --epochs 50 \
     --batch-size 32 \
     --lr 5e-5 \
     --data-dir aria_latent \
-    --checkpoint-dir checkpoints_vift_stable \
+    --checkpoint-dir checkpoints \
     --device cuda
 
 # Step 3: Evaluate (auto-generates test features if needed)
-python evaluate_stable_model.py \
-    --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
+python evaluate.py \
+    --checkpoint checkpoints/[timestamp]/best_model.pt \
     --data-dir aria_latent \
     --output-dir evaluation_results \
     --device cuda
