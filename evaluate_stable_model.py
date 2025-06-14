@@ -25,39 +25,6 @@ from train_vift_aria_stable import VIFTStable
 from src.data.components.aria_latent_dataset import AriaLatentDataset
 
 
-def quat_inv(q):
-    """Quaternion inverse (conjugate for unit quaternions)"""
-    # q = [x, y, z, w] -> q_inv = [-x, -y, -z, w]
-    return np.concatenate([-q[..., :3], q[..., 3:4]], axis=-1)
-
-
-def quat_mul_np(q1, q2):
-    """Quaternion multiplication: q1 * q2 (numpy version)"""
-    # q1 = [x1, y1, z1, w1], q2 = [x2, y2, z2, w2]
-    x1, y1, z1, w1 = q1[..., 0], q1[..., 1], q1[..., 2], q1[..., 3]
-    x2, y2, z2, w2 = q2[..., 0], q2[..., 1], q2[..., 2], q2[..., 3]
-    
-    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
-    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-    
-    return np.stack([x, y, z, w], axis=-1)
-
-
-def quat_apply_np(q, v):
-    """Apply quaternion rotation to vector v (numpy version)"""
-    # Convert vector to quaternion form [vx, vy, vz, 0]
-    v_quat = np.concatenate([v, np.zeros_like(v[..., :1])], axis=-1)
-    
-    # Rotate: q * v * q^{-1}
-    q_conj = quat_inv(q)
-    v_rot = quat_mul_np(quat_mul_np(q, v_quat), q_conj)
-    
-    # Extract vector part
-    return v_rot[..., :3]
-
-
 def check_and_generate_test_features(data_dir, processed_dir):
     """Check if test features exist, generate if not"""
     test_dir = os.path.join(data_dir, 'test')
@@ -192,33 +159,9 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_
             # Get predictions - now only single step prediction [B, 1, 7]
             pred_poses = predictions['poses'].cpu().numpy()  # [B, 1, 7]
             
-            # Compute relative ground truth from last two frames
-            batch_poses = batch_gpu['poses'].cpu().numpy()
-            
-            # Get last two frames for each sequence in batch
-            prev_poses = batch_poses[:, -2:-1, :]  # [B, 1, 7] pose_{t-1}
-            last_poses = batch_poses[:, -1:, :]    # [B, 1, 7] pose_t
-            
-            # Compute relative poses for ground truth
-            gt_poses = np.zeros_like(last_poses)  # [B, 1, 7]
-            
-            for b in range(batch_poses.shape[0]):
-                # Extract poses
-                prev_q = prev_poses[b, 0, 3:]  # q_{t-1}
-                prev_t = prev_poses[b, 0, :3]  # p_{t-1}
-                last_q = last_poses[b, 0, 3:]  # q_t
-                last_t = last_poses[b, 0, :3]  # p_t
-                
-                # Relative rotation: q_rel = q_{t-1}^{-1} * q_t
-                q_rel = quat_mul_np(quat_inv(prev_q), last_q)
-                
-                # Relative translation expressed in the PREVIOUS frame
-                world_delta = last_t - prev_t  # Translation in world frame
-                rel_trans = quat_apply_np(quat_inv(prev_q), world_delta)  # Transform to frame t-1
-                
-                # Store relative pose
-                gt_poses[b, 0, :3] = rel_trans
-                gt_poses[b, 0, 3:] = q_rel
+            # For single-step prediction, we compare with the last ground truth pose
+            # This represents the transition from current frame to next frame
+            gt_poses = batch_gpu['poses'][:, -1:, :].cpu().numpy()  # [B, 1, 7]
             
             # Process each sequence in batch
             for i in range(pred_poses.shape[0]):
