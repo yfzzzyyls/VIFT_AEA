@@ -207,11 +207,8 @@ def process_sequence(seq_dir, model, device, window_size=11, stride=1, pose_scal
         window_imu = imu_data[start_idx:end_idx]        # [11, 33, 6]
         window_absolute_poses = absolute_poses[start_idx:end_idx]  # [11, 7]
         
-        # Convert absolute poses to relative poses with FIXED coordinate transformation
-        window_relative_poses = convert_absolute_to_relative_fixed(window_absolute_poses)
-        
+        # We'll compute relative poses later to match the feature transitions
         # Keep translation in meters (standard VIO unit)
-        # Note: pose_scale parameter is now ignored to maintain consistency
         
         # Resize images to 256x512 (model expects this size)
         window_visual_resized = F.interpolate(
@@ -243,8 +240,34 @@ def process_sequence(seq_dir, model, device, window_size=11, stride=1, pose_scal
         
         # Store visual and IMU features separately
         features_list.append((v_feat, i_feat))
-        # Store poses for transitions (skip first pose as it's always origin)
-        poses_list.append(torch.from_numpy(window_relative_poses[1:]))  # [10, 7]
+        
+        # CRITICAL FIX: The features encode 1-frame transitions (consecutive frames)
+        # So the GT should also be 1-frame transitions, not stride-based transitions
+        # Extract the 10 consecutive relative poses that match the 10 feature transitions
+        consecutive_relative_poses = []
+        for i in range(1, window_size):
+            # Relative pose from frame i-1 to frame i (consecutive frames)
+            prev_idx = i - 1
+            curr_idx = i
+            
+            prev_trans = window_absolute_poses[prev_idx, :3]
+            prev_rot = window_absolute_poses[prev_idx, 3:]
+            curr_trans = window_absolute_poses[curr_idx, :3]
+            curr_rot = window_absolute_poses[curr_idx, 3:]
+            
+            # Compute relative transformation
+            trans_world = curr_trans - prev_trans
+            R_prev = quaternion_to_rotation_matrix(prev_rot)
+            trans_local = R_prev.T @ trans_world
+            
+            prev_rot_inv = quaternion_inverse(prev_rot)
+            rel_rot = quaternion_multiply(prev_rot_inv, curr_rot)
+            rel_rot = rel_rot / np.linalg.norm(rel_rot)
+            
+            consecutive_relative_poses.append(np.concatenate([trans_local, rel_rot]))
+        
+        consecutive_relative_poses = np.array(consecutive_relative_poses)
+        poses_list.append(torch.from_numpy(consecutive_relative_poses))  # [10, 7]
     
     return features_list, poses_list
 

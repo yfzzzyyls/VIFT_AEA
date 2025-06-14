@@ -36,7 +36,7 @@ def check_and_generate_test_features(data_dir, processed_dir):
         # Run the feature generation script
         cmd = [
             'python', 'generate_all_pretrained_latents_fixed.py',
-            '--processed-dir', processed_dir,
+            '--processed-dir', 'aria_processed',
             '--output-dir', data_dir,
             '--stride', '10',
             '--process-test'

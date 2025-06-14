@@ -20,15 +20,8 @@ class AriaLatentDataset(Dataset):
             assert (self.root_dir / f"{prefix}_imu.npy").exists(), f"Missing IMU file for {prefix}"
             assert (self.root_dir / f"{prefix}_gt.npy").exists(), f"Missing GT file for {prefix}"
         
-        # Compute global mean/std for translation
-        # load all ground-truth files correctly as strings
-        all_gt = np.stack([np.load(str(self.root_dir / f"{prefix}_gt.npy")) for prefix in self.file_prefixes])  # [N, seq,7]
-        trans = all_gt[..., :3]
-        self.trans_mean = trans.mean(axis=(0,1))
-        self.trans_std = trans.std(axis=(0,1)) + 1e-8
-        # convert stats to torch tensors for use in __getitem__
-        self.trans_mean = torch.tensor(self.trans_mean, dtype=torch.float32)
-        self.trans_std = torch.tensor(self.trans_std, dtype=torch.float32)
+        # Translation statistics no longer needed - we keep translations in meters
+        # The model learns to predict meter-scale translations directly
         
         # Compute global mean/std for visual and IMU features
         all_vis = []
@@ -73,12 +66,8 @@ class AriaLatentDataset(Dataset):
         relative_poses = torch.from_numpy(relative_poses).float()
         
         # NOTE: GT files now contain poses in meters (standard VIO unit)
-
-        # Normalize translation targets using dataset-wide stats
-        t = relative_poses[:, :3]
-        t = (t - self.trans_mean.to(t.device)) / self.trans_std.to(t.device)
-        q = relative_poses[:, 3:7]
-        relative_poses = torch.cat([t, q], dim=-1)
+        # Keep translations in meters - no per-sample normalization
+        # The model will learn to predict meter-scale translations directly
         
         batch = {
             'visual_features': visual_features,
