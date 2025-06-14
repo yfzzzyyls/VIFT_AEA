@@ -1,224 +1,132 @@
-# VIFT-AEA: Visual-Inertial Fusion Transformer for Aria Everyday Activities
+______________________________________________________________________
 
-This project implements a Visual-Inertial Odometry (VIO) system using transformer architecture for the Aria Everyday Activities dataset. The model predicts frame-to-frame relative poses (translation and rotation) by fusing visual and IMU features.
+<div align="center">
 
-## Quick Start
+# Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry (ECCV 2024 VCAD Workshop)
 
-### 1. Environment Setup
+<a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white"></a>
+<a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-792ee5?logo=pytorchlightning&logoColor=white"></a>
+<a href="https://hydra.cc/"><img alt="Config: Hydra" src="https://img.shields.io/badge/Config-Hydra-89b8cd"></a>
+<a href="https://github.com/ashleve/lightning-hydra-template"><img alt="Template" src="https://img.shields.io/badge/-Lightning--Hydra--Template-017F2F?style=flat&logo=github&labelColor=gray"></a><br>
+[![Paper](http://img.shields.io/badge/paper-arxiv.2409.08769-B31B1B.svg)](https://arxiv.org/abs/2409.08769)
+
+</div>
+
+## Description
+
+This reporsitory contains codes for paper Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry.
+
+
+## Installation
+
+Make sure you installed correct PyTorch version for your specific development environment.
+Other requirements can be installed via `pip`.
+
+#### Pip
+
 ```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate
+# clone project
+git clone https://github.com/ybkurt/VIFT
+cd VIFT
 
-# Install requirements
+# [OPTIONAL] create conda environment
+conda create -n vift python=3.9
+conda activate vift
+
+# install pytorch according to instructions
+# https://pytorch.org/get-started/
+
+# install requirements
 pip install -r requirements.txt
 ```
 
-### 2. Data Processing Pipeline
-
-#### Process Raw Aria Data (20 sequences with ALL frames)
-```bash
-# Process 20 diverse sequences from aria_everyday dataset
-./process_full_dataset_optimal.sh
-```
-
-This script processes 20 sequences from 4 different locations, extracting ALL frames (not downsampled). Output will be in `aria_processed/`.
-
-#### Generate Latent Features
-```bash
-# Generate latent features with stride 10
-python generate_all_pretrained_latents_fixed.py \
-    --processed-dir aria_processed \
-    --output-dir aria_latent \
-    --stride 10 \
-    --skip-test
-```
-
-### 3. Training
-
-#### Stable Version
+## Downloading KITTI Dataset
 
 ```bash
-# Step 2: Train the stable model
-python train_efficient.py \
-    --epochs 50 \
-    --batch-size 32 \
-    --lr 5e-5 \
-    --data-dir aria_latent \
-    --checkpoint-dir checkpoints_vift_stable \
-    --device cuda
-
-# Step 3: Evaluate (auto-generates test features if needed)
-python evaluate_stable_model.py \
-    --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
-    --data-dir aria_latent \
-    --output-dir evaluation_results \
-    --device cuda
+cd data
+sh data_prep.sh
 ```
 
-**Stable Version Results:**
-- Translation Error: 0.843 cm (mean), 0.339 cm (median)
-- Rotation Error: 1.302° (mean), 0.741° (median)
-- 95% of predictions within 3.192 cm and 4.288°
+This script will put the KITTI dataset under `data/kitti_data` folder. 
+You need to use `configs/data/kitti_vio.yaml` for dataloading.
+
+You need to use `configs/model/vio.yaml` to train models with KITTI dataset.
+You can change the `net` field in config to target your `nn.Module` object. The requirements are as follows for proper functionality:
+
+- See `src/models/components/vio_simple_dense_net.py` for an example `nn.Module` object consisting of multiple linear layers and ReLU activations.
+
+## Downloading Pretrained Image and IMU Encoders
+
+We use pretrained image and IMU encoders of [Visual-Selective-VIO](https://github.com/mingyuyng/Visual-Selective-VIO) model. Download the model weights from repository and put them under the `pretrained_models` directory.
 
 
-**Key Improvements in Fixed Training:**
-- Learnable normalization that preserves motion scale
-- World-frame relative poses (no coordinate transformations)
-- Mixed precision training with gradient accumulation
-- Scale correction factor to prevent underestimation
-- Robust gradient handling without skipping batches
+### Caching Latents for KITTI Dataset  
 
-**Important Note on Inference:**
-- During inference, the model only needs images and IMU data (no ground truth)
-- The model predicts relative poses directly in world coordinates
-- No coordinate transformations are needed during inference
-- The world-frame training ensures consistent predictions without direction flips
+We use pretrained visual and inertial encoders from Visual_Selective_VIO to save the latent vectors for KITTI dataset.
 
-**Stable Training Features (train_vift_aria_stable.py):**
-- Input normalization for visual (×0.1) and IMU (×0.01) features
-- Robust loss functions: Huber loss for translation, smooth geodesic for rotation
-- Pre-norm transformer architecture for better gradient flow
-- Aggressive gradient clipping (0.5) and monitoring
-- Very conservative learning rate (5e-5) with warmup
-- Smaller batch size (8) to reduce memory pressure
-- Skips batches with exploding gradients
 
-**Standard Architecture Features (train_vift_aria.py):**
-- Direct 7DoF pose prediction (no transition-based approach)
-- Geodesic rotation loss for proper SO(3) distance measurement
-- Moderate weight initialization (std=0.1)
-- Simplified loss: L1 translation + geodesic rotation
-- Lower learning rate (1e-4) for stable training
-
-### 4. Evaluation and Inference
-
-#### Evaluate Stable Model Performance
 ```bash
-# For models trained with stable training script
-python evaluate_stable_model.py \
-    --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
-    --data-dir aria_latent \
-    --output-dir evaluation_results \
-    --batch-size 16 \
-    --device cuda
+cd data
+python latent_caching.py
+python latent_val_caching.py
 ```
 
-**Note**: The evaluation script automatically generates test features if they don't exist using `generate_all_pretrained_latents_fixed.py`.
+This script will put the latent training KITTI dataset under `data/kitti_latent_data` folder. 
+You need to use `configs/data/kitti_vio.yaml` for dataloading.
 
-This will output:
-- Translation and rotation error statistics
-- Sample trajectory visualizations in `evaluation_results/plots/`
-- Error distribution histograms
-- 3D trajectory plots for each test sequence (full, 1s, 5s)
-- 3D rotation plots for each test sequence (full, 1s, 5s)
+You need to use `configs/model/vio.yaml` to train models with KITTI dataset.
+You can change the `net` field in config to target your `nn.Module` object.
 
-### 5. Expected Results
+- See `src/models/components/vio_simple_dense_net.py` for an example `nn.Module` object consisting of multiple linear layers and ReLU activations.
 
-With the stable training approach, you should expect:
-- **Translation Error**: ~0.8cm mean, ~0.3cm median
-- **Rotation Error**: ~1.3° mean, ~0.7° median
-- Most predictions (95%) within 3.2cm translation and 4.2° rotation error
+## Replicating Experiments in Paper
 
-## Project Structure
+After saving latents for KITTI dataset, you can run following command to run the experiments in the paper.
 
-```
-VIFT_AEA/
-├── src/
-│   ├── models/                    # Model architectures
-│   │   └── components/
-│   │       └── pose_transformer.py  # Core transformer
-│   ├── data/                      # Dataset classes
-│   ├── metrics/                   # Loss functions
-│   └── utils/
-│       └── tools.py               # Rotation utilities (geodesic loss)
-├── scripts/
-│   └── process_aria_to_vift_quaternion.py  # Data processing
-├── train_vift_aria.py             # Main training script (unified)
-├── train_vift_aria_stable.py      # Stable training (fixes NaN issues)
-├── train_vift_direct.py           # Alternative direct prediction
-├── inference_full_frames_unified.py # Inference for standard models
-├── inference_full_frames_stable.py  # Inference for stable models  
-├── evaluate_stable_model.py         # Evaluation script for test set
-├── configs/                       # Hydra configuration files
-├── pretrained_models/             # Pretrained VIFT encoder
-├── aria_processed/    # Processed sequences
-├── aria_latent/                    # Generated features (train/val/test)
-├── evaluation_results/            # Test set evaluation outputs
-└── checkpoints_vift_stable/       # Trained models
+```bash
+sh scripts/schedule_paper.sh
 ```
 
-## Key Features
+## How to run
 
-- **Full Frame Processing**: Uses ALL frames from videos (not downsampled)
-- **Quaternion Representation**: Maintains rotation continuity
-- **Geodesic Rotation Loss**: Proper distance measurement on SO(3) manifold
-- **Direct Pose Prediction**: Following original VIFT architecture
-- **Multi-Head Architecture**: 8-head attention for visual-IMU fusion
-- **Relative Pose Prediction**: Frame-to-frame motion in local coordinates
+Train model with default configuration
 
-## Results
-
-### Latest Improvements (Unified Architecture)
-
-**Key Improvements:**
-1. **Direct Prediction**: Replaced transition-based approach with direct 7DoF output
-2. **Geodesic Loss**: Proper rotation error measurement on SO(3) manifold
-3. **Stable Training**: Fixed NaN issues with proper initialization and loss weights
-4. **Architecture Simplification**: Removed complex PoseTransformer dependencies
-
-**Expected Performance:**
-- Predictions should match ground truth scale (meters, not centimeters)
-- Trajectories should follow curved paths, not straight lines
-- Rotation errors measured properly in degrees
-- Stable training without NaN losses
-
-### Architectural Evolution
-
-| Version | Architecture | Loss Function | Scale Issues | Stability |
-|---------|--------------|---------------|--------------|-----------|
-| Transition-based | Embeddings→Differences→Poses | Complex multi-term | Yes (10-100x smaller) | Poor |
-| Direct (original) | Transformer→Linear(7) | Simple MSE | Better | Moderate |
-| Unified (latest) | Transformer→Linear(7) | L1 + Geodesic | Best | Good |
-
-### Why Geodesic Loss?
-
-The geodesic loss properly measures rotation distance on the SO(3) manifold:
-- L1/L2 on quaternions doesn't measure actual rotation angle
-- Geodesic distance = actual angle between rotations
-- Better gradient flow for rotation learning
-- Standard practice in rotation estimation literature
-
-## Troubleshooting
-
-### Common Issues
-
-1. **NaN Losses**: If you encounter NaN losses:
-   - Use `train_vift_aria_stable.py` instead - it has built-in protections
-   - Key differences: input normalization, gradient monitoring, smaller batch size
-   - The stable version normalizes IMU features (which can have values >600)
-
-2. **Scale Mismatch**: If predictions are 10-100x smaller than ground truth, ensure you're using the unified version with direct prediction
-
-3. **Straight Line Trajectories**: This indicates the model isn't learning motion dynamics - check loss weights and learning rate
-
-4. **Architecture Mismatch**: Always use matching inference script for your trained model
-
-### Training Tips
-
-- Start with learning rate 1e-4 for stable training
-- Monitor both translation and rotation losses separately
-- Check sample predictions every 50 batches to ensure reasonable magnitudes
-- Use batch size 16 for stable training (reduce if GPU memory limited)
-- If NaN persists, check data for corrupted samples
-
-## Citation
-
-Based on the VIFT architecture from:
+```bash
+# train on GPU
+python src/train.py trainer=gpu
 ```
-@article{vift2023,
-  title={Visual-Inertial Fusion Transformer},
-  author={...},
-  year={2023}
+
+Train model with chosen experiment configuration from [configs/experiment/](configs/experiment/)
+
+```bash
+python src/train.py experiment=experiment_name.yaml trainer=gpu
+```
+
+You can override any parameter from command line like this
+
+```bash
+python src/train.py trainer.max_epochs=20 data.batch_size=64
+```
+
+## Acknowledgments
+This project makes use of code from the following open-source projects:
+
+- [RPMG](https://github.com/JYChen18/RPMG): License: [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
+- [Visual Selective VIO](https://github.com/mingyuyng/Visual-Selective-VIO)
+
+
+
+We are grateful to the authors and contributors of these projects for their valuable work.
+
+## CITATION
+
+If you find our work useful in your research, please consider citing:
+
+```
+@article{kurt2024vift,
+  title={Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry},
+  author={Kurt, Yunus Bilge and Akman, Ahmet and Alatan, Ayd{\i}n},
+  journal={arXiv preprint arXiv:2409.08769},
+  year={2024}
 }
 ```

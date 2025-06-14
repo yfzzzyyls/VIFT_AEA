@@ -132,7 +132,12 @@ def integrate_trajectory(relative_poses, initial_pose=None):
 
 
 def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_dataset):
-    """Evaluate model on test data"""
+    """Evaluate model on test data
+    
+    IMPORTANT: When using stride=1 sliding windows during test data generation,
+    consecutive windows overlap by (window_size-1) frames. To avoid double-counting
+    transitions when integrating trajectories, we must carefully handle the overlap.
+    """
     os.makedirs(output_dir, exist_ok=True)
     
     all_results = []
@@ -160,8 +165,8 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_
             pred_poses = predictions['poses'].cpu().numpy()  # [B, 1, 7]
             
             # For single-step prediction, we compare with the last ground truth pose
-            # This represents the transition from current frame to next frame
-            gt_poses = batch_gpu['poses'][:, -1:, :].cpu().numpy()  # [B, 1, 7]
+            # This represents the transition from frame 9->10 in an 11-frame window
+            gt_poses = batch_gpu['poses'][:, -1:, :].cpu().numpy()  # [B, 1, 7] - last transition
             
             # Process each sequence in batch
             for i in range(pred_poses.shape[0]):
@@ -234,10 +239,33 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_
         seq_results_with_idx = sequence_results[seq_id]
         seq_results_with_idx.sort(key=lambda x: x[0])  # Sort by frame index
         
-        # Extract just the results after sorting
-        seq_results = [r for _, r in seq_results_with_idx]
+        # CRITICAL ISSUE with stride=1 test data:
+        # The dataset was generated with stride=1, meaning windows overlap by 10 frames.
+        # The frame_idx is just the sample number, not the actual video frame.
+        # This means we cannot properly deduplicate overlapping predictions.
+        # 
+        # TEMPORARY FIX: Skip samples to approximate non-overlapping windows
+        # With window_size=11 and stride=1, we should take every 10th sample
+        # to get approximately non-overlapping transitions.
         
-        # Concatenate all results for this sequence in proper temporal order
+        # Apply stride=10 sampling to avoid overlapping windows
+        # Since test data was generated with stride=1, we take every 10th sample
+        stride_for_non_overlap = 10
+        seq_results_sampled = []
+        
+        print(f"\nSequence {seq_id}:")
+        print(f"  Total windows: {len(seq_results_with_idx)}")
+        
+        # Sample every nth result to avoid overlap
+        for i in range(0, len(seq_results_with_idx), stride_for_non_overlap):
+            seq_results_sampled.append(seq_results_with_idx[i][1])
+            
+        print(f"  Sampled windows (non-overlapping): {len(seq_results_sampled)}")
+        
+        # Use sampled results instead of all results
+        seq_results = seq_results_sampled
+        
+        # Concatenate sampled results for this sequence
         all_pred = np.concatenate([r['pred_poses'] for r in seq_results], axis=0)
         all_gt = np.concatenate([r['gt_poses'] for r in seq_results], axis=0)
         
