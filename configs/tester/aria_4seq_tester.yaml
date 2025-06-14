@@ -1,0 +1,12 @@
+_target_: src.testers.kitti_latent_tester.KITTILatentTester
+val_seqs: ['016', '017', '018', '019']  # All 4 Aria test sequences
+data_dir: ${paths.root_dir}/aria_latent_kitti_format
+seq_len: 11
+folder: ''
+img_w: 512
+img_h: 256
+wrapper_weights_path: ${paths.root_dir}/pretrained_models/vf_512_if_256_3e-05.model
+device: cuda
+v_f_len: 512
+i_f_len: 256
+use_history_in_eval: False

@@ -1,0 +1,22 @@
+_target_: src.data.vio_datamodule.VIODataModule
+batch_size: 4
+num_workers: 0
+pin_memory: false
+
+train_loader:
+  _target_: src.data.components.aria_latent_dataset_kitti_format.AriaLatentKITTIFormat
+  _partial_: false
+  root: ${paths.root_dir}/aria_latent_kitti_format
+  sequences: ['016', '017']
+
+val_loader:
+  _target_: src.data.components.aria_latent_dataset_kitti_format.AriaLatentKITTIFormat
+  _partial_: false
+  root: ${paths.root_dir}/aria_latent_kitti_format
+  sequences: ['018']
+
+test_loader:
+  _target_: src.data.components.aria_latent_dataset_kitti_format.AriaLatentKITTIFormat
+  _partial_: false
+  root: ${paths.root_dir}/aria_latent_kitti_format
+  sequences: ['016', '017', '018']  # Only 3 sequences
