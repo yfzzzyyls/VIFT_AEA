@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - _self_
+  - data: aria_kitti_format  # Use Aria data in KITTI format
+  - model: latent_vio_tf      # Use the same model config as KITTI training
+  - logger: null
+  - paths: default
+  - extras: default
+  - hydra: default
+  - trainer: default
+
+task_name: "eval_kitti_on_aria"
+
+tags: ["kitti_on_aria", "generalization"]
+
+# You'll need to provide the checkpoint path to your KITTI-trained model
+ckpt_path: ???
+
+# Override test sequences if needed
+# data:
+#   test_loader:
+#     train_seqs: ['016', '017', '018', '019']
