@@ -174,42 +174,14 @@ def robust_geodesic_loss(pred_quat, gt_quat):
     return angle_error.mean()
 
 
-def quat_inv(q):
-    """Quaternion inverse (conjugate for unit quaternions)"""
-    # q = [x, y, z, w] -> q_inv = [-x, -y, -z, w]
-    return torch.cat([-q[..., :3], q[..., 3:4]], dim=-1)
-
-def quat_mul(q1, q2):
-    """Quaternion multiplication: q1 * q2"""
-    # q1 = [x1, y1, z1, w1], q2 = [x2, y2, z2, w2]
-    x1, y1, z1, w1 = q1[..., 0], q1[..., 1], q1[..., 2], q1[..., 3]
-    x2, y2, z2, w2 = q2[..., 0], q2[..., 1], q2[..., 2], q2[..., 3]
-    
-    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
-    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-    
-    return torch.stack([x, y, z, w], dim=-1)
-
 def compute_stable_loss(predictions, batch, trans_weight=100.0, rot_weight=1.0):
     """Stable loss computation with gradient-friendly formulation"""
     pred_poses = predictions['poses']  # [B, 1, 7] - only last prediction
+    gt_poses = batch['poses']  # [B, seq_len, 7]
     
-    # Compute relative ground truth from last two frames
-    last = batch['poses'][:, -1:, :]    # [B, 1, 7] pose_t
-    prev = batch['poses'][:, -2:-1, :]  # [B, 1, 7] pose_{t-1}
-    
-    # Translational delta in meters
-    gt_trans = last[:, :, :3] - prev[:, :, :3]
-    
-    # Rotational delta: q_rel = q_prev^{-1} * q_last
-    q_prev = prev[:, :, 3:]
-    q_last = last[:, :, 3:]
-    q_rel = quat_mul(quat_inv(q_prev), q_last)
-    
-    # Combine into relative pose
-    gt_poses = torch.cat([gt_trans, q_rel], dim=-1)  # [B, 1, 7]
+    # For causal prediction, we compare the last prediction with the last ground truth
+    # This represents the transition from current to next frame
+    gt_poses = gt_poses[:, -1:, :]  # Take only the last ground truth pose
     
     # Split predictions and ground truth
     pred_trans = pred_poses[:, :, :3]
@@ -325,16 +297,11 @@ def train_epoch(model, dataloader, optimizer, device, epoch, grad_clip=10.0):
                 pred_poses = predictions['poses'][0, :5].cpu().numpy()
                 gt_poses = batch_gpu['poses'][0, 1:6].cpu().numpy()
                 
-                print(f"\nBatch {batch_idx} sample relative poses:")
-                print("  Predicted relative pose:")
+                print(f"\nBatch {batch_idx} sample poses:")
+                print("  Predicted poses (first 5 timesteps):")
                 print(pred_poses)
-                print("  Ground truth relative pose:")
-                # Compute relative GT for display
-                last = batch_gpu['poses'][0, -1, :].cpu().numpy()
-                prev = batch_gpu['poses'][0, -2, :].cpu().numpy()
-                gt_rel = last.copy()
-                gt_rel[:3] = last[:3] - prev[:3]  # relative translation
-                print(gt_rel.reshape(1, -1))
+                print("  Ground truth poses (corresponding):")
+                print(gt_poses)
     
     return total_loss / num_batches if num_batches > 0 else float('inf')
 
@@ -410,7 +377,6 @@ def main():
     print("- Causal masking with single-step prediction")
     print("- No output BatchNorm (fixed architectural issue)")
     print("- Translation loss weight: 100.0 (meters to match radians)")
-    print("- RELATIVE pose training (matching evaluation)")
     print(f"{'='*60}\n")
     
     # Load datasets
