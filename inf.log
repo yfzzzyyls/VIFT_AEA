@@ -6,33 +6,33 @@
    Found 396 test samples
 
 📊 Model Information:
-   Loaded checkpoint from epoch 50
-   Validation loss: 0.0773
-   Val translation error: 0.041 m
-   Val rotation error: 3.17°
+   Loaded checkpoint from epoch 49
+   Validation loss: 6.4176
+   Val translation error: 1.054 m
+   Val rotation error: 15.90°
 
 📁 Test dataset loaded: 396 samples
 
 🔍 Evaluating on test sequences...
-Processing batches:   0%|          | 0/25 [00:00<?, ?it/s]Processing batches:   4%|▍         | 1/25 [00:00<00:04,  5.10it/s]Processing batches: 100%|██████████| 25/25 [00:00<00:00, 84.34it/s]
+Processing batches:   0%|          | 0/25 [00:00<?, ?it/s]Processing batches:   4%|▍         | 1/25 [00:00<00:05,  4.08it/s]Processing batches:  92%|█████████▏| 23/25 [00:00<00:00, 82.19it/s]Processing batches: 100%|██████████| 25/25 [00:00<00:00, 66.32it/s]
 
 ==================================================
 📊 EVALUATION RESULTS
 ==================================================
 
 📏 Translation Error (cm):
-   Mean:   5.355
-   Std:    2.850
-   Median: 4.748
-   95%:    10.655
-   Max:    16.094
+   Mean:   31.685
+   Std:    27.584
+   Median: 24.196
+   95%:    79.934
+   Max:    162.236
 
 🔄 Rotation Error (degrees):
-   Mean:   3.241
-   Std:    2.164
-   Median: 2.402
-   95%:    7.918
-   Max:    10.273
+   Mean:   22.007
+   Std:    29.385
+   Median: 10.277
+   95%:    93.492
+   Max:    171.463
 ==================================================
 
 📊 Plots saved to: evaluation_results/plots/
