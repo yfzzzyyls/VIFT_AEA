@@ -77,6 +77,7 @@ python src/eval.py \
 
 ### Workflow 2: Train and Test on Aria Everyday Activities
 
+**Option A: Using Pre-trained Feature Encoders**
 ```bash
 # 1. Setup environment
 source venv/bin/activate
@@ -106,6 +107,36 @@ python evaluate_stable_model.py \
     --output-dir evaluation_results
 ```
 
+**Option B: Training From Scratch (All Components)**
+```bash
+# 1. Setup environment
+source venv/bin/activate
+
+# 2. Process Aria data with proper IMU alignment
+./process_full_dataset_optimal_fixed.sh
+
+# 3. Create train/val splits
+python prepare_aria_splits.py --source-dir aria_processed
+
+# 4. Train all components from scratch (with quaternion output)
+python train_aria_from_scratch.py \
+      --data-dir aria_processed \
+      --epochs 30 \
+      --batch-size 4 \
+      --lr 1e-4 \
+      --checkpoint-dir checkpoints_from_scratch \
+      --num-gpus 4
+
+# 5. Evaluate the trained model
+python evaluate_from_scratch.py \
+      --checkpoint checkpoints_from_scratch/best_model.pt \
+      --data-dir aria_processed \
+      --output-dir evaluation_from_scratch
+
+# 5. Monitor training
+tensorboard --logdir checkpoints_from_scratch
+```
+
 ### Workflow 3: Cross-Domain Testing (KITTI→Aria)
 
 ```bash
@@ -124,6 +155,48 @@ python src/eval.py \
     data=latent_kitti_vio \
     data.test_loader.root_dir=/home/external/VIFT_AEA/data/aria_latent_as_kitti/val_10 \
     trainer=gpu trainer.devices=1 logger=csv
+```
+
+### Workflow 4: Train VIFT From Scratch on Aria (All Components)
+
+```bash
+# 1. Setup environment
+source venv/bin/activate
+
+# 2. Process Aria data with proper IMU alignment
+./process_full_dataset_optimal_fixed.sh
+
+# 3. Create train/val/test splits
+python prepare_aria_splits.py --source-dir aria_processed
+
+# 4. Train all components from scratch (no pre-trained weights)
+# Single GPU
+python train_aria_from_scratch.py \
+    --data-dir aria_processed \
+    --epochs 30 \
+    --batch-size 4 \
+    --lr 1e-4 \
+    --checkpoint-dir checkpoints_from_scratch \
+    --num-gpus 1
+
+# Multi-GPU (4 GPUs)
+python train_aria_from_scratch.py \
+    --data-dir aria_processed \
+    --epochs 30 \
+    --batch-size 4 \
+    --lr 1e-4 \
+    --checkpoint-dir checkpoints_from_scratch \
+    --num-gpus 4
+
+# 5. Monitor training progress
+# Check train.log for any errors
+tail -f train.log
+
+# 6. Evaluate trained model
+python evaluate_from_scratch.py \
+    --checkpoint checkpoints_from_scratch/best_model.pt \
+    --data-dir aria_processed \
+    --output-dir evaluation_from_scratch
 ```
 
 ## Important: IMU Data Format
