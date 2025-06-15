@@ -16,6 +16,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from scipy.spatial.transform import Rotation as R
 from torch.utils.data import DataLoader
 import pandas as pd
+import json
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -211,13 +212,36 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         seq_results_sampled = seq_results
         print(f"  Non-overlapping windows: {len(seq_results_sampled)}")
         
-        # Concatenate sampled results
-        all_pred = np.concatenate([r['pred_poses'] for r in seq_results_sampled], axis=0)
-        all_gt = np.concatenate([r['gt_poses'] for r in seq_results_sampled], axis=0)
+        # Load raw ground truth poses from file
+        seq_dir = test_loader.dataset.data_dir / seq_id
+        with open(seq_dir / 'poses_quaternion.json', 'r') as f:
+            raw_poses = json.load(f)
         
-        # Integrate full trajectory
-        pred_positions_full, pred_rotations_full = integrate_trajectory(all_pred)
-        gt_positions_full, gt_rotations_full = integrate_trajectory(all_gt)
+        # Get ground truth absolute poses for the frames we're evaluating
+        # We need to track which frames are covered by our predictions
+        all_frame_indices = []
+        for r in seq_results_sampled:
+            start_idx = r['start_idx']
+            # Each window covers 11 frames (10 transitions)
+            frame_indices = list(range(start_idx, start_idx + 11))
+            all_frame_indices.extend(frame_indices)
+        
+        # Remove duplicates and sort
+        all_frame_indices = sorted(list(set(all_frame_indices)))
+        
+        # Extract ground truth absolute poses
+        gt_positions_full = np.array([raw_poses[i]['translation'] for i in all_frame_indices])
+        gt_quaternions = np.array([raw_poses[i]['quaternion'] for i in all_frame_indices])
+        
+        # Concatenate predictions
+        all_pred = np.concatenate([r['pred_poses'] for r in seq_results_sampled], axis=0)
+        
+        # Integrate predictions starting from first ground truth pose
+        initial_pose = np.concatenate([gt_positions_full[0], gt_quaternions[0]])
+        pred_positions_full, pred_rotations_full = integrate_trajectory(all_pred, initial_pose)
+        
+        # For ground truth rotations, use the raw quaternions
+        gt_rotations_full = gt_quaternions
         
         # Save trajectories to CSV
         save_trajectory_csv(pred_positions_full, gt_positions_full, 
@@ -243,8 +267,12 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         # Generate 1-second plots
         frames_1s = min(fps, len(all_pred))
         if frames_1s > 0:
-            pred_positions_1s, pred_rotations_1s = integrate_trajectory(all_pred[:frames_1s])
-            gt_positions_1s, gt_rotations_1s = integrate_trajectory(all_gt[:frames_1s])
+            # For predictions, integrate only the first second
+            pred_positions_1s, pred_rotations_1s = integrate_trajectory(all_pred[:frames_1s], initial_pose)
+            
+            # For ground truth, use raw poses for first second
+            gt_positions_1s = gt_positions_full[:frames_1s + 1]  # +1 because we need initial pose too
+            gt_rotations_1s = gt_rotations_full[:frames_1s + 1]
             
             plot_trajectory_3d(
                 pred_positions_1s,
@@ -265,8 +293,12 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         # Generate 5-second plots
         frames_5s = min(5 * fps, len(all_pred))
         if frames_5s > 0:
-            pred_positions_5s, pred_rotations_5s = integrate_trajectory(all_pred[:frames_5s])
-            gt_positions_5s, gt_rotations_5s = integrate_trajectory(all_gt[:frames_5s])
+            # For predictions, integrate only the first 5 seconds
+            pred_positions_5s, pred_rotations_5s = integrate_trajectory(all_pred[:frames_5s], initial_pose)
+            
+            # For ground truth, use raw poses for first 5 seconds
+            gt_positions_5s = gt_positions_full[:frames_5s + 1]  # +1 because we need initial pose too
+            gt_rotations_5s = gt_rotations_full[:frames_5s + 1]
             
             plot_trajectory_3d(
                 pred_positions_5s,

@@ -170,14 +170,6 @@ source venv/bin/activate
 python prepare_aria_splits.py --source-dir aria_processed
 
 # 4. Train all components from scratch (no pre-trained weights)
-# Single GPU
-python train_aria_from_scratch.py \
-    --data-dir aria_processed \
-    --epochs 30 \
-    --batch-size 4 \
-    --lr 1e-4 \
-    --checkpoint-dir checkpoints_from_scratch \
-    --num-gpus 1
 
 # Multi-GPU (4 GPUs)
 python train_aria_from_scratch.py \

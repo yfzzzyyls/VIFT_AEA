@@ -321,7 +321,7 @@ def main():
         batch_size=effective_batch_size,
         num_workers=args.num_workers * max(1, args.num_gpus),  # Scale workers with GPUs
         sequence_length=11,
-        stride=10  # Non-overlapping windows since we predict all 10 transitions
+        stride=10  # Ensures all transitions are covered (minimal frame overlap)
     )
     data_module.setup()
     
