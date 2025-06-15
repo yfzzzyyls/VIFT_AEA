@@ -130,9 +130,9 @@ class VIFTStable(nn.Module):
         # Project to 7DoF
         output = self.fc2(output)
 
-        # For relative poses between consecutive frames
-        # Take only the last prediction (current -> next frame) to match paper
-        predictions = output[:, -1:, :]  # shape [B, 1, 7]
+        # For multi-step prediction, use all transitions (first 10 timesteps)
+        # Each timestep predicts the transition to the next frame
+        predictions = output[:, :10, :]  # shape [B, 10, 7]
         
         # Split and normalize quaternions
         translation = predictions[:, :, :3]

@@ -92,7 +92,7 @@ def process_sequence_between_frames(seq_dir, model, device, window_size=11, stri
         window_visual = visual_data[start_idx:end_idx]  # [11, 3, H, W]
         
         # Extract corresponding 10 IMU intervals
-        window_imu = imu_data[start_idx:start_idx + window_size - 1]  # [10, 50, 6]
+        window_imu = imu_data[start_idx:start_idx + window_size - 1]  # [10, 11, 6]
         
         # Resize images to 256x512
         window_visual_resized = F.interpolate(
@@ -105,22 +105,9 @@ def process_sequence_between_frames(seq_dir, model, device, window_size=11, stri
         # Normalize images to [-0.5, 0.5]
         window_visual_normalized = window_visual_resized - 0.5
         
-        # Prepare IMU data - extract 11 samples per interval
-        # VIFT expects overlapping windows of 11 IMU samples for each transition
-        # We have 50 samples per interval, so we can extract 11 samples with proper spacing
-        window_imu_110 = []
-        
-        # Process each of the 10 intervals
-        for i in range(window_size - 1):  # 10 intervals
-            interval_imu = window_imu[i]  # [50, 6]
-            
-            # Extract 11 evenly spaced samples from the 50 available
-            # This maintains temporal coverage of the full interval
-            indices = np.linspace(0, 49, 11, dtype=int)
-            sampled = interval_imu[indices]  # [11, 6]
-            window_imu_110.append(sampled)
-        
-        window_imu_110 = torch.cat(window_imu_110, dim=0)  # [110, 6]
+        # Prepare IMU data - already in correct format (11 samples per interval)
+        # Just reshape from [10, 11, 6] to [110, 6]
+        window_imu_110 = window_imu.reshape(-1, 6)  # [110, 6]
         
         # Add batch dimension
         batch_visual = window_visual_normalized.unsqueeze(0).to(device)  # [1, 11, 3, 256, 512]
@@ -241,7 +228,7 @@ def generate_split_data_between_frames(processed_dir, output_dir, model, device,
         'window_size': 11,
         'stride': stride,
         'imu_format': 'between_frames',
-        'imu_downsampling': '50->10 samples per interval',
+        'imu_downsampling': '11 samples per interval (directly extracted)',
         'sample_counts': sample_counter,
         'note': 'Features extracted from between-frames IMU data with proper temporal alignment'
     }

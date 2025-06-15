@@ -25,12 +25,14 @@ from train_vift_aria_stable import VIFTStable, robust_geodesic_loss
 
 
 def compute_loss(predictions, batch, trans_weight=100.0, rot_weight=1.0):
-    """Compute loss with proper scaling"""
-    pred_poses = predictions['poses']  # [B, 1, 7]
+    """Compute loss with proper scaling for multi-step prediction"""
+    pred_poses = predictions['poses']  # [B, 10, 7]
     gt_poses = batch['poses']  # [B, seq_len, 7]
     
-    # For single-step prediction, use only the last GT pose
-    gt_poses = gt_poses[:, -1:, :]
+    # For multi-step prediction, use all 10 transitions
+    # Note: gt_poses might be [B, 11, 7] or [B, 10, 7] depending on dataset
+    if gt_poses.shape[1] > 10:
+        gt_poses = gt_poses[:, :10, :]  # Use first 10 transitions
     
     pred_trans = pred_poses[:, :, :3]
     pred_rot = pred_poses[:, :, 3:]
@@ -128,9 +130,9 @@ def validate(model, dataloader, device):
             if loss_dict is None:
                 continue
             
-            # Translation error in meters
-            pred_trans = predictions['translation']
-            gt_trans = batch_gpu['poses'][:, -1:, :3]
+            # Translation error in meters (average over all timesteps)
+            pred_trans = predictions['translation']  # [B, 10, 3]
+            gt_trans = batch_gpu['poses'][:, :10, :3]  # [B, 10, 3]
             trans_error = torch.mean(torch.norm(pred_trans - gt_trans, dim=-1))
             
             # Rotation error in degrees
@@ -172,6 +174,8 @@ def main():
     print("Using pre-extracted features with fixed dataset:")
     print("- No z-score normalization on translations")
     print("- Direct meter-scale training")
+    print("- Multi-step prediction (all 10 transitions)")
+    print("- Stride=10 for non-overlapping windows")
     print("- Consistent with evaluation pipeline")
     print("="*60 + "\n")
     

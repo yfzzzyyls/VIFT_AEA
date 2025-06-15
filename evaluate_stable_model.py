@@ -35,11 +35,11 @@ def check_and_generate_test_features(data_dir, processed_dir):
         
         # Run the feature generation script
         cmd = [
-            'python', 'generate_all_pretrained_latents_fixed.py',
+            'python', 'generate_all_pretrained_latents_between_frames.py',
             '--processed-dir', 'aria_processed',
             '--output-dir', data_dir,
             '--stride', '10',
-            '--process-test'
+            '--process-test'  # Process test data instead of --skip-test
         ]
         
         try:
@@ -161,12 +161,11 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_
             # Get predictions
             predictions = model(batch_gpu)
             
-            # Get predictions - now only single step prediction [B, 1, 7]
-            pred_poses = predictions['poses'].cpu().numpy()  # [B, 1, 7]
+            # Get predictions - now multi-step prediction [B, 10, 7]
+            pred_poses = predictions['poses'].cpu().numpy()  # [B, 10, 7]
             
-            # For single-step prediction, we compare with the last ground truth pose
-            # This represents the transition from frame 9->10 in an 11-frame window
-            gt_poses = batch_gpu['poses'][:, -1:, :].cpu().numpy()  # [B, 1, 7] - last transition
+            # For multi-step prediction, we compare with all 10 ground truth poses
+            gt_poses = batch_gpu['poses'][:, :10, :].cpu().numpy()  # [B, 10, 7]
             
             # Process each sequence in batch
             for i in range(pred_poses.shape[0]):
@@ -174,8 +173,8 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_
                 pred_seq = pred_poses[i]
                 gt_seq = gt_poses[i]
                 
-                # Compute errors
-                trans_error = np.linalg.norm(pred_seq[:, :3] - gt_seq[:, :3], axis=1)
+                # Compute errors for all timesteps
+                trans_error = np.linalg.norm(pred_seq[:, :3] - gt_seq[:, :3], axis=1)  # [10]
                 
                 # Rotation error
                 rot_errors = []
@@ -239,31 +238,14 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, test_
         seq_results_with_idx = sequence_results[seq_id]
         seq_results_with_idx.sort(key=lambda x: x[0])  # Sort by frame index
         
-        # CRITICAL ISSUE with stride=1 test data:
-        # The dataset was generated with stride=1, meaning windows overlap by 10 frames.
-        # The frame_idx is just the sample number, not the actual video frame.
-        # This means we cannot properly deduplicate overlapping predictions.
-        # 
-        # TEMPORARY FIX: Skip samples to approximate non-overlapping windows
-        # With window_size=11 and stride=1, we should take every 10th sample
-        # to get approximately non-overlapping transitions.
-        
-        # Apply stride=10 sampling to avoid overlapping windows
-        # Since test data was generated with stride=1, we take every 10th sample
-        stride_for_non_overlap = 10
-        seq_results_sampled = []
+        # Since test data is generated with stride=10, no need for additional sampling
+        # Each window already represents non-overlapping transitions
         
         print(f"\nSequence {seq_id}:")
         print(f"  Total windows: {len(seq_results_with_idx)}")
         
-        # Sample every nth result to avoid overlap
-        for i in range(0, len(seq_results_with_idx), stride_for_non_overlap):
-            seq_results_sampled.append(seq_results_with_idx[i][1])
-            
-        print(f"  Sampled windows (non-overlapping): {len(seq_results_sampled)}")
-        
-        # Use sampled results instead of all results
-        seq_results = seq_results_sampled
+        # Extract just the results (without frame indices)
+        seq_results = [item[1] for item in seq_results_with_idx]
         
         # Concatenate sampled results for this sequence
         all_pred = np.concatenate([r['pred_poses'] for r in seq_results], axis=0)
