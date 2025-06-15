@@ -35,28 +35,28 @@ python src/eval.py \
 
 ### Workflow 2: Train and Test on Aria
 
-***With Fixed IMU Format (between-frames) - Recommended**
+**With Fixed IMU Format (between-frames) - Recommended**
 ```bash
 # 1. Process Aria data with proper IMU alignment
 ./process_full_dataset_optimal_fixed.sh
 
 # 2. Generate latent features with between-frames handling
 python generate_all_pretrained_latents_between_frames.py \
-    --processed-dir aria_processed_fixed \
-    --output-dir aria_latent_fixed \
+    --processed-dir aria_processed \
+    --output-dir aria_latent \
     --stride 10
 
 # 3. Train stable model
 python train_efficient.py \
     --epochs 50 --batch-size 32 --lr 5e-5 \
-    --data-dir aria_latent_fixed \
-    --checkpoint-dir checkpoints_vift_fixed
+    --data-dir aria_latent \
+    --checkpoint-dir checkpoints_vift_stable
 
 # 4. Evaluate
 python evaluate_stable_model.py \
-    --checkpoint checkpoints_vift_fixed/[timestamp]/best_model.pt \
-    --data-dir aria_latent_fixed \
-    --output-dir evaluation_results_fixed
+    --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
+    --data-dir aria_latent \
+    --output-dir evaluation_results
 ```
 
 ### Workflow 3: Cross-Domain Testing (KITTI→Aria)
@@ -105,7 +105,7 @@ pip install rootutils colorlog natsort
 ```bash
 # Process with correct between-frames IMU extraction (recommended)
 ./process_full_dataset_optimal_fixed.sh
-# Output: aria_processed_fixed/
+# Output: aria_processed/
 ```
 
 The fixed version extracts IMU data between consecutive frames for proper VIO temporal alignment. For N frames, it produces N-1 intervals of IMU data.
@@ -126,8 +126,8 @@ python generate_all_pretrained_latents_fixed.py \
 ```bash
 # Generate latent features with proper IMU handling
 python generate_all_pretrained_latents_between_frames.py \
-    --processed-dir aria_processed_fixed \
-    --output-dir aria_latent_fixed \
+    --processed-dir aria_processed \
+    --output-dir aria_latent \
     --stride 10 \
     --skip-test
 ```
@@ -280,8 +280,8 @@ python train_efficient.py \
     --epochs 50 \
     --batch-size 32 \
     --lr 5e-5 \
-    --data-dir aria_latent_fixed \
-    --checkpoint-dir checkpoints_fixed \
+    --data-dir aria_latent \
+    --checkpoint-dir checkpoints_vift_stable \
     --device cuda
 ```
 

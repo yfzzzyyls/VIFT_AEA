@@ -9,7 +9,7 @@ echo ""
 # Configuration
 ARIA_PATH="/mnt/ssd_ext/incSeg-data/aria_everyday"
 OUTPUT_BASE="/home/external/VIFT_AEA"
-PROCESSED_DIR="$OUTPUT_BASE/aria_processed_fixed"
+PROCESSED_DIR="$OUTPUT_BASE/aria_processed"
 MAX_FRAMES=1000  # Default 1000 frames evenly sampled
 NUM_WORKERS=4
 
@@ -146,9 +146,9 @@ echo "  - Each interval contains 50 IMU samples at 1000Hz"
 echo ""
 echo "Next steps:"
 echo "1. Generate latent features with the fixed data:"
-echo "   python generate_all_pretrained_latents_fixed.py \\"
+echo "   python generate_all_pretrained_latents_between_frames.py \\"
 echo "       --processed-dir $PROCESSED_DIR \\"
-echo "       --output-dir $OUTPUT_BASE/aria_latent_fixed \\"
+echo "       --output-dir $OUTPUT_BASE/aria_latent \\"
 echo "       --stride 10 \\"
 echo "       --skip-test"
 echo ""
