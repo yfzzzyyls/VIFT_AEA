@@ -1,0 +1,19 @@
+VIFT FROM SCRATCH EVALUATION RESULTS
+=====================================
+
+Translation Error (cm):
+  Mean:   3.93
+  Std:    8.19
+  Median: 1.25
+  95%:    13.69
+  Max:    76.80
+
+Rotation Error (degrees):
+  Mean:   62.41
+  Std:    45.30
+  Median: 40.74
+  95%:    145.88
+  Max:    179.84
+
+Note: High rotation error is expected due to Euler angle representation.
+Consider using quaternion representation for better results.

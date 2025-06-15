@@ -112,7 +112,7 @@ class VIFTFromScratch(nn.Module):
         }
 
 
-def compute_loss(predictions, batch, trans_weight=100.0, rot_weight=1.0):
+def compute_loss(predictions, batch, trans_weight=10.0, rot_weight=1.0):
     """Compute loss with quaternion representation for multi-step prediction"""
     pred_poses = predictions['poses']  # [B, 10, 7]
     gt_poses = batch['gt_poses']  # [B, 10, 7]
@@ -264,7 +264,7 @@ def main():
                         help='Number of training epochs')
     parser.add_argument('--batch-size', type=int, default=4,
                         help='Batch size per GPU')
-    parser.add_argument('--lr', type=float, default=1e-4,
+    parser.add_argument('--lr', type=float, default=3e-5,
                         help='Learning rate')
     parser.add_argument('--checkpoint-dir', type=str, default='checkpoints_from_scratch',
                         help='Directory to save checkpoints')
