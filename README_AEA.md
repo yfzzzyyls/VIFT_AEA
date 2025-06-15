@@ -54,7 +54,7 @@ python train_efficient.py \
 
 # 4. Evaluate
 python evaluate_stable_model.py \
-    --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
+    --checkpoint checkpoints_vift_stable/best_model.pt \
     --data-dir aria_latent \
     --output-dir evaluation_results
 ```
@@ -262,7 +262,7 @@ python train_efficient.py \
 
 # Evaluate (auto-generates test features if needed)
 python evaluate_stable_model.py \
-    --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
+    --checkpoint checkpoints_vift_stable/best_model.pt \
     --data-dir aria_latent \
     --output-dir evaluation_results \
     --device cuda
@@ -352,7 +352,7 @@ python src/eval.py \
 ```bash
 # For models trained with stable training script
 python evaluate_stable_model.py \
-    --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
+    --checkpoint checkpoints_vift_stable/best_model.pt \
     --data-dir aria_latent \
     --output-dir evaluation_results \
     --batch-size 16 \
@@ -384,13 +384,13 @@ python inference_kitti.py \
 ```bash
 # Inference with stable model
 python inference_full_frames_stable.py \
-    --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
+    --checkpoint checkpoints_vift_stable/best_model.pt \
     --sequence-path /path/to/aria/sequence \
     --output-path trajectory_output.json
 
 # Inference with standard model  
 python inference_full_frames_unified.py \
-    --checkpoint checkpoints_vift_aria/[timestamp]/checkpoint.pt \
+    --checkpoint checkpoints_vift_aria/best_model.pt \
     --sequence-path /path/to/aria/sequence \
     --output-path trajectory_output.json
 ```
