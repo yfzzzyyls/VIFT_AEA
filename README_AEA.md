@@ -34,27 +34,29 @@ python src/eval.py \
 ```
 
 ### Workflow 2: Train and Test on Aria
-```bash
-# 1. Process Aria data
-./process_full_dataset_optimal.sh
 
-# 2. Generate latent features
-python generate_all_pretrained_latents_fixed.py \
-    --processed-dir aria_processed \
-    --output-dir aria_latent \
+***With Fixed IMU Format (between-frames) - Recommended**
+```bash
+# 1. Process Aria data with proper IMU alignment
+./process_full_dataset_optimal_fixed.sh
+
+# 2. Generate latent features with between-frames handling
+python generate_all_pretrained_latents_between_frames.py \
+    --processed-dir aria_processed_fixed \
+    --output-dir aria_latent_fixed \
     --stride 10
 
 # 3. Train stable model
 python train_efficient.py \
     --epochs 50 --batch-size 32 --lr 5e-5 \
-    --data-dir aria_latent \
-    --checkpoint-dir checkpoints_vift_stable
+    --data-dir aria_latent_fixed \
+    --checkpoint-dir checkpoints_vift_fixed
 
 # 4. Evaluate
 python evaluate_stable_model.py \
-    --checkpoint checkpoints_vift_stable/[timestamp]/best_model.pt \
-    --data-dir aria_latent \
-    --output-dir evaluation_results
+    --checkpoint checkpoints_vift_fixed/[timestamp]/best_model.pt \
+    --data-dir aria_latent_fixed \
+    --output-dir evaluation_results_fixed
 ```
 
 ### Workflow 3: Cross-Domain Testing (KITTI→Aria)
@@ -91,19 +93,41 @@ pip install rootutils colorlog natsort
 ### 2. Data Processing Pipeline
 
 #### Process Raw Aria Data (20 sequences with ALL frames)
+
+**Option A: Original Implementation (with temporal misalignment)**
 ```bash
-# Process 20 diverse sequences from aria_everyday dataset
+# Process with sliding window IMU (not recommended for VIO)
 ./process_full_dataset_optimal.sh
+# Output: aria_processed/
 ```
 
-This script processes 20 sequences from 4 different locations, extracting ALL frames (not downsampled). Output will be in `aria_processed/`.
+**Option B: Fixed Implementation (with proper between-frames IMU)**
+```bash
+# Process with correct between-frames IMU extraction (recommended)
+./process_full_dataset_optimal_fixed.sh
+# Output: aria_processed_fixed/
+```
+
+The fixed version extracts IMU data between consecutive frames for proper VIO temporal alignment. For N frames, it produces N-1 intervals of IMU data.
 
 #### Generate Latent Features
+
+**For Original Data Format:**
 ```bash
 # Generate latent features with stride 10
 python generate_all_pretrained_latents_fixed.py \
     --processed-dir aria_processed \
     --output-dir aria_latent \
+    --stride 10 \
+    --skip-test
+```
+
+**For Fixed Between-Frames Format (recommended):**
+```bash
+# Generate latent features with proper IMU handling
+python generate_all_pretrained_latents_between_frames.py \
+    --processed-dir aria_processed_fixed \
+    --output-dir aria_latent_fixed \
     --stride 10 \
     --skip-test
 ```
@@ -248,6 +272,18 @@ python evaluate_stable_model.py \
 - Translation Error: 0.843 cm (mean), 0.339 cm (median)
 - Rotation Error: 1.302° (mean), 0.741° (median)
 - 95% of predictions within 3.192 cm and 4.288°
+
+**Training with Fixed IMU Data:**
+```bash
+# Train on properly aligned IMU data
+python train_efficient.py \
+    --epochs 50 \
+    --batch-size 32 \
+    --lr 5e-5 \
+    --data-dir aria_latent_fixed \
+    --checkpoint-dir checkpoints_fixed \
+    --device cuda
+```
 
 **B. Standard VIFT Architecture on Aria**
 
@@ -479,6 +515,23 @@ The geodesic loss properly measures rotation distance on the SO(3) manifold:
 | VIFT | KITTI | Aria (reorganized) | 3.27% | 1.77° | Using reorganized data approach |
 | VIFT | KITTI | Aria (direct) | ~32% | ~16° | Initial attempt with format mismatch |
 | VIFT-AEA Stable | Aria | Aria | 0.84 cm | 1.3° | Trained directly on Aria |
+| VIFT-AEA Fixed | Aria (fixed IMU) | Aria | TBD | TBD | With proper between-frames IMU |
+
+## Important: IMU Data Format Fix
+
+The original implementation had a temporal misalignment issue where IMU data was extracted in sliding windows centered on each frame. This has been fixed:
+
+### Original (Incorrect) Approach:
+- IMU window: [-25ms, +25ms] around each frame
+- Creates overlapping data and violates causality
+- Shape: `[N, 50, 6]` for N frames
+
+### Fixed (Correct) Approach:
+- IMU extracted between consecutive frames [t_i, t_{i+1})
+- No overlap, proper temporal alignment for VIO
+- Shape: `[N-1, 50, 6]` for N frames
+
+To use the fixed version, use scripts with "_fixed" suffix.
 
 ## Important Notes for Cross-Domain Testing
 

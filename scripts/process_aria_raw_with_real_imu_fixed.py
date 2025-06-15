@@ -190,36 +190,56 @@ class AriaRawProcessor:
             # Convert timestamps to seconds
             imu_timestamps_s = imu_timestamps_ns / 1e9
             
-            # Extract IMU data aligned with camera frames
+            # Extract IMU data BETWEEN consecutive frames (proper VIO approach)
             imu_data = []
-            samples_per_frame = 10  # Target samples per frame
+            samples_per_frame = 50  # Keep all 50 samples between frames
             
-            for i, pose in enumerate(poses):
-                if self.max_frames > 0 and i >= self.max_frames:
+            # Process each interval between consecutive frames
+            for i in range(len(poses) - 1):
+                if self.max_frames > 0 and i >= self.max_frames - 1:
                     break
                 
-                frame_timestamp = pose['timestamp']
-                frame_samples = []
+                # Get timestamps for consecutive frames
+                t_start = poses[i]['timestamp']
+                t_end = poses[i + 1]['timestamp']
                 
-                # Get 10 IMU samples around frame timestamp
-                # Sample window: -25ms to +25ms around frame
-                for j in range(samples_per_frame):
-                    # Evenly distribute samples across 50ms window
-                    sample_offset = (j - 4.5) * 0.005  # -22.5ms to +22.5ms
-                    target_time = frame_timestamp + sample_offset
+                # Find all IMU samples in this interval
+                mask = (imu_timestamps_s >= t_start) & (imu_timestamps_s < t_end)
+                interval_indices = np.where(mask)[0]
+                
+                if len(interval_indices) == 0:
+                    print(f"⚠️ No IMU data between frames {i} and {i+1}")
+                    # Create zero-filled data
+                    frame_samples = [torch.zeros(6, dtype=torch.float64) for _ in range(samples_per_frame)]
+                else:
+                    # Extract IMU samples in this interval
+                    interval_gyro = gyro_data[interval_indices]
+                    interval_accel = accel_data[interval_indices]
                     
-                    # Find closest IMU sample
-                    idx = np.argmin(np.abs(imu_timestamps_s - target_time))
-                    
-                    if abs(imu_timestamps_s[idx] - target_time) < 0.01:  # Within 10ms
-                        sample_data = torch.tensor([
-                            gyro_data[idx, 0], gyro_data[idx, 1], gyro_data[idx, 2],
-                            accel_data[idx, 0], accel_data[idx, 1], accel_data[idx, 2]
-                        ], dtype=torch.float64)
-                        frame_samples.append(sample_data)
+                    # Resample to exactly 50 samples if needed
+                    if len(interval_indices) != samples_per_frame:
+                        # Create target sample times
+                        target_times = np.linspace(t_start, t_end, samples_per_frame, endpoint=False)
+                        frame_samples = []
+                        
+                        for target_t in target_times:
+                            # Find closest IMU sample
+                            closest_idx = interval_indices[np.argmin(np.abs(imu_timestamps_s[interval_indices] - target_t))]
+                            sample_data = torch.tensor([
+                                gyro_data[closest_idx, 0], gyro_data[closest_idx, 1], gyro_data[closest_idx, 2],
+                                accel_data[closest_idx, 0], accel_data[closest_idx, 1], accel_data[closest_idx, 2]
+                            ], dtype=torch.float64)
+                            frame_samples.append(sample_data)
                     else:
-                        # Pad with zeros if no close sample
-                        frame_samples.append(torch.zeros(6, dtype=torch.float64))
+                        # Use all samples as-is
+                        frame_samples = []
+                        for j in range(len(interval_indices)):
+                            idx = interval_indices[j]
+                            sample_data = torch.tensor([
+                                gyro_data[idx, 0], gyro_data[idx, 1], gyro_data[idx, 2],
+                                accel_data[idx, 0], accel_data[idx, 1], accel_data[idx, 2]
+                            ], dtype=torch.float64)
+                            frame_samples.append(sample_data)
                 
                 if len(frame_samples) == samples_per_frame:
                     imu_data.append(torch.stack(frame_samples))
@@ -267,30 +287,27 @@ class AriaRawProcessor:
                 print("❌ No IMU streams found")
                 return None
             
-            # Extract IMU data aligned with camera frames
+            # Extract IMU data BETWEEN consecutive frames (proper VIO approach)
             imu_data = []
-            samples_per_frame = 10  # Downsampled from 50 to 10 samples per frame
+            samples_per_frame = 50  # Keep all 50 samples between frames
             
-            print(f"📊 Extracting IMU for {len(poses)} poses...")
-            for i, pose in enumerate(poses):
-                if self.max_frames > 0 and i >= self.max_frames:
+            print(f"📊 Extracting IMU between {len(poses)-1} frame pairs...")
+            for i in range(len(poses) - 1):
+                if self.max_frames > 0 and i >= self.max_frames - 1:
                     break
                 
                 if i % 1000 == 0:
-                    print(f"  Progress: {i}/{len(poses)} poses...")
+                    print(f"  Progress: {i}/{len(poses)-1} intervals...")
                 
-                frame_timestamp = pose['timestamp']
+                # Get timestamps for consecutive frames
+                t_start = poses[i]['timestamp']
+                t_end = poses[i + 1]['timestamp']
                 frame_samples = []
                 
-                # Get 10 IMU samples evenly distributed from 50 samples (every 5th sample)
-                # Original: 50 samples over 50ms window
-                # Now: 10 samples, taking every 5th sample
+                # Get 50 IMU samples evenly distributed between frames
                 for j in range(samples_per_frame):
-                    # Sample indices: 0, 5, 10, 15, 20, 25, 30, 35, 40, 45
-                    sample_idx = j * 5
-                    # Sample time: 25ms before to 25ms after frame
-                    sample_offset = (sample_idx - 25) * 0.001  # 25 is half of 50
-                    sample_time = frame_timestamp + sample_offset
+                    # Linear interpolation between frame timestamps
+                    sample_time = t_start + (t_end - t_start) * (j / samples_per_frame)
                     sample_time_ns = int(sample_time * 1e9)
                     
                     # Get IMU data
@@ -469,10 +486,16 @@ class AriaRawProcessor:
             return False
         
         # Ensure matching lengths
-        min_frames = min(len(poses), visual_data.shape[0], imu_data.shape[0])
-        poses = poses[:min_frames]
-        visual_data = visual_data[:min_frames]
-        imu_data = imu_data[:min_frames]
+        # Note: IMU data has N-1 intervals for N frames
+        num_frames = min(len(poses), visual_data.shape[0])
+        num_imu_intervals = min(num_frames - 1, imu_data.shape[0])
+        
+        # Adjust to have consistent data
+        poses = poses[:num_imu_intervals + 1]
+        visual_data = visual_data[:num_imu_intervals + 1]
+        imu_data = imu_data[:num_imu_intervals]
+        
+        min_frames = num_imu_intervals + 1  # For metadata
         
         # Save data
         poses_file = seq_output_dir / "poses_quaternion.json"
@@ -487,13 +510,16 @@ class AriaRawProcessor:
             'sequence_name': sequence_path.name,
             'sequence_id': sequence_id,
             'num_frames': min_frames,
+            'num_imu_intervals': num_imu_intervals,
             'visual_shape': list(visual_data.shape),
             'imu_shape': list(imu_data.shape),
             'slam_source': 'mps_slam_resampled_20hz',
-            'imu_source': 'real_vrs_data',
+            'imu_source': 'real_vrs_data_between_frames',
             'imu_frequency': 1000,
             'camera_frequency': 20,
-            'rotation_format': 'quaternion_xyzw'
+            'rotation_format': 'quaternion_xyzw',
+            'imu_format': 'between_frames',
+            'imu_note': 'IMU data represents motion between consecutive frames (N-1 intervals for N frames)'
         }
         
         with open(seq_output_dir / "metadata.json", 'w') as f:
