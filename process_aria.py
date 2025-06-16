@@ -6,6 +6,8 @@ Combines shell script logic with processing script and adds IMU order assertions
 
 import argparse
 import json
+import math
+import os
 import shutil
 import zipfile
 from pathlib import Path
@@ -33,28 +35,29 @@ except ImportError:
 
 
 class AriaProcessor:
-    def __init__(self, input_dir: str, output_dir: str, max_frames: int = 1000):
+    def __init__(self, input_dir: str, output_dir: str, max_frames: int = 1000, seq_id: str = None):
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
         self.max_frames = max_frames
+        self.seq_id = seq_id  # For logging with sequence prefix
         self.output_dir.mkdir(exist_ok=True)
         
-        # Check device
-        if torch.cuda.is_available():
-            self.device = torch.device("cuda")
-            print("🚀 Using CUDA GPU")
+        # Always use CPU for extraction to avoid GPU memory issues in multiprocessing
+        self.device = torch.device("cpu")
+        if self.seq_id:
+            print(f"[{self.seq_id}] 💻 Using CPU for extraction")
         else:
-            self.device = torch.device("cpu")
-            print("💻 Using CPU")
+            print("💻 Using CPU for extraction")
     
     def extract_slam_poses(self, sequence_path: Path) -> Optional[List[Dict]]:
         """Extract SLAM trajectory from MPS results and resample to 20Hz."""
-        print(f"📍 Extracting and resampling SLAM trajectory...")
+        prefix = f"[{self.seq_id}] " if self.seq_id else ""
+        print(f"{prefix}📍 Extracting and resampling SLAM trajectory...")
         
         # Look for SLAM trajectories zip
         trajectory_zips = list(sequence_path.glob("*mps_slam_trajectories.zip"))
         if not trajectory_zips:
-            print("❌ No SLAM trajectories found")
+            print(f"{prefix}❌ No SLAM trajectories found")
             return None
         
         trajectory_zip = trajectory_zips[0]
@@ -102,44 +105,83 @@ class AriaProcessor:
             shutil.rmtree(temp_dir, ignore_errors=True)
         
         if not raw_poses:
-            print("❌ No poses extracted from SLAM trajectory")
+            print(f"{prefix}❌ No poses extracted from SLAM trajectory")
             return None
             
-        print(f"📊 Extracted {len(raw_poses)} raw SLAM poses")
+        print(f"{prefix}📊 Extracted {len(raw_poses)} raw SLAM poses")
         
         # Calculate raw SLAM statistics
         raw_positions = np.array([p['translation'] for p in raw_poses])
         raw_duration = raw_poses[-1]['timestamp'] - raw_poses[0]['timestamp']
         raw_distance = np.sum(np.linalg.norm(np.diff(raw_positions, axis=0), axis=1))
-        print(f"📊 Raw SLAM: {raw_duration:.1f}s duration, {raw_distance:.2f}m total movement")
+        print(f"{prefix}📊 Raw SLAM: {raw_duration:.1f}s duration, {raw_distance:.2f}m total movement")
         
-        # Evenly sample frames across the trajectory
-        total_frames = len(raw_poses)
+        # Proper time-based resampling at 20Hz
+        t_start = raw_poses[0]['timestamp']
+        t_end = raw_poses[-1]['timestamp']
         
-        if self.max_frames > 0 and self.max_frames < total_frames:
-            # Evenly sample max_frames from the trajectory
-            print(f"📊 Evenly sampling {self.max_frames} frames from {total_frames} total poses...")
-            indices = np.linspace(0, total_frames - 1, self.max_frames, dtype=int)
-            resampled_poses = [raw_poses[i] for i in indices]
-        else:
-            # Use all frames
-            resampled_poses = raw_poses
-            print(f"📊 Using all {len(resampled_poses)} frames")
+        # Create target timestamps at exactly 20Hz intervals
+        target_timestamps = np.arange(t_start, t_end, 0.05)  # 50ms = 20Hz
+        
+        # Limit to max_frames if specified
+        if self.max_frames > 0 and len(target_timestamps) > self.max_frames:
+            # Evenly sample from the 20Hz grid
+            indices = np.linspace(0, len(target_timestamps) - 1, self.max_frames, dtype=int)
+            target_timestamps = target_timestamps[indices]
+        
+        print(f"{prefix}📊 Resampling to {len(target_timestamps)} frames at 20Hz...")
+        
+        # Extract all raw timestamps for efficient search
+        raw_timestamps = np.array([p['timestamp'] for p in raw_poses])
+        
+        # Find closest raw pose for each target timestamp
+        # Track used indices to avoid duplicates
+        resampled_poses = []
+        used_indices = set()
+        
+        for target_ts in target_timestamps:
+            closest_idx = np.argmin(np.abs(raw_timestamps - target_ts))
+            
+            # If this index was already used, find the next closest
+            if closest_idx in used_indices and len(raw_poses) > len(used_indices):
+                # Get distances to all poses
+                distances = np.abs(raw_timestamps - target_ts)
+                # Sort indices by distance
+                sorted_indices = np.argsort(distances)
+                # Find first unused index
+                for idx in sorted_indices:
+                    if idx not in used_indices:
+                        closest_idx = idx
+                        break
+            
+            used_indices.add(closest_idx)
+            resampled_poses.append(raw_poses[closest_idx])
         
         if resampled_poses:
+            # Verify timestamps are strictly monotonic
+            resampled_timestamps = [p['timestamp'] for p in resampled_poses]
+            time_diffs = np.diff(resampled_timestamps)
+            if np.any(time_diffs <= 0):
+                print(f"{prefix}⚠️ WARNING: Non-monotonic timestamps detected after resampling")
+                print(f"{prefix}   Found {np.sum(time_diffs <= 0)} non-increasing intervals")
+                # Could raise an error here if strict monotonicity is required
+                # raise ValueError("Resampled poses have non-monotonic timestamps")
             # Calculate resampled statistics
             resampled_positions = np.array([p['translation'] for p in resampled_poses])
             resampled_duration = resampled_poses[-1]['timestamp'] - resampled_poses[0]['timestamp']
             resampled_distance = np.sum(np.linalg.norm(np.diff(resampled_positions, axis=0), axis=1))
             
-            print(f"✅ Sampled {len(resampled_poses)} poses")
-            print(f"📊 Duration: {resampled_duration:.1f}s, Movement: {resampled_distance:.2f}m")
+            print(f"{prefix}✅ Sampled {len(resampled_poses)} poses")
+            print(f"{prefix}📊 Duration: {resampled_duration:.1f}s, Movement: {resampled_distance:.2f}m")
             
         return resampled_poses if resampled_poses else None
     
-    def extract_real_imu_data(self, vrs_path: Path, poses: List[Dict]) -> Optional[torch.Tensor]:
-        """Extract real IMU data from VRS file with channel order assertions."""
-        print(f"📊 Extracting real IMU data from VRS...")
+    def extract_real_imu_data(self, vrs_path: Path, poses: List[Dict]) -> Optional[Tuple[torch.Tensor, str]]:
+        """Extract real IMU data from VRS file with channel order assertions.
+        Returns: (imu_data, stream_id) or None
+        """
+        prefix = f"[{self.seq_id}] " if self.seq_id else ""
+        print(f"{prefix}📊 Extracting real IMU data from VRS...")
         
         # Try AriaVrsDataLoader first if available
         if ARIA_VRS_LOADER_AVAILABLE:
@@ -148,36 +190,52 @@ class AriaProcessor:
                 if result is not None:
                     return result
             except Exception as e:
-                print(f"❌ AriaVrsDataLoader failed: {e}")
+                print(f"{prefix}❌ AriaVrsDataLoader failed: {e}")
         
         # Try original method
         try:
             return self.extract_real_imu_data_original(vrs_path, poses)
         except Exception as e:
-            print(f"❌ Real IMU extraction failed: {e}")
+            print(f"{prefix}❌ Real IMU extraction failed: {e}")
             raise RuntimeError(f"Failed to extract real IMU data: {e}")
     
     def assert_imu_channel_order(self, imu_data: torch.Tensor, source: str):
         """Assert that IMU data has correct channel order [accel, gyro]."""
+        prefix = f"[{self.seq_id}] " if self.seq_id else ""
+        
         # Calculate magnitudes
         acc_norm = torch.norm(imu_data[..., :3], dim=-1).mean().item()
         gyro_norm = torch.norm(imu_data[..., 3:], dim=-1).mean().item()
         
-        print(f"📊 IMU sanity check ({source}): |acc|={acc_norm:.2f} m/s² ({acc_norm/9.81:.2f}g), |gyro|={gyro_norm:.2f} rad/s")
+        print(f"{prefix}📊 IMU sanity check ({source}): |acc|={acc_norm:.2f} m/s² ({acc_norm/9.81:.2f}g), |gyro|={gyro_norm:.2f} rad/s")
         
-        # Assert expected ranges
-        assert acc_norm > 5.0, f"Accelerometer magnitude too low: {acc_norm:.2f} m/s². Expected ~9.8 m/s² (gravity). Channel order may be wrong!"
-        assert acc_norm < 20.0, f"Accelerometer magnitude too high: {acc_norm:.2f} m/s². Expected ~9.8 m/s² for indoor motion."
-        assert gyro_norm < 10.0, f"Gyroscope magnitude too high: {gyro_norm:.2f} rad/s. Expected <5 rad/s for indoor motion. Channel order may be wrong!"
+        # More refined checks to handle edge cases
+        if acc_norm < 5.0:
+            print(f"{prefix}❌ ERROR: Accelerometer magnitude too low: {acc_norm:.2f} m/s²")
+            print(f"{prefix}   Expected ~9.8 m/s² (gravity). Channel order is likely wrong!")
+            raise ValueError(f"IMU channel order error: |acc|={acc_norm:.2f} m/s², expected ~9.8")
         
-        # Warn if values are at boundaries
+        if gyro_norm > 10.0:
+            print(f"{prefix}❌ ERROR: Gyroscope magnitude too high: {gyro_norm:.2f} rad/s")
+            print(f"{prefix}   Expected <5 rad/s for indoor motion. Channel order is likely wrong!")
+            raise ValueError(f"IMU channel order error: |gyro|={gyro_norm:.2f} rad/s, expected <5")
+        
+        # Warnings for unusual but potentially valid cases
+        # Relaxed threshold for stationary/tilted scenarios
         if acc_norm < 7.0:
-            print(f"⚠️ WARNING: Accelerometer magnitude seems low: {acc_norm:.2f} m/s²")
+            print(f"{prefix}⚠️ WARNING: Low accelerometer magnitude: {acc_norm:.2f} m/s²")
+            print(f"{prefix}   Device may be stationary on a tilted surface")
+        elif acc_norm > 15.0:
+            print(f"{prefix}⚠️ WARNING: High accelerometer magnitude: {acc_norm:.2f} m/s²")
+            print(f"{prefix}   This might indicate rapid motion or impacts")
+            
         if gyro_norm > 5.0:
-            print(f"⚠️ WARNING: Gyroscope magnitude seems high for indoor motion: {gyro_norm:.2f} rad/s")
+            print(f"{prefix}⚠️ WARNING: High gyroscope magnitude: {gyro_norm:.2f} rad/s")
+            print(f"{prefix}   This might indicate rapid rotation")
     
-    def extract_real_imu_data_alternative(self, vrs_path: Path, poses: List[Dict]) -> Optional[torch.Tensor]:
+    def extract_real_imu_data_alternative(self, vrs_path: Path, poses: List[Dict]) -> Optional[Tuple[torch.Tensor, str]]:
         """Extract real IMU data using AriaVrsDataLoader."""
+        prefix = f"[{self.seq_id}] " if self.seq_id else ""
         
         try:
             # Use AriaVrsDataLoader for simpler IMU extraction
@@ -187,24 +245,27 @@ class AriaProcessor:
             imu_timestamps_ns = None
             accel_data = None
             gyro_data = None
+            stream_id = None
             
             try:
                 imu_timestamps_ns, accel_data, gyro_data = dl.load_imu_stream("imu-right")
-                print("✅ Using right IMU stream")
+                stream_id = "1202-1"  # Right IMU
+                print(f"{prefix}✅ Using right IMU stream (1202-1)")
             except:
                 try:
                     # Fall back to left IMU (≈800 Hz)
                     imu_timestamps_ns, accel_data, gyro_data = dl.load_imu_stream("imu-left")
-                    print("✅ Using left IMU stream")
+                    stream_id = "1202-2"  # Left IMU
+                    print(f"{prefix}✅ Using left IMU stream (1202-2)")
                 except Exception as e:
-                    print(f"❌ No IMU streams found: {e}")
+                    print(f"{prefix}❌ No IMU streams found: {e}")
                     return None
             
             if imu_timestamps_ns is None or len(imu_timestamps_ns) == 0:
-                print("❌ No IMU data found")
+                print(f"{prefix}❌ No IMU data found")
                 return None
             
-            print(f"📊 Found {len(imu_timestamps_ns)} IMU samples")
+            print(f"{prefix}📊 Found {len(imu_timestamps_ns)} IMU samples")
             
             # Convert timestamps to seconds
             imu_timestamps_s = imu_timestamps_ns / 1e9
@@ -227,12 +288,13 @@ class AriaProcessor:
                 interval_indices = np.where(mask)[0]
                 
                 if len(interval_indices) == 0:
-                    print(f"⚠️ No IMU data between frames {i} and {i+1}")
+                    print(f"{prefix}⚠️ No IMU data between frames {i} and {i+1}")
                     # Create zero-filled data
                     frame_samples = [torch.zeros(6, dtype=torch.float32) for _ in range(samples_per_frame)]
                 else:
                     # Create 11 evenly spaced target times
-                    target_times = np.linspace(t_start, t_end, samples_per_frame, endpoint=False)
+                    # Using endpoint=True for symmetric [0, Δt] grid including t_end
+                    target_times = np.linspace(t_start, t_end, samples_per_frame, endpoint=True)
                     frame_samples = []
                     
                     for target_t in target_times:
@@ -252,29 +314,31 @@ class AriaProcessor:
                 stacked_imu = torch.stack(imu_data)
                 # Assert correct channel order
                 self.assert_imu_channel_order(stacked_imu, "AriaVrsDataLoader")
-                print(f"✅ Extracted real IMU data for {len(imu_data)} frames")
-                return stacked_imu.to(self.device)
+                print(f"{prefix}✅ Extracted real IMU data for {len(imu_data)} frames")
+                return stacked_imu.to(self.device), stream_id
             else:
-                print("❌ No IMU data extracted")
+                print(f"{prefix}❌ No IMU data extracted")
             
         except Exception as e:
-            print(f"❌ Error with AriaVrsDataLoader: {e}")
+            print(f"{prefix}❌ Error with AriaVrsDataLoader: {e}")
             import traceback
             traceback.print_exc()
         
         return None
     
-    def extract_real_imu_data_original(self, vrs_path: Path, poses: List[Dict]) -> Optional[torch.Tensor]:
+    def extract_real_imu_data_original(self, vrs_path: Path, poses: List[Dict]) -> Optional[Tuple[torch.Tensor, str]]:
         """Extract real IMU data from VRS file using original API."""
-        print("📊 Using original projectaria_tools method...")
+        prefix = f"[{self.seq_id}] " if self.seq_id else ""
+        print(f"{prefix}📊 Using original projectaria_tools method...")
         try:
             provider = data_provider.create_vrs_data_provider(str(vrs_path))
             if not provider:
-                print("❌ Failed to open VRS file")
+                print(f"{prefix}❌ Failed to open VRS file")
                 return None
             
             # Get IMU stream - try right IMU first, then left
             imu_stream = None
+            used_stream_id = None
             stream_ids = ["1202-1", "1202-2"]  # Right and left IMU
             
             for stream_id_str in stream_ids:
@@ -284,27 +348,28 @@ class AriaProcessor:
                     config = provider.get_imu_configuration(imu_stream_id)
                     if config:
                         imu_stream = imu_stream_id
-                        print(f"✅ Using IMU stream: {stream_id_str}")
-                        print(f"📊 IMU rate: {config.nominal_rate_hz} Hz")
+                        used_stream_id = stream_id_str
+                        print(f"{prefix}✅ Using IMU stream: {stream_id_str}")
+                        print(f"{prefix}📊 IMU rate: {config.nominal_rate_hz} Hz")
                         break
                 except:
                     continue
             
             if not imu_stream:
-                print("❌ No IMU streams found")
+                print(f"{prefix}❌ No IMU streams found")
                 return None
             
             # Extract IMU data BETWEEN consecutive frames (proper VIO approach)
             imu_data = []
             samples_per_frame = 11  # Directly extract 11 samples per interval
             
-            print(f"📊 Extracting IMU between {len(poses)-1} frame pairs...")
+            print(f"{prefix}📊 Extracting IMU between {len(poses)-1} frame pairs...")
             for i in range(len(poses) - 1):
                 if self.max_frames > 0 and i >= self.max_frames - 1:
                     break
                 
                 if i % 1000 == 0:
-                    print(f"  Progress: {i}/{len(poses)-1} intervals...")
+                    print(f"{prefix}  Progress: {i}/{len(poses)-1} intervals...")
                 
                 # Get timestamps for consecutive frames
                 t_start = poses[i]['timestamp']
@@ -312,9 +377,10 @@ class AriaProcessor:
                 frame_samples = []
                 
                 # Get 11 IMU samples evenly distributed between frames
-                for j in range(samples_per_frame):
-                    # Linear interpolation between frame timestamps
-                    sample_time = t_start + (t_end - t_start) * (j / samples_per_frame)
+                # Using endpoint=True for symmetric [0, Δt] grid including t_end
+                sample_times = np.linspace(t_start, t_end, samples_per_frame, endpoint=True)
+                
+                for j, sample_time in enumerate(sample_times):
                     sample_time_ns = int(sample_time * 1e9)
                     
                     # Get IMU data
@@ -326,7 +392,7 @@ class AriaProcessor:
                             TimeQueryOptions.CLOSEST
                         )
                     except Exception as e:
-                        print(f"⚠️ Error getting IMU sample: {e}")
+                        print(f"{prefix}⚠️ Error getting IMU sample: {e}")
                         imu_sample = None
                     
                     if imu_sample:
@@ -351,11 +417,11 @@ class AriaProcessor:
                 stacked_imu = torch.stack(imu_data)
                 # Assert correct channel order
                 self.assert_imu_channel_order(stacked_imu, "projectaria_tools")
-                print(f"✅ Extracted real IMU data for {len(imu_data)} frames")
-                return stacked_imu.to(self.device)
+                print(f"{prefix}✅ Extracted real IMU data for {len(imu_data)} frames")
+                return stacked_imu.to(self.device), used_stream_id
             
         except Exception as e:
-            print(f"❌ Error extracting IMU: {e}")
+            print(f"{prefix}❌ Error extracting IMU: {e}")
             import traceback
             traceback.print_exc()
         
@@ -363,12 +429,13 @@ class AriaProcessor:
     
     def extract_rgb_frames(self, vrs_path: Path, poses: List[Dict], output_video_path: Path) -> Optional[torch.Tensor]:
         """Extract RGB frames from VRS file."""
-        print(f"🎥 Extracting RGB frames from VRS...")
+        prefix = f"[{self.seq_id}] " if self.seq_id else ""
+        print(f"{prefix}🎥 Extracting RGB frames from VRS...")
         
         try:
             provider = data_provider.create_vrs_data_provider(str(vrs_path))
             if not provider:
-                print("❌ Failed to open VRS file")
+                print(f"{prefix}❌ Failed to open VRS file")
                 return None
             
             # Get RGB camera stream
@@ -376,25 +443,37 @@ class AriaProcessor:
             config = provider.get_image_configuration(rgb_stream_id)
             
             if not config:
-                print("❌ No RGB camera stream found")
+                print(f"{prefix}❌ No RGB camera stream found")
                 return None
             
-            print(f"📷 RGB camera: {config.image_width}x{config.image_height}")
+            print(f"{prefix}📷 RGB camera: {config.image_width}x{config.image_height}")
             
-            # Target resolution
-            target_width = 336
-            target_height = 188
+            # Calculate target resolution maintaining aspect ratio
+            # Original Aria resolution is typically 1408x1408 (square)
+            # We want to downsample while maintaining aspect ratio
+            original_width = config.image_width
+            original_height = config.image_height
+            
+            # Target roughly 336x188 area but maintain aspect ratio
+            target_area = 336 * 188
+            aspect_ratio = original_width / original_height
+            
+            # Calculate dimensions that maintain aspect ratio
+            target_height = int(np.sqrt(target_area / aspect_ratio))
+            target_width = int(target_height * aspect_ratio)
+            
+            print(f"{prefix}📐 Resizing to {target_width}x{target_height} (aspect ratio: {aspect_ratio:.2f})")
             
             # Extract frames aligned with poses
             frames = []
             
-            print(f"📊 Extracting {len(poses)} RGB frames...")
+            print(f"{prefix}📊 Extracting {len(poses)} RGB frames...")
             for i, pose in enumerate(poses):
                 if self.max_frames > 0 and i >= self.max_frames:
                     break
                 
                 if i % 100 == 0:
-                    print(f"  Progress: {i}/{len(poses)} frames...")
+                    print(f"{prefix}  Progress: {i}/{len(poses)} frames...")
                 
                 frame_timestamp_ns = int(pose['timestamp'] * 1e9)
                 
@@ -410,23 +489,25 @@ class AriaProcessor:
                     # Get the first image if multiple
                     img_array = image_data[0].to_numpy_array()
                     
-                    # Resize to target resolution
-                    img_resized = cv2.resize(img_array, (target_width, target_height))
+                    # Resize to target resolution with INTER_AREA for better quality
+                    img_resized = cv2.resize(img_array, (target_width, target_height), interpolation=cv2.INTER_AREA)
                     
-                    # Convert to tensor and normalize
-                    img_tensor = torch.from_numpy(img_resized).float() / 255.0
+                    # Keep as uint8 to save memory, convert to float later if needed
+                    # This follows PyTorch's recommendation for preprocessing pipelines
+                    img_tensor = torch.from_numpy(img_resized)
                     
                     # Add to list
                     frames.append(img_tensor)
                 else:
-                    # Pad with zeros if no frame
-                    frames.append(torch.zeros(target_height, target_width, 3))
+                    # Pad with zeros if no frame (uint8)
+                    frames.append(torch.zeros(target_height, target_width, 3, dtype=torch.uint8))
             
             if frames:
-                print(f"✅ Extracted {len(frames)} RGB frames")
+                print(f"{prefix}✅ Extracted {len(frames)} RGB frames")
                 
                 # Stack and permute to [N, C, H, W]
-                visual_data = torch.stack(frames).permute(0, 3, 1, 2)
+                # Convert to float and normalize here for efficiency
+                visual_data = torch.stack(frames).permute(0, 3, 1, 2).float() / 255.0
                 
                 # Save as video (optional)
                 if output_video_path:
@@ -435,7 +516,7 @@ class AriaProcessor:
                 return visual_data.to(self.device)
             
         except Exception as e:
-            print(f"❌ Error extracting RGB frames: {e}")
+            print(f"{prefix}❌ Error extracting RGB frames: {e}")
             import traceback
             traceback.print_exc()
         
@@ -443,8 +524,10 @@ class AriaProcessor:
     
     def save_video(self, frames: torch.Tensor, output_path: Path, fps: int = 20):
         """Save frames as video."""
+        prefix = f"[{self.seq_id}] " if self.seq_id else ""
         try:
-            # Convert to numpy and denormalize
+            # Convert to numpy (already normalized float data)
+            # Denormalize back to uint8 for video
             frames_np = (frames.permute(0, 2, 3, 1).cpu().numpy() * 255).astype(np.uint8)
             
             # Setup video writer
@@ -459,22 +542,23 @@ class AriaProcessor:
                 out.write(frame_bgr)
             
             out.release()
-            print(f"✅ Saved video to {output_path}")
+            print(f"{prefix}✅ Saved video to {output_path}")
             
         except Exception as e:
-            print(f"⚠️ Failed to save video: {e}")
+            print(f"{prefix}⚠️ Failed to save video: {e}")
     
     def process_sequence(self, sequence_path: Path, sequence_id: str) -> bool:
         """Process a single sequence with real IMU data."""
-        print(f"\n🔄 Processing sequence: {sequence_path.name}")
+        prefix = f"[{self.seq_id}] " if self.seq_id else ""
+        print(f"\n{prefix}🔄 Processing sequence: {sequence_path.name}")
         
-        # Check for VRS file - look for any .vrs file in the directory
-        vrs_files = list(sequence_path.glob("*.vrs"))
+        # Check for VRS file - look for the main recording VRS file
+        vrs_files = list(sequence_path.glob("*main_recording.vrs"))
         if not vrs_files:
-            print(f"❌ No .vrs file found in {sequence_path}")
+            print(f"{prefix}❌ No main_recording.vrs file found in {sequence_path}")
             return False
         vrs_path = vrs_files[0]  # Use the first VRS file found
-        print(f"📹 Found VRS file: {vrs_path.name}")
+        print(f"{prefix}📹 Found VRS file: {vrs_path.name}")
         
         # Extract SLAM poses (now properly resampled)
         poses = self.extract_slam_poses(sequence_path)
@@ -482,9 +566,10 @@ class AriaProcessor:
             return False
         
         # Extract real IMU data (with assertions)
-        imu_data = self.extract_real_imu_data(vrs_path, poses)
-        if imu_data is None:
+        imu_result = self.extract_real_imu_data(vrs_path, poses)
+        if imu_result is None:
             return False
+        imu_data, imu_stream_id = imu_result
         
         # Extract RGB frames
         seq_output_dir = self.output_dir / sequence_id
@@ -523,28 +608,33 @@ class AriaProcessor:
             'num_imu_intervals': num_imu_intervals,
             'visual_shape': list(visual_data.shape),
             'imu_shape': list(imu_data.shape),
-            'slam_source': 'mps_slam_resampled_20hz',
+            'slam_source': 'mps_slam_time_based_20hz',
             'imu_source': 'real_vrs_data_between_frames',
+            'imu_stream_id': imu_stream_id,
+            'imu_stream_name': 'right IMU' if imu_stream_id == '1202-1' else 'left IMU',
             'imu_frequency': 1000,
             'camera_frequency': 20,
             'rotation_format': 'quaternion_xyzw',
             'imu_format': 'between_frames',
             'imu_channel_order': 'ax,ay,az,gx,gy,gz',
             'imu_units': 'm/s²,m/s²,m/s²,rad/s,rad/s,rad/s',
-            'imu_note': 'IMU data contains 11 evenly spaced samples between consecutive frames (N-1 intervals for N frames)'
+            'imu_note': 'IMU data contains 11 evenly spaced samples between consecutive frames (N-1 intervals for N frames)',
+            'imu_sampling': 'np.linspace with endpoint=True for symmetric [t_start, t_end] interval'
         }
         
         with open(seq_output_dir / "metadata.json", 'w') as f:
             json.dump(metadata, f, indent=2)
         
-        print(f"✅ Successfully processed {sequence_path.name}: {min_frames} frames")
+        print(f"{prefix}✅ Successfully processed {sequence_path.name}: {min_frames} frames")
         return True
 
 
 def process_sequence_wrapper(args):
     """Wrapper for multiprocessing."""
     seq_path, seq_id, processor_args = args
-    processor = AriaProcessor(**processor_args)
+    # Disable CUDA for worker processes to avoid GPU memory issues
+    os.environ['CUDA_VISIBLE_DEVICES'] = ''
+    processor = AriaProcessor(**processor_args, seq_id=seq_id)
     return processor.process_sequence(seq_path, seq_id)
 
 
@@ -563,8 +653,13 @@ def main():
     
     # Get all sequences in the input directory
     input_path = Path(args.input_dir)
-    all_sequences = sorted([d for d in input_path.iterdir() 
-                           if d.is_dir() and (d / "recording.vrs").exists()])
+    all_sequences = []
+    for d in sorted(input_path.iterdir()):
+        if d.is_dir():
+            # Look for any .vrs file ending with "main_recording.vrs"
+            vrs_files = list(d.glob("*main_recording.vrs"))
+            if vrs_files:
+                all_sequences.append(d)
     
     # Take first 20 sequences
     sequences_to_process = all_sequences[:20]
@@ -600,6 +695,14 @@ def main():
     if args.num_workers > 1:
         print(f"\n🚀 Processing with {args.num_workers} workers...")
         
+        # Ensure no sequences are dropped due to integer division
+        # Use ceiling division to distribute work evenly
+        num_sequences = len(sequences_to_process)
+        chunk_size = math.ceil(num_sequences / args.num_workers)
+        
+        print(f"📊 Distributing {num_sequences} sequences across {args.num_workers} workers")
+        print(f"   Each worker will process up to {chunk_size} sequences")
+        
         # Prepare arguments for multiprocessing
         processor_args = {
             'input_dir': args.input_dir,
@@ -621,11 +724,11 @@ def main():
         processed_count = sum(results)
     else:
         print(f"\n🚀 Processing sequentially...")
-        processor = AriaProcessor(args.input_dir, args.output_dir, args.max_frames)
         processed_count = 0
         
         for i, seq_path in enumerate(tqdm(sequences_to_process, desc="Processing")):
             seq_id = f"{i:03d}"
+            processor = AriaProcessor(args.input_dir, args.output_dir, args.max_frames, seq_id=seq_id)
             if processor.process_sequence(seq_path, seq_id):
                 processed_count += 1
     
@@ -640,7 +743,7 @@ def main():
         'sequences_processed': list(sequence_mapping.values()),
         'imu_type': 'real_sensor_data',
         'imu_channel_order': 'ax,ay,az,gx,gy,gz',
-        'slam_resampling': 'resampled_to_20hz',
+        'slam_resampling': 'time_based_20hz',
         'max_frames_per_sequence': args.max_frames
     }
     
@@ -657,6 +760,8 @@ def main():
     # Verify sequence 005 is included
     if "005" in sequence_mapping:
         print(f"\n✅ Sequence 005 ({sequence_mapping['005']}) is included in the processed data")
+    else:
+        raise ValueError("Sequence 005 is missing from the processed data!")
     
     print("\n🎯 Next steps:")
     print("1. Run the debug script to verify IMU-image alignment:")
