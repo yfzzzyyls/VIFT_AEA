@@ -422,6 +422,34 @@ def main():
     # Initialize model
     model = VIFTFromScratch()
     
+    # ──────────────────────────────────────────────────────────────────
+    # 1.  Text-mode overview – always available
+    print("\n🛠  Model __repr__ tree (registered order)\n")
+    print(model)                     # built-in layer tree
+
+    # 2.  Detailed table – requires torchinfo (or torchsummaryX)
+    try:
+        from torchinfo import summary
+        # Create dummy batch dict
+        dummy_batch = {
+            "images": torch.zeros(1, 11, 3, 256, 512),
+            "imu":    torch.zeros(1, 110, 6),
+            "gt_poses": torch.zeros(1, 10, 7)    # not used, still needed for dict key
+        }
+        # Use input_data as a list containing the dict
+        summary(
+            model,
+            input_data=[dummy_batch],  # Pass as list with single dict element
+            col_names=("input_size", "output_size", "num_params", "trainable"),
+            depth=3,          # <=3 keeps the table readable
+            row_settings=("var_names",),
+            device="cpu"      # Use CPU for summary to avoid GPU memory
+        )
+    except ImportError:
+        print("\n⚠️  `torchinfo` not installed – skipping summary table.\n"
+              "    pip install torchinfo  (or torchsummaryX) to enable.")
+    # ──────────────────────────────────────────────────────────────────
+    
     # Load sequence mapping
     sequence_mapping = {}
     mapping_file = Path("./aria_processed/sequence_mapping.json")
