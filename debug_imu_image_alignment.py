@@ -137,11 +137,13 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
     """Overfit model on a single sample and monitor convergence."""
     if eval_mode:
         model.eval()  # Disable BatchNorm & Dropout
-        # But keep gradients enabled and disable running stats tracking
+        # Freeze BatchNorm completely for stable single-sample training
         for m in model.modules():
-            if isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm1d):
-                m.track_running_stats = False
-        print("Model in eval mode with BatchNorm tracking disabled")
+            if isinstance(m, (torch.nn.BatchNorm2d, torch.nn.BatchNorm1d)):
+                m.eval()  # Use pre-trained stats
+                m.weight.requires_grad_(False)
+                m.bias.requires_grad_(False)
+        print("Model in eval mode with BatchNorm frozen")
     else:
         model.train()
     
@@ -152,8 +154,8 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
     for p in model.parameters():
         assert torch.isfinite(p).all(), "NaN/inf in model weights"
     
-    # Lower learning rate for single sample optimization
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)  # 10x lower LR for single sample
+    # Moderate learning rate for stable convergence
+    optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)  # 5x lower than baseline, stable for single sample
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
@@ -174,12 +176,12 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
     
     # Check IMU values after bias correction
     acc_norm_before = torch.norm(window_imu[..., :3], dim=-1).mean().item()
-    acc_norm_after = torch.norm(window_imu_corrected[..., :3], dim=-1).mean().item()
+    acc_norm_after = torch.norm(window_imu_corrected[..., :3], dim=-1).mean().item()  # Fixed: now using corrected tensor
     print(f"Accelerometer magnitude: before={acc_norm_before:.3f} m/s², after={acc_norm_after:.3f} m/s²")
     
-    # Debug: Check a few IMU samples
-    print(f"First few IMU samples (accel only):")
-    print(window_imu[0, :5, :3].cpu().numpy())
+    # Debug: Check a few IMU samples after correction
+    print(f"First few IMU samples after bias correction (accel only):")
+    print(window_imu_corrected[0, :5, :3].cpu().numpy())
     
     losses = []
     trans_correlations = []
@@ -228,14 +230,22 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
         
         rot_loss = angle.mean()
         
-        loss = trans_loss + rot_loss
+        # Balance translation and rotation with alpha scaling
+        alpha = 3.0  # Room corner to corner ≈ 3m (better balance for indoor scenes)
+        loss = trans_loss * (1.0 / alpha) + rot_loss
         
         # Backward pass
         optimizer.zero_grad()
         loss.backward()
         
-        # Clip gradients more aggressively to prevent NaN and get gradient norm
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
+        # Warm clip schedule: tighter clipping early, then gradually increase headroom
+        if step < 300:
+            clip_val = 1.0
+        elif step < 500:
+            clip_val = 2.0  # Intermediate value
+        else:
+            clip_val = 3.0  # More conservative than 5.0
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_val)
         
         optimizer.step()
         
@@ -357,6 +367,11 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
     # Final analysis
     final_loss = losses[-1]
     print(f"\nFinal loss after {max_steps} steps: {final_loss:.4e}")
+    
+    # Print detailed metrics
+    if 'trans_loss' in locals() and 'rot_loss' in locals():
+        print(f"Final trans_loss: {trans_loss.item():.4e} ({trans_loss.item()*100:.2f} cm)")
+        print(f"Final rot_loss: {rot_loss.item():.4e} ({np.degrees(rot_loss.item()):.2f}°)")
     
     # Check for NaN
     if np.isnan(final_loss):
