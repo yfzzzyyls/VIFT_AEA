@@ -109,11 +109,7 @@ class AriaRawDataset(Dataset):
         # Resize to expected input size (512x256)
         if visual.shape[-2:] != (256, 512):
             visual = F.interpolate(visual, size=(256, 512), mode='bilinear', align_corners=False)
-        
-        # Apply transforms if any
-        if self.transform:
-            visual = self.transform(visual)
-        
+                
         # Get IMU data - already in correct format (11 samples per interval)
         # VIFT expects 110 samples (11 per transition)
         imu = sample['imu']  # [10, 11, 6]

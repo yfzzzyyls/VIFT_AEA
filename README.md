@@ -83,7 +83,7 @@ python src/eval.py \
 source venv/bin/activate
 
 # 2. Process Aria data with proper IMU alignment (between-frames)
-./process_full_dataset_optimal_fixed.sh
+python process_aria.py
 
 # 3. Generate latent features with fixed IMU handling
 python generate_all_pretrained_latents_between_frames.py \
@@ -113,7 +113,7 @@ python evaluate_stable_model.py \
 source venv/bin/activate
 
 # 2. Process Aria data with proper IMU alignment
-./process_full_dataset_optimal_fixed.sh
+python process_aria.py
 
 # 3. Create train/val splits
 python prepare_aria_splits.py --source-dir aria_processed
@@ -164,7 +164,7 @@ python src/eval.py \
 source venv/bin/activate
 
 # 2. Process Aria data with proper IMU alignment
-./process_full_dataset_optimal_fixed.sh
+python process_aria.py
 
 # 3. Create train/val/test splits
 python prepare_aria_splits.py --source-dir aria_processed
@@ -236,7 +236,7 @@ VIFT_AEA/
 ├── configs/                          # Hydra configuration files
 ├── scripts/                          # Processing scripts
 ├── pretrained_models/                # Pretrained encoders
-├── process_full_dataset_optimal_fixed.sh  # Aria data processing
+├── process_aria.py                   # Unified Aria data processing
 ├── train_efficient.py                # Aria training script
 └── evaluate_stable_model.py          # Evaluation script
 ```
@@ -257,7 +257,7 @@ python train_efficient.py --epochs 50 --batch-size 32 --lr 5e-5
 
 ## Troubleshooting
 
-1. **High validation errors**: Ensure you're using the fixed IMU extraction (`process_full_dataset_optimal_fixed.sh`)
+1. **High validation errors**: Ensure you're using the fixed IMU extraction (`python process_aria.py`)
 2. **Out of memory**: Reduce batch size or use gradient accumulation
 3. **NaN losses**: Check for corrupted data samples or reduce learning rate
 

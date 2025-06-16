@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-Process raw AriaEveryday dataset with real IMU data and proper SLAM resampling.
-Fixed version that:
-1. Resamples SLAM poses from ~1000Hz to 20Hz camera rate
-2. Extracts real IMU data from VRS files
+Process first 20 sequences from AriaEveryday dataset with real IMU data.
+Combines shell script logic with processing script and adds IMU order assertions.
 """
 
 import argparse
@@ -12,6 +10,8 @@ import shutil
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import multiprocessing as mp
+from functools import partial
 
 import cv2
 import numpy as np
@@ -32,11 +32,11 @@ except ImportError:
     ARIA_VRS_LOADER_AVAILABLE = False
 
 
-class AriaRawProcessor:
+class AriaProcessor:
     def __init__(self, input_dir: str, output_dir: str, max_frames: int = 1000):
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
-        self.max_frames = max_frames  # Default 1000 frames
+        self.max_frames = max_frames
         self.output_dir.mkdir(exist_ok=True)
         
         # Check device
@@ -138,7 +138,7 @@ class AriaRawProcessor:
         return resampled_poses if resampled_poses else None
     
     def extract_real_imu_data(self, vrs_path: Path, poses: List[Dict]) -> Optional[torch.Tensor]:
-        """Extract real IMU data from VRS file - NO FALLBACKS."""
+        """Extract real IMU data from VRS file with channel order assertions."""
         print(f"📊 Extracting real IMU data from VRS...")
         
         # Try AriaVrsDataLoader first if available
@@ -156,6 +156,25 @@ class AriaRawProcessor:
         except Exception as e:
             print(f"❌ Real IMU extraction failed: {e}")
             raise RuntimeError(f"Failed to extract real IMU data: {e}")
+    
+    def assert_imu_channel_order(self, imu_data: torch.Tensor, source: str):
+        """Assert that IMU data has correct channel order [accel, gyro]."""
+        # Calculate magnitudes
+        acc_norm = torch.norm(imu_data[..., :3], dim=-1).mean().item()
+        gyro_norm = torch.norm(imu_data[..., 3:], dim=-1).mean().item()
+        
+        print(f"📊 IMU sanity check ({source}): |acc|={acc_norm:.2f} m/s² ({acc_norm/9.81:.2f}g), |gyro|={gyro_norm:.2f} rad/s")
+        
+        # Assert expected ranges
+        assert acc_norm > 5.0, f"Accelerometer magnitude too low: {acc_norm:.2f} m/s². Expected ~9.8 m/s² (gravity). Channel order may be wrong!"
+        assert acc_norm < 20.0, f"Accelerometer magnitude too high: {acc_norm:.2f} m/s². Expected ~9.8 m/s² for indoor motion."
+        assert gyro_norm < 10.0, f"Gyroscope magnitude too high: {gyro_norm:.2f} rad/s. Expected <5 rad/s for indoor motion. Channel order may be wrong!"
+        
+        # Warn if values are at boundaries
+        if acc_norm < 7.0:
+            print(f"⚠️ WARNING: Accelerometer magnitude seems low: {acc_norm:.2f} m/s²")
+        if gyro_norm > 5.0:
+            print(f"⚠️ WARNING: Gyroscope magnitude seems high for indoor motion: {gyro_norm:.2f} rad/s")
     
     def extract_real_imu_data_alternative(self, vrs_path: Path, poses: List[Dict]) -> Optional[torch.Tensor]:
         """Extract real IMU data using AriaVrsDataLoader."""
@@ -219,9 +238,10 @@ class AriaRawProcessor:
                     for target_t in target_times:
                         # Find closest IMU sample
                         closest_idx = interval_indices[np.argmin(np.abs(imu_timestamps_s[interval_indices] - target_t))]
+                        # CORRECT ORDER: [accel, gyro]
                         sample_data = torch.tensor([
-                            gyro_data[closest_idx, 0], gyro_data[closest_idx, 1], gyro_data[closest_idx, 2],
-                            accel_data[closest_idx, 0], accel_data[closest_idx, 1], accel_data[closest_idx, 2]
+                            accel_data[closest_idx, 0], accel_data[closest_idx, 1], accel_data[closest_idx, 2],
+                            gyro_data[closest_idx, 0], gyro_data[closest_idx, 1], gyro_data[closest_idx, 2]
                         ], dtype=torch.float32)
                         frame_samples.append(sample_data)
                 
@@ -229,8 +249,11 @@ class AriaRawProcessor:
                     imu_data.append(torch.stack(frame_samples))
             
             if imu_data:
+                stacked_imu = torch.stack(imu_data)
+                # Assert correct channel order
+                self.assert_imu_channel_order(stacked_imu, "AriaVrsDataLoader")
                 print(f"✅ Extracted real IMU data for {len(imu_data)} frames")
-                return torch.stack(imu_data).to(self.device)
+                return stacked_imu.to(self.device)
             else:
                 print("❌ No IMU data extracted")
             
@@ -307,14 +330,14 @@ class AriaRawProcessor:
                         imu_sample = None
                     
                     if imu_sample:
-                        # Format: [gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]
+                        # CORRECT FORMAT: [accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z]
                         sample_data = torch.tensor([
-                            imu_sample.gyro_radsec[0],
-                            imu_sample.gyro_radsec[1],
-                            imu_sample.gyro_radsec[2],
                             imu_sample.accel_msec2[0],
                             imu_sample.accel_msec2[1],
-                            imu_sample.accel_msec2[2]
+                            imu_sample.accel_msec2[2],
+                            imu_sample.gyro_radsec[0],
+                            imu_sample.gyro_radsec[1],
+                            imu_sample.gyro_radsec[2]
                         ], dtype=torch.float32)
                         frame_samples.append(sample_data)
                     else:
@@ -325,8 +348,11 @@ class AriaRawProcessor:
                     imu_data.append(torch.stack(frame_samples))
             
             if imu_data:
+                stacked_imu = torch.stack(imu_data)
+                # Assert correct channel order
+                self.assert_imu_channel_order(stacked_imu, "projectaria_tools")
                 print(f"✅ Extracted real IMU data for {len(imu_data)} frames")
-                return torch.stack(imu_data).to(self.device)
+                return stacked_imu.to(self.device)
             
         except Exception as e:
             print(f"❌ Error extracting IMU: {e}")
@@ -455,7 +481,7 @@ class AriaRawProcessor:
         if not poses:
             return False
         
-        # Extract real IMU data
+        # Extract real IMU data (with assertions)
         imu_data = self.extract_real_imu_data(vrs_path, poses)
         if imu_data is None:
             return False
@@ -503,6 +529,8 @@ class AriaRawProcessor:
             'camera_frequency': 20,
             'rotation_format': 'quaternion_xyzw',
             'imu_format': 'between_frames',
+            'imu_channel_order': 'ax,ay,az,gx,gy,gz',
+            'imu_units': 'm/s²,m/s²,m/s²,rad/s,rad/s,rad/s',
             'imu_note': 'IMU data contains 11 evenly spaced samples between consecutive frames (N-1 intervals for N frames)'
         }
         
@@ -511,71 +539,131 @@ class AriaRawProcessor:
         
         print(f"✅ Successfully processed {sequence_path.name}: {min_frames} frames")
         return True
-    
-    
-    def process_dataset(self, sequences: Optional[List[str]] = None, max_sequences: Optional[int] = None):
-        """Process multiple sequences."""
-        print(f"🎯 Processing Raw AriaEveryday Dataset")
-        print(f"📁 Input: {self.input_dir}")
-        print(f"📁 Output: {self.output_dir}")
-        print("=" * 60)
-        
-        # Get sequences
-        if sequences:
-            sequence_paths = [self.input_dir / s for s in sequences]
-        else:
-            sequence_paths = [d for d in self.input_dir.iterdir() 
-                            if d.is_dir() and (d / "recording.vrs").exists()]
-        
-        if max_sequences:
-            sequence_paths = sequence_paths[:max_sequences]
-        
-        print(f"📊 Found {len(sequence_paths)} sequences to process")
-        
-        processed_count = 0
-        
-        for i, seq_path in enumerate(tqdm(sequence_paths, desc="Processing")):
-            # If processing single sequence, use sequence name as ID
-            if len(sequence_paths) == 1 and sequences:
-                sequence_id = seq_path.name
-            else:
-                sequence_id = f"{i:03d}"
-            
-            if self.process_sequence(seq_path, sequence_id):
-                processed_count += 1
-        
-        print(f"\n🎉 Processing Complete!")
-        print(f"✅ Successfully processed: {processed_count}/{len(sequence_paths)} sequences")
-        
-        # Save summary
-        summary = {
-            'dataset': 'AriaEveryday_Raw',
-            'total_sequences': len(sequence_paths),
-            'processed_sequences': processed_count,
-            'imu_type': 'real_sensor_data',
-            'slam_resampling': 'resampled_to_20hz',
-            'max_frames_per_sequence': self.max_frames
-        }
-        
-        with open(self.output_dir / "dataset_summary.json", 'w') as f:
-            json.dump(summary, f, indent=2)
+
+
+def process_sequence_wrapper(args):
+    """Wrapper for multiprocessing."""
+    seq_path, seq_id, processor_args = args
+    processor = AriaProcessor(**processor_args)
+    return processor.process_sequence(seq_path, seq_id)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Process raw AriaEveryday with real IMU data and proper SLAM resampling')
+    parser = argparse.ArgumentParser(description='Process first 20 AriaEveryday sequences with real IMU data')
     parser.add_argument('--input-dir', type=str, default='/mnt/ssd_ext/incSeg-data/aria_everyday',
                        help='Path to raw AriaEveryday dataset')
-    parser.add_argument('--output-dir', type=str, default='aria_processed_real_imu',
+    parser.add_argument('--output-dir', type=str, default='./aria_processed',
                        help='Output directory')
     parser.add_argument('--max-frames', type=int, default=1000,
                        help='Max frames per sequence (default: 1000, evenly sampled)')
-    parser.add_argument('--sequences', nargs='+', help='Specific sequences to process')
-    parser.add_argument('--max-sequences', type=int, help='Maximum number of sequences')
+    parser.add_argument('--num-workers', type=int, default=4,
+                       help='Number of parallel workers')
     
     args = parser.parse_args()
     
-    processor = AriaRawProcessor(args.input_dir, args.output_dir, args.max_frames)
-    processor.process_dataset(args.sequences, args.max_sequences)
+    # Get all sequences in the input directory
+    input_path = Path(args.input_dir)
+    all_sequences = sorted([d for d in input_path.iterdir() 
+                           if d.is_dir() and (d / "recording.vrs").exists()])
+    
+    # Take first 20 sequences
+    sequences_to_process = all_sequences[:20]
+    
+    print(f"🎯 Processing First 20 AriaEveryday Sequences")
+    print(f"📁 Input: {args.input_dir}")
+    print(f"📁 Output: {args.output_dir}")
+    print(f"🔢 Found {len(all_sequences)} total sequences")
+    print(f"🎬 Processing first 20 sequences")
+    print("=" * 60)
+    
+    # Create output directory
+    output_path = Path(args.output_dir)
+    output_path.mkdir(exist_ok=True)
+    
+    # Create sequence mapping
+    sequence_mapping = {}
+    print("\n📋 Sequences to process:")
+    for i, seq_path in enumerate(sequences_to_process):
+        seq_id = f"{i:03d}"
+        sequence_mapping[seq_id] = seq_path.name
+        if seq_path.name == "loc2_script3_seq3_rec1":
+            print(f"  {seq_id}: {seq_path.name} ⭐ (standing from couch)")
+        else:
+            print(f"  {seq_id}: {seq_path.name}")
+    
+    # Save sequence mapping
+    with open(output_path / "sequence_mapping.json", 'w') as f:
+        json.dump(sequence_mapping, f, indent=2)
+    print(f"\n✅ Saved sequence mapping to {output_path / 'sequence_mapping.json'}")
+    
+    # Process sequences
+    if args.num_workers > 1:
+        print(f"\n🚀 Processing with {args.num_workers} workers...")
+        
+        # Prepare arguments for multiprocessing
+        processor_args = {
+            'input_dir': args.input_dir,
+            'output_dir': args.output_dir,
+            'max_frames': args.max_frames
+        }
+        
+        process_args = [(sequences_to_process[i], f"{i:03d}", processor_args) 
+                       for i in range(len(sequences_to_process))]
+        
+        # Process in parallel
+        with mp.Pool(args.num_workers) as pool:
+            results = list(tqdm(
+                pool.imap(process_sequence_wrapper, process_args),
+                total=len(process_args),
+                desc="Processing sequences"
+            ))
+        
+        processed_count = sum(results)
+    else:
+        print(f"\n🚀 Processing sequentially...")
+        processor = AriaProcessor(args.input_dir, args.output_dir, args.max_frames)
+        processed_count = 0
+        
+        for i, seq_path in enumerate(tqdm(sequences_to_process, desc="Processing")):
+            seq_id = f"{i:03d}"
+            if processor.process_sequence(seq_path, seq_id):
+                processed_count += 1
+    
+    print(f"\n🎉 Processing Complete!")
+    print(f"✅ Successfully processed: {processed_count}/{len(sequences_to_process)} sequences")
+    
+    # Save summary
+    summary = {
+        'dataset': 'AriaEveryday_Raw',
+        'total_sequences': len(all_sequences),
+        'processed_sequences': processed_count,
+        'sequences_processed': list(sequence_mapping.values()),
+        'imu_type': 'real_sensor_data',
+        'imu_channel_order': 'ax,ay,az,gx,gy,gz',
+        'slam_resampling': 'resampled_to_20hz',
+        'max_frames_per_sequence': args.max_frames
+    }
+    
+    with open(output_path / "dataset_summary.json", 'w') as f:
+        json.dump(summary, f, indent=2)
+    
+    print(f"\n📊 Summary:")
+    print(f"  - Processed {processed_count} sequences")
+    print(f"  - Each with up to {args.max_frames} frames")
+    print(f"  - IMU data format: [ax,ay,az,gx,gy,gz]")
+    print(f"  - IMU extracted between consecutive frames")
+    print(f"\n📁 Output saved to: {output_path}")
+    
+    # Verify sequence 005 is included
+    if "005" in sequence_mapping:
+        print(f"\n✅ Sequence 005 ({sequence_mapping['005']}) is included in the processed data")
+    
+    print("\n🎯 Next steps:")
+    print("1. Run the debug script to verify IMU-image alignment:")
+    print("   python debug_imu_image_alignment.py")
+    print("2. Generate latent features:")
+    print("   python generate_all_pretrained_latents_between_frames.py")
+    print("3. Train the model with properly aligned data")
 
 
 if __name__ == "__main__":
