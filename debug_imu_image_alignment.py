@@ -109,6 +109,10 @@ def find_high_motion_window(dataloader, model, sequence_mapping=None, num_sample
     print(f"  Accelerometer: {acc_norm:.3f}m/s² ({acc_norm/9.81:.3f}g)")
     print(f"  Gyroscope: {gyro_norm:.3f}rad/s")
     
+    # Add finite assertions
+    assert torch.isfinite(imus).all(), "IMU tensor contains inf/nan"
+    assert torch.isfinite(images).all(), "Image tensor contains inf/nan"
+    
     return images, imus, gt_poses
 
 
@@ -140,6 +144,13 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
         print("Model in eval mode with BatchNorm tracking disabled")
     else:
         model.train()
+    
+    # Enable anomaly detection for precise nan back-trace
+    torch.autograd.set_detect_anomaly(True)
+    
+    # Ensure all model parameters are finite at startup
+    for p in model.parameters():
+        assert torch.isfinite(p).all(), "NaN/inf in model weights"
     
     # Lower learning rate for single sample optimization
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)  # 10x lower LR for single sample
@@ -205,17 +216,15 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
         pred_quat = pred_quat / (torch.norm(pred_quat, dim=-1, keepdim=True) + 1e-8)
         gt_quat = gt_quat / (torch.norm(gt_quat, dim=-1, keepdim=True) + 1e-8)
         
-        # Compute quaternion geodesic distance
+        # Compute quaternion geodesic distance using atan2 for numerical stability
         dot_product = torch.sum(pred_quat * gt_quat, dim=-1)
-        # Clamp and take abs in one go for cleaner code
-        angle = 2.0 * torch.acos(dot_product.clamp(-1.0 + 1e-7, 1.0 - 1e-7).abs())
         
-        # Use Taylor approximation for small angles to avoid vanishing gradients
-        small_angle_mask = angle < 1e-3
-        if small_angle_mask.any():
-            # For small angles: angle ≈ 2*sqrt(1 - dot²)
-            abs_dot = dot_product[small_angle_mask].abs()
-            angle[small_angle_mask] = 2.0 * torch.sqrt(1.0 - abs_dot**2)
+        # Use atan2(sqrt(1-x²), x) which has finite slope at |x|→1
+        # This avoids the derivative blow-up of acos near ±1
+        abs_dot = dot_product.abs()
+        # Clamp to avoid numerical issues in sqrt
+        abs_dot_clamped = abs_dot.clamp(max=1.0 - 1e-7)
+        angle = 2.0 * torch.atan2(torch.sqrt(1.0 - abs_dot_clamped**2), abs_dot_clamped)
         
         rot_loss = angle.mean()
         
@@ -225,8 +234,8 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
         optimizer.zero_grad()
         loss.backward()
         
-        # Clip gradients to prevent NaN and get gradient norm
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        # Clip gradients more aggressively to prevent NaN and get gradient norm
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
         
         optimizer.step()
         
