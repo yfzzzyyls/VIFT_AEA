@@ -5,6 +5,8 @@ Tests whether the two sensors are properly synchronized by overfitting
 on a high-motion sample and analyzing cross-correlation.
 """
 
+# use python debug_imu_image_alignment.py --eval-mode
+
 import os
 import sys
 import torch
@@ -519,6 +521,28 @@ def main():
         # Transpose to [B, 11, 10, 6] if that's what model expects
         # Actually, let's keep it as [B, 110, 6] as that seems to be what the model expects
         print(f"  IMU reshaped would be: {window_imu_reshaped.shape}")
+    
+    # Verify data shapes and values
+    print("\n📊 Data verification:")
+    print(f"  First GT pose: {gt_pose[0, 0].cpu().numpy()}")
+    print(f"  GT pose format: [tx, ty, tz, qx, qy, qz, qw] (quaternion in xyzw format)")
+    # Verify quaternion is normalized
+    first_quat = gt_pose[0, 0, 3:7].cpu().numpy()
+    quat_norm = np.linalg.norm(first_quat)
+    print(f"  First quaternion: {first_quat}, norm={quat_norm:.6f}")
+    
+    # Quick forward pass to verify output shape
+    with torch.no_grad():
+        test_batch = {
+            'images': window_img,
+            'imu': window_imu,
+            'gt_poses': gt_pose
+        }
+        test_out = model(test_batch)
+        print(f"\n  Model output shape: {test_out['poses'].shape}")
+        print(f"  First pred pose: {test_out['poses'][0, 0].cpu().numpy()}")
+        assert test_out['poses'].shape == (1, 10, 7), f"Expected (1, 10, 7), got {test_out['poses'].shape}"
+        print("  ✅ Output shape correct!")
     
     # Run overfit test
     print("\nStarting single-sample overfit test...")
