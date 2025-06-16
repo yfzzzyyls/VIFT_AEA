@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from scipy.signal import correlate, correlation_lags
 import cv2
+from tqdm import tqdm
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
@@ -135,7 +136,7 @@ def compute_cross_correlation(pred_signal, gt_signal):
     return correlation, lags
 
 
-def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800, eval_mode=False):
+def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=1000, eval_mode=False):
     """Overfit model on a single sample and monitor convergence."""
     if eval_mode:
         model.eval()  # Disable BatchNorm & Dropout
@@ -157,7 +158,7 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
         assert torch.isfinite(p).all(), "NaN/inf in model weights"
     
     # Moderate learning rate for stable convergence
-    optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)  # 5x lower than baseline, stable for single sample
+    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4)  # 5x lower than baseline, stable for single sample
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
@@ -193,7 +194,10 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
     plt.ion()
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     
-    for step in range(max_steps):
+    # Create progress bar
+    pbar = tqdm(range(max_steps), desc="Training", unit="step")
+    
+    for step in pbar:
         # Forward pass - model expects dictionary input with GPU tensors
         batch = {
             'images': window_img,    # Already on GPU
@@ -253,8 +257,14 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
         
         losses.append(loss.item())
         
+        # Update progress bar with current loss
+        pbar.set_postfix({'loss': f'{loss.item():.4e}', 
+                          'trans': f'{trans_loss.item():.4e}',
+                          'rot': f'{rot_loss.item():.4e}'})
+        
         # Check for NaN immediately
         if torch.isnan(loss):
+            pbar.close()
             print(f"\nNaN detected at step {step}!")
             print(f"  trans_loss: {trans_loss.item() if not torch.isnan(trans_loss) else 'NaN'}")
             print(f"  rot_loss: {rot_loss.item() if not torch.isnan(rot_loss) else 'NaN'}")
@@ -364,11 +374,13 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
             plt.tight_layout()
             plt.pause(0.001)  # Minimal pause to avoid slowing down training
     
+    # Close progress bar
+    pbar.close()
     plt.ioff()
     
     # Final analysis
     final_loss = losses[-1]
-    print(f"\nFinal loss after {max_steps} steps: {final_loss:.4e}")
+    print(f"\nFinal loss after {len(losses)} steps: {final_loss:.4e}")
     
     # Print detailed metrics
     if 'trans_loss' in locals() and 'rot_loss' in locals():
@@ -385,28 +397,19 @@ def overfit_single_sample(model, window_img, window_imu, gt_pose, max_steps=800,
         return losses, trans_correlations, rot_correlations
     
     if final_loss > 1e-3:
-        print("\n⚠️  WARNING: Loss did not converge to near-zero!")
-        print("Possible issues:")
-        
         # Check correlation peaks
         if trans_correlations:
             _, corr, lags = trans_correlations[-1]
             peak_idx = np.argmax(corr)
             peak_lag = lags[peak_idx]
             if abs(peak_lag) > 0:
-                print(f"  - Timestamp misalignment: peak at lag={peak_lag}")
+                print(f"\n  - Timestamp misalignment: peak at lag={peak_lag}")
                 print(f"    → Try shifting IMU window by {-peak_lag} frames")
         
-        # Check IMU magnitudes
-        acc_mean = torch.norm(window_imu[..., :3], dim=-1).mean().item()
-        gyro_mean = torch.norm(window_imu[..., 3:], dim=-1).mean().item()
-        if acc_mean < 5.0:  # Less than 0.5g
-            print(f"  - IMU scale issue: acc magnitude too small ({acc_mean:.3f}m/s² = {acc_mean/9.81:.3f}g)")
-            print(f"    → Check units (should be m/s²)")
-        
-        if trans_loss.item() < rot_loss.item() * 0.1:
-            print(f"  - Spatial misalignment: rotation loss dominates")
-            print(f"    → Check camera-IMU extrinsics calibration")
+        if 'trans_loss' in locals() and 'rot_loss' in locals():
+            if trans_loss.item() < rot_loss.item() * 0.1:
+                print(f"\n  - Spatial misalignment: rotation loss dominates")
+                print(f"    → Check camera-IMU extrinsics calibration")
     else:
         print("\n✅ SUCCESS: Model converged to near-zero loss!")
         print("The IMU and image streams appear to be properly aligned.")
