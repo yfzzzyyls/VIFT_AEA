@@ -119,7 +119,7 @@ python process_aria.py
 python prepare_aria_splits.py --source-dir aria_processed
 
 # 4. Train all components from scratch (with quaternion output and improved loss)
-torchrun --nproc_per_node=4 train_aria_from_scratch.py --epochs 73 --distributed --batch-size 4
+torchrun --nproc_per_node=4 train_aria_from_scratch.py --opt-cnn sgd --opt-trf adamw --lr-cnn 1e-4 --lr-trf 5e-4 --epochs 37 --distributed --batch-size 4
 
 # 5. Evaluate the trained model
 python evaluate_from_scratch.py \

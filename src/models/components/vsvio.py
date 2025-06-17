@@ -83,8 +83,18 @@ class Encoder(nn.Module):
         v = v.view(batch_size, seq_len, -1)  # (batch, seq_len, fv)
         v = self.visual_head(v)  # (batch, seq_len, 256)
         
-        # IMU CNN
-        imu = torch.cat([imu[:, i * 10:i * 10 + 11, :].unsqueeze(1) for i in range(seq_len)], dim=1)
+        # IMU CNN - extract 11 samples per transition
+        # For 10 transitions: 110 samples total (11 per transition)
+        # For 20 transitions: 220 samples total (11 per transition)
+        imu_windows = []
+        for i in range(seq_len):
+            # Each transition has exactly 11 IMU samples
+            start_idx = i * 11
+            end_idx = start_idx + 11
+            imu_window = imu[:, start_idx:end_idx, :]
+            imu_windows.append(imu_window.unsqueeze(1))
+        
+        imu = torch.cat(imu_windows, dim=1)
         imu = self.inertial_encoder(imu)
         return v, imu
 

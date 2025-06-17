@@ -23,6 +23,7 @@ Note: When using distributed training, the effective batch size is batch_size * 
 
 import os
 import sys
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -39,6 +40,13 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from src.models.components.vsvio import TransformerVIO
 from src.data.components.aria_raw_dataset import AriaRawDataModule
+
+# -----------------------------------------------
+# Aria hardware specifications
+VIDEO_FPS = 20           # Aria RGB stream at 20 FPS
+IMU_RATE_HZ = 1000       # Aria high-rate IMU at 1kHz
+IMU_PER_FRAME = IMU_RATE_HZ // VIDEO_FPS   # 50 samples per video frame
+# -----------------------------------------------
 
 
 def robust_geodesic_loss_stable(pred_quat, gt_quat):
@@ -79,7 +87,7 @@ class VIFTFromScratch(nn.Module):
         # Model configuration
         class Config:
             # Sequence parameters
-            seq_len = 11
+            seq_len = 21          # 21 RGB frames → 20 pose transitions
             
             # Image parameters
             img_w = 512
@@ -106,6 +114,7 @@ class VIFTFromScratch(nn.Module):
             fuse_method = 'cat'
         
         self.config = Config()
+        # Use the standard TransformerVIO model
         self.backbone = TransformerVIO(self.config)
         
         # Replace output layer for quaternion output (7 values instead of 6)
@@ -159,25 +168,41 @@ class VIFTFromScratch(nn.Module):
     
     def forward(self, batch):
         """Forward pass."""
-        images = batch['images']  # [B, 11, 3, 256, 512]
-        imu = batch['imu']        # [B, 110, 6]
+        seq_len = self.config.seq_len
+        num_transitions = seq_len - 1
+        
+        images = batch['images']  # [B, seq_len, 3, 256, 512]
+        imu = batch['imu']        # [B, num_transitions * samples_per_interval, 6]
         
         # Validate input shapes
         B = images.shape[0]
-        assert images.shape == (B, 11, 3, 256, 512), f"Expected images shape (B, 11, 3, 256, 512), got {images.shape}"
-        assert imu.shape == (B, 110, 6), f"Expected IMU shape (B, 110, 6), got {imu.shape}"
+        assert images.shape[1] == seq_len, f"Expected {seq_len} frames, got {images.shape[1]}"
+        assert images.shape[2:] == (3, 256, 512), f"Expected image shape (3, 256, 512), got {images.shape[2:]}"
+        
+        # Flexible IMU validation - detect actual samples per interval
+        total_imu_samples = imu.shape[1]
+        if total_imu_samples % num_transitions == 0:
+            samples_per_interval = total_imu_samples // num_transitions
+            # Common configurations: 10 (100Hz), 11 (110Hz), 50 (1kHz)
+            if samples_per_interval not in [10, 11, 50]:
+                print(f"WARNING: Unusual IMU sampling rate: {samples_per_interval} samples per interval")
+        else:
+            raise ValueError(f"IMU samples {total_imu_samples} not divisible by {num_transitions} transitions")
+        
+        assert imu.shape[2] == 6, f"Expected 6 IMU channels (ax,ay,az,gx,gy,gz), got {imu.shape[2]}"
         
         # Validate IMU data format: (ax, ay, az, gx, gy, gz)
         # Check that gyroscope values are reasonable (typically < 10 rad/s)
         gyro_magnitude = torch.norm(imu[:, :, 3:], dim=-1)
         assert gyro_magnitude.max() < 20.0, f"Gyroscope values too large (max: {gyro_magnitude.max():.2f}), check if IMU format is (ax,ay,az,gx,gy,gz)"
         
-        # Get features from backbone (which creates RGB-RGB pairs internally)
-        fv, fi = self.backbone.Feature_net(images, imu)  # fv: [B, 10, 512], fi: [B, 10, 256]
+        # Get features from backbone's Feature_net (which creates RGB-RGB pairs internally)
+        num_transitions = seq_len - 1
+        fv, fi = self.backbone.Feature_net(images, imu)  # fv: [B, num_transitions, 512], fi: [B, num_transitions, 256]
         
         # Validate feature shapes
-        assert fv.shape == (B, 10, 512), f"Expected visual features shape (B, 10, 512), got {fv.shape}"
-        assert fi.shape == (B, 10, 256), f"Expected IMU features shape (B, 10, 256), got {fi.shape}"
+        assert fv.shape == (B, num_transitions, 512), f"Expected visual features shape (B, {num_transitions}, 512), got {fv.shape}"
+        assert fi.shape == (B, num_transitions, 256), f"Expected IMU features shape (B, {num_transitions}, 256), got {fi.shape}"
         
         # Check for dimension swaps - features should have reasonable statistics
         fv_mean = fv.mean()
@@ -187,35 +212,35 @@ class VIFTFromScratch(nn.Module):
         #     "Visual features have suspiciously uniform statistics across batch dimension"
         
         # Concatenate visual and inertial features
-        combined_features = torch.cat([fv, fi], dim=-1)  # [B, 10, 768]
+        combined_features = torch.cat([fv, fi], dim=-1)  # [B, 20, 768]
         
         # Predict poses for all transitions
         # Each timestep already represents a transition (src->tgt pair)
-        transition_features = combined_features  # [B, 10, 768]
+        transition_features = combined_features  # [B, 20, 768]
         
         # Apply pose predictor to each timestep
         batch_size, seq_len, feat_dim = transition_features.shape
-        transition_features_flat = transition_features.reshape(-1, feat_dim)  # [B*10, 768]
-        poses_flat = self.pose_predictor(transition_features_flat)  # [B*10, 7]
-        poses = poses_flat.reshape(batch_size, seq_len, 7)  # [B, 10, 7]
+        transition_features_flat = transition_features.reshape(-1, feat_dim)  # [B*20, 768]
+        poses_flat = self.pose_predictor(transition_features_flat)  # [B*20, 7]
+        poses = poses_flat.reshape(batch_size, seq_len, 7)  # [B, 20, 7]
         
         # Normalize quaternion part for each pose
-        trans = poses[:, :, :3]  # [B, 10, 3]
-        quat = poses[:, :, 3:]   # [B, 10, 4]
+        trans = poses[:, :, :3]  # [B, 20, 3]
+        quat = poses[:, :, 3:]   # [B, 20, 4]
         quat = F.normalize(quat, p=2, dim=-1)
         
         # Combine and return
-        normalized_poses = torch.cat([trans, quat], dim=-1)  # [B, 10, 7]
+        normalized_poses = torch.cat([trans, quat], dim=-1)  # [B, 20, 7]
         
         # If ground truth is provided, compute loss components
         if 'gt_poses' in batch:
-            gt_poses = batch['gt_poses']  # [B, 10, 7]
+            gt_poses = batch['gt_poses']  # [B, 20, 7]
             
             # Split predictions and ground truth
-            pred_trans = normalized_poses[:, :, :3]  # [B, 10, 3]
-            pred_rot = normalized_poses[:, :, 3:]    # [B, 10, 4]
-            gt_trans = gt_poses[:, :, :3]      # [B, 10, 3]
-            gt_rot = gt_poses[:, :, 3:]        # [B, 10, 4]
+            pred_trans = normalized_poses[:, :, :3]  # [B, 20, 3]
+            pred_rot = normalized_poses[:, :, 3:]    # [B, 20, 4]
+            gt_trans = gt_poses[:, :, :3]      # [B, 20, 3]
+            gt_rot = gt_poses[:, :, 3:]        # [B, 20, 4]
             
             # Raw losses
             trans_loss_raw = F.smooth_l1_loss(pred_trans, gt_trans, reduction='mean')
@@ -247,7 +272,7 @@ class VIFTFromScratch(nn.Module):
             }
         else:
             return {
-                'poses': normalized_poses  # [B, 10, 7]
+                'poses': normalized_poses  # [B, 20, 7]
             }
 
 
@@ -299,24 +324,31 @@ def compute_loss(model, predictions, batch, is_training=True):
     }
 
 
-def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=None, global_step=0):
+def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=None, global_step=0, use_amp=False):
     """Train one epoch."""
     model.train()
     total_loss = 0
     num_batches = 0
     step = global_step  # Use global step counter for gradient clipping
     
+    # Create gradient scaler for mixed precision training
+    scaler = torch.cuda.amp.GradScaler() if use_amp else None
+    
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}")
     for batch_idx, batch in enumerate(progress_bar):
         # Move to device
         batch = {
-            'images': batch['images'].to(device),      # [B, 11, 3, H, W]
+            'images': batch['images'].to(device),      # [B, 21, 3, H, W]
             'imu': batch['imu'].to(device).float(),
             'gt_poses': batch['gt_poses'].to(device)
         }
         
-        # Forward pass
-        predictions = model(batch)
+        # Forward pass with automatic mixed precision
+        if use_amp:
+            with torch.cuda.amp.autocast():
+                predictions = model(batch)
+        else:
+            predictions = model(batch)
         
         # Compute loss
         loss_dict = compute_loss(model, predictions, batch)
@@ -333,17 +365,37 @@ def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=No
             continue
         
         # Backward pass
-        optimizer.zero_grad()
-        loss.backward()
+        for opt in optimizers:
+            opt.zero_grad()
         
-        # Gradient clipping (simplified to single value)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+        if use_amp:
+            # Scale loss and backward pass
+            scaler.scale(loss).backward()
+            
+            # Unscale gradients before clipping
+            for opt in optimizers:
+                scaler.unscale_(opt)
+            
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            
+            # Step optimizers and update scaler
+            for opt in optimizers:
+                scaler.step(opt)
+            scaler.update()
+        else:
+            loss.backward()
+            
+            # Gradient clipping (simplified to single value)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            
+            for opt in optimizers:
+                opt.step()
         
-        optimizer.step()
-        
-        # Step warmup scheduler if provided (per batch)
-        if warmup_scheduler is not None:
-            warmup_scheduler.step()
+        # Step warmup schedulers if provided (per batch)
+        if warmup_schedulers is not None:
+            for scheduler in warmup_schedulers:
+                scheduler.step()
         
         step += 1  # Increment step counter
         
@@ -375,7 +427,7 @@ def validate(model, dataloader, device):
         for batch in tqdm(dataloader, desc="Validation"):
             # Move to device
             batch = {
-                'images': batch['images'].to(device),      # [B, 11, 3, H, W]
+                'images': batch['images'].to(device),      # [B, 21, 3, H, W]
                 'imu': batch['imu'].to(device).float(),
                 'gt_poses': batch['gt_poses'].to(device)
             }
@@ -390,22 +442,22 @@ def validate(model, dataloader, device):
                 continue
             
             # Compute errors for multi-step prediction
-            pred_poses = predictions['poses']  # [B, 10, 7]
-            gt_poses = batch['gt_poses']  # [B, 10, 7]
+            pred_poses = predictions['poses']  # [B, 20, 7]
+            gt_poses = batch['gt_poses']  # [B, 20, 7]
             
             # Translation error
-            pred_trans = pred_poses[:, :, :3]  # [B, 10, 3]
-            gt_trans = gt_poses[:, :, :3]      # [B, 10, 3]
+            pred_trans = pred_poses[:, :, :3]  # [B, 20, 3]
+            gt_trans = gt_poses[:, :, :3]      # [B, 20, 3]
             trans_error = torch.norm(pred_trans - gt_trans, dim=-1).mean()
             
             # Rotation error
-            pred_rot = pred_poses[:, :, 3:]  # [B, 10, 4]
-            gt_rot = gt_poses[:, :, 3:]      # [B, 10, 4]
+            pred_rot = pred_poses[:, :, 3:]  # [B, 20, 4]
+            gt_rot = gt_poses[:, :, 3:]      # [B, 20, 4]
             pred_rot = F.normalize(pred_rot, p=2, dim=-1)
             gt_rot = F.normalize(gt_rot, p=2, dim=-1)
             
             # Compute angle between quaternions
-            dot_product = torch.sum(pred_rot * gt_rot, dim=-1).abs()  # [B, 10]
+            dot_product = torch.sum(pred_rot * gt_rot, dim=-1).abs()  # [B, num_transitions]
             dot_product = torch.clamp(dot_product, -1.0, 1.0)
             angle_error = 2 * torch.acos(dot_product)
             rot_error = torch.rad2deg(angle_error).mean()
@@ -469,10 +521,20 @@ def main():
                         help='Batch size per GPU')
     parser.add_argument('--lr', type=float, default=1e-4,
                         help='Learning rate')
+    parser.add_argument('--lr-cnn', type=float, default=None,
+                        help='CNN learning rate (defaults to --lr)')
+    parser.add_argument('--lr-trf', type=float, default=None,
+                        help='Transformer learning rate (defaults to --lr)')
+    parser.add_argument('--opt-cnn', type=str, default='adamw', choices=['adamw', 'sgd'],
+                        help='Optimizer for CNN')
+    parser.add_argument('--opt-trf', type=str, default='adamw', choices=['adamw', 'sgd'],
+                        help='Optimizer for Transformer')
     parser.add_argument('--checkpoint-dir', type=str, default='checkpoints_from_scratch',
                         help='Directory to save checkpoints')
     parser.add_argument('--num-workers', type=int, default=4,
                         help='Number of data loading workers')
+    parser.add_argument('--amp', action='store_true',
+                        help='Use automatic mixed precision training (saves ~40% memory)')
     
     # Distributed training arguments
     parser.add_argument('--distributed', action='store_true',
@@ -510,7 +572,7 @@ def main():
         print("- IMU Encoder (3-layer 1D CNN)")
         print("- Pose Transformer (4 layers, 8 heads)")
         print("- Quaternion output (3 trans + 4 quat)")
-        print("- Multi-step prediction (all 10 transitions)")
+        print("- Multi-step prediction (all 20 transitions)")
         print(f"\nTraining Configuration:")
         print(f"- Distributed: {'Yes (DDP)' if args.distributed else 'No'}")
         print(f"- World size: {world_size}")
@@ -518,6 +580,7 @@ def main():
         print(f"- Total batch size: {args.batch_size * world_size}")
         print(f"- Learning rate: {args.lr}")
         print(f"- Window stride: 2 (overlapping sequences for better temporal consistency)")
+        print(f"- Mixed precision (AMP): {'Enabled' if args.amp else 'Disabled'}")
         print("="*60 + "\n")
     
     # Create data module
@@ -526,7 +589,7 @@ def main():
         data_dir=args.data_dir,
         batch_size=args.batch_size,  # Per GPU batch size
         num_workers=args.num_workers,
-        sequence_length=11,
+        sequence_length=21,   # keep stride=2
         stride=2  # Better temporal overlap (was 10)
     )
     data_module.setup()
@@ -586,13 +649,11 @@ def main():
     
     # Wrap with DDP if distributed
     if args.distributed:
-        # Set find_unused_parameters=True because the TransformerVIO model
-        # has some unused parameters in its architecture
         model = DDP(
             model,
             device_ids=[args.local_rank],
             output_device=args.local_rank,
-            find_unused_parameters=True
+            find_unused_parameters=True  # Set to True since we're only using Feature_net from TransformerVIO
         )
         if is_main_process:
             print(f"Using DistributedDataParallel with {world_size} GPUs")
@@ -606,21 +667,98 @@ def main():
         print(f"  Total: {total_params:,}")
         print(f"  Trainable: {trainable_params:,}")
     
-    # Create optimizer
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    # Split parameters between CNN and Transformer
+    base_model = model.module if hasattr(model, 'module') else model
+    cnn_params = []
+    trf_params = []
     
-    # Warmup scheduler (like train_efficient.py)
-    warmup_steps = len(train_loader) * 2  # 2 epochs of warmup
-    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
-        optimizer, 
-        start_factor=0.1, 
-        total_iters=warmup_steps
-    )
+    # Visual encoder parameters (CNN)
+    # Also include IMU encoder in CNN params since it's also convolutional
+    for name, param in base_model.named_parameters():
+        if 'backbone.visual_encoder' in name or 'backbone.inertial_encoder' in name:
+            cnn_params.append(param)
+        elif 'backbone' in name or 'pose_predictor' in name or 'log_sigma' in name:
+            trf_params.append(param)
+        else:
+            # Fail fast if we encounter unexpected parameters
+            # This guard ensures that any new model components (e.g., new stem blocks, auxiliary heads)
+            # are explicitly classified into either CNN or Transformer groups, preventing silent
+            # misclassification that could lead to suboptimal learning rates or optimizer settings.
+            raise RuntimeError(f"Unclassified parameter: {name}. Please update parameter splitting logic.")
     
-    # Cosine annealing after warmup
-    cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.epochs - 2, eta_min=1e-6
-    )
+    # Count parameters in each group
+    cnn_count = sum(p.numel() for p in cnn_params)
+    trf_count = sum(p.numel() for p in trf_params)
+    
+    if is_main_process:
+        print(f"\nParameter Split:")
+        print(f"  CNN parameters: {cnn_count:,}")
+        print(f"  Transformer parameters: {trf_count:,}")
+        
+        # Verify all parameters are accounted for
+        assert cnn_count + trf_count == trainable_params, \
+            f"Parameter count mismatch: {cnn_count} + {trf_count} != {trainable_params}"
+    
+    # Set learning rates
+    lr_cnn = args.lr_cnn if args.lr_cnn is not None else args.lr
+    lr_trf = args.lr_trf if args.lr_trf is not None else args.lr
+    
+    # Create optimizers based on command line arguments
+    if args.opt_cnn == 'sgd' and args.opt_trf == 'adamw' and len(cnn_params) > 0 and len(trf_params) > 0:
+        # Different optimizers for CNN and Transformer
+        optimizer_cnn = torch.optim.SGD([
+            {'params': cnn_params, 'lr': lr_cnn, 'momentum': 0.9}
+        ], lr=lr_cnn)
+        
+        # Create second optimizer for transformer
+        optimizer_trf = torch.optim.AdamW([
+            {'params': trf_params, 'lr': lr_trf}
+        ], lr=lr_trf, weight_decay=1e-4)
+        
+        # Use canonical PyTorch pattern: separate optimizers and schedulers
+        optimizers = [optimizer_cnn, optimizer_trf]
+        use_dual_optimizers = True
+        
+        if is_main_process:
+            print(f"  CNN LR: {lr_cnn:.2e}, Optimizer: sgd")
+            print(f"  Transformer LR: {lr_trf:.2e}, Optimizer: adamw")
+    else:
+        # Single optimizer for all parameters
+        if args.opt_cnn == 'sgd':
+            optimizer = torch.optim.SGD([
+                {'params': cnn_params, 'lr': lr_cnn},
+                {'params': trf_params, 'lr': lr_trf}
+            ], lr=args.lr, momentum=0.9)
+        else:
+            optimizer = torch.optim.AdamW([
+                {'params': cnn_params, 'lr': lr_cnn},
+                {'params': trf_params, 'lr': lr_trf}
+            ], lr=args.lr, weight_decay=1e-4)
+        
+        optimizers = [optimizer]
+        use_dual_optimizers = False
+        
+        if is_main_process:
+            print(f"  CNN LR: {lr_cnn:.2e}, Optimizer: {args.opt_cnn}")
+            print(f"  Transformer LR: {lr_trf:.2e}, Optimizer: {args.opt_trf}")
+    
+    # Create schedulers - one per optimizer (canonical PyTorch pattern)
+    warmup_steps = int(len(train_loader) * 1.5)  # ~1.5 epochs for longer windows
+    warmup_epochs = math.ceil(warmup_steps / len(train_loader))
+    
+    warmup_schedulers = []
+    cosine_schedulers = []
+    
+    for opt in optimizers:
+        warmup_schedulers.append(torch.optim.lr_scheduler.LinearLR(
+            opt, 
+            start_factor=0.1, 
+            total_iters=warmup_steps
+        ))
+        
+        cosine_schedulers.append(torch.optim.lr_scheduler.CosineAnnealingLR(
+            opt, T_max=args.epochs - warmup_epochs, eta_min=1e-6
+        ))
     
     # Training loop
     best_val_loss = float('inf')
@@ -634,24 +772,26 @@ def main():
         if is_main_process:
             print(f"\n{'='*60}")
             print(f"Epoch {epoch}/{args.epochs}")
-            print(f"Learning rate: {optimizer.param_groups[0]['lr']:.2e}")
+            print(f"Learning rates: " + ", ".join([f"{opt.param_groups[0]['lr']:.2e}" for opt in optimizers]))
             print(f"{'='*60}")
         
         # Determine if we're in warmup phase
-        warmup_scheduler_to_use = warmup_scheduler if global_step < warmup_steps else None
+        warmup_schedulers_to_use = warmup_schedulers if global_step < warmup_steps else None
         
         # Train
         train_loss, global_step = train_epoch(
-            model, train_loader, optimizer, device, epoch, 
-            warmup_scheduler=warmup_scheduler_to_use, global_step=global_step
+            model, train_loader, optimizers, device, epoch, 
+            warmup_schedulers=warmup_schedulers_to_use, global_step=global_step,
+            use_amp=args.amp
         )
         
         # Validate
         val_metrics = validate(model, val_loader, device)
         
-        # Step cosine scheduler after warmup phase (per epoch)
+        # Step cosine schedulers after warmup phase (per epoch)
         if global_step >= warmup_steps:
-            cosine_scheduler.step()
+            for scheduler in cosine_schedulers:
+                scheduler.step()
         
         # Only print and save on main process
         if is_main_process:
@@ -676,12 +816,14 @@ def main():
                 checkpoint = {
                     'epoch': epoch,
                     'model_state_dict': model_state,
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'scheduler_state_dict': warmup_scheduler.state_dict() if global_step < warmup_steps else cosine_scheduler.state_dict(),
+                    'optimizer_state_dicts': [opt.state_dict() for opt in optimizers],
+                    'warmup_scheduler_state_dicts': [s.state_dict() for s in warmup_schedulers],
+                    'cosine_scheduler_state_dicts': [s.state_dict() for s in cosine_schedulers],
                     'train_loss': train_loss,
                     'val_metrics': val_metrics,
                     'config': base_model.config.__dict__,
-                    'global_step': global_step
+                    'global_step': global_step,
+                    'use_dual_optimizers': use_dual_optimizers
                 }
                 torch.save(checkpoint, checkpoint_dir / 'best_model.pt')
                 print("  ✓ New best model saved")
@@ -690,12 +832,14 @@ def main():
             latest_checkpoint = {
                 'epoch': epoch,
                 'model_state_dict': model_state,
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': warmup_scheduler.state_dict() if global_step < warmup_steps else cosine_scheduler.state_dict(),
+                'optimizer_state_dicts': [opt.state_dict() for opt in optimizers],
+                'warmup_scheduler_state_dicts': [s.state_dict() for s in warmup_schedulers],
+                'cosine_scheduler_state_dicts': [s.state_dict() for s in cosine_schedulers],
                 'train_loss': train_loss,
                 'val_metrics': val_metrics,
                 'config': base_model.config.__dict__,
-                'global_step': global_step
+                'global_step': global_step,
+                'use_dual_optimizers': use_dual_optimizers
             }
             torch.save(latest_checkpoint, checkpoint_dir / 'latest_model.pt')
     

@@ -36,22 +36,28 @@ def remove_gravity(imu_window: torch.Tensor) -> torch.Tensor:
     """Remove gravity bias from IMU accelerometer data
     
     Args:
-        imu_window: [B,110,6] tensor with (ax,ay,az,gx,gy,gz)
+        imu_window: [B,N,6] tensor with (ax,ay,az,gx,gy,gz) where N = num_transitions * samples_per_transition
     
     Returns:
         IMU tensor with gravity-bias removed from accelerometer
     """
     # Extract accelerometer data
-    accel = imu_window[..., :3]  # [B, 110, 3]
+    accel = imu_window[..., :3]  # [B, N, 3]
     
-    # Reshape to compute per-frame bias (11 frames x 10 IMU samples per frame)
-    # Average across the 10 samples within each frame
+    # Dynamically determine samples per transition
+    # We have 20 transitions total, so samples_per_transition = N / 20
+    total_samples = accel.shape[1]
+    num_transitions = 20
+    samples_per_transition = total_samples // num_transitions
+    
+    # Reshape to compute per-transition bias
+    # Average across all samples within each transition
     # Use contiguous() to ensure safe reshape on potentially non-contiguous tensors
-    accel_reshaped = accel.contiguous().view(accel.shape[0], 11, 10, 3)
-    bias = accel_reshaped.mean(dim=2, keepdim=True)  # [B, 11, 1, 3]
+    accel_reshaped = accel.contiguous().view(accel.shape[0], num_transitions, samples_per_transition, 3)
+    bias = accel_reshaped.mean(dim=2, keepdim=True)  # [B, 20, 1, 3]
     
-    # Expand bias for each of the 10 samples in each frame (no memory copy)
-    bias_expanded = bias.expand(-1, 11, 10, -1).contiguous().view(accel.shape)
+    # Expand bias for each sample in each transition (no memory copy)
+    bias_expanded = bias.expand(-1, num_transitions, samples_per_transition, -1).contiguous().view(accel.shape)
     
     # Remove bias from accelerometer
     accel_corrected = accel - bias_expanded
@@ -279,21 +285,21 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
             gt_poses = batch['gt_poses'].to(device)
             
             # Get predictions
-            predictions = model({'images': images, 'imu': imu})  # {'poses': [B, 10, 7]}
-            pred_poses_batch = predictions['poses']  # [B, 10, 7]
+            predictions = model({'images': images, 'imu': imu})  # {'poses': [B, 20, 7]}
+            pred_poses_batch = predictions['poses']  # [B, 20, 7]
             
             # Process each sample in batch
             batch_size = pred_poses_batch.shape[0]
             for i in range(batch_size):
-                # For multi-step prediction, we predict all 10 transitions
-                pred_poses = pred_poses_batch[i].cpu().numpy()  # [10, 7]
-                gt_poses_sample = gt_poses[i].cpu().numpy()  # [10, 7]
+                # For multi-step prediction, we predict all 20 transitions
+                pred_poses = pred_poses_batch[i].cpu().numpy()  # [20, 7]
+                gt_poses_sample = gt_poses[i].cpu().numpy()  # [20, 7]
                 
                 # Compute errors for all transitions
                 trans_errors = []
                 rot_errors = []
                 
-                for j in range(10):
+                for j in range(20):
                     # Translation error
                     trans_error = np.linalg.norm(pred_poses[j, :3] - gt_poses_sample[j, :3])
                     trans_errors.append(trans_error)
@@ -315,10 +321,10 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
                 scale_errors = compute_scale_drift(pred_poses, gt_poses_sample)
                 
                 result = {
-                    'pred_poses': pred_poses,  # [10, 7]
-                    'gt_poses': gt_poses_sample,  # [10, 7]
-                    'trans_errors': np.array(trans_errors),  # [10]
-                    'rot_errors': np.array(rot_errors),  # [10]
+                    'pred_poses': pred_poses,  # [20, 7]
+                    'gt_poses': gt_poses_sample,  # [20, 7]
+                    'trans_errors': np.array(trans_errors),  # [20]
+                    'rot_errors': np.array(rot_errors),  # [20]
                     'scale_errors': scale_errors,  # Scale drift percentages
                     'seq_name': batch['seq_name'][i],
                     'start_idx': batch['start_idx'][i].item()
@@ -377,7 +383,7 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         print(f"\nSequence {seq_id}:")
         print(f"  Total windows: {len(seq_results)}")
         
-        # No need to sample since we already use stride=10 in the dataset
+        # No need to sample since we already use stride=2 in the dataset
         seq_results_sampled = seq_results
         print(f"  Non-overlapping windows: {len(seq_results_sampled)}")
         
@@ -391,8 +397,8 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         all_frame_indices = []
         for r in seq_results_sampled:
             start_idx = r['start_idx']
-            # Each window covers 11 frames (10 transitions)
-            frame_indices = list(range(start_idx, start_idx + 11))
+            # Each window covers 21 frames (20 transitions)
+            frame_indices = list(range(start_idx, start_idx + 21))
             all_frame_indices.extend(frame_indices)
         
         # Remove duplicates and sort
@@ -412,8 +418,13 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         # For ground truth rotations, use the raw quaternions
         gt_rotations_full = gt_quaternions
         
+        # Ensure arrays have matching shapes for APE computation
+        min_len = min(len(pred_positions_full), len(gt_positions_full))
+        pred_positions_aligned = pred_positions_full[:min_len]
+        gt_positions_aligned = gt_positions_full[:min_len]
+        
         # Compute APE for this sequence
-        ape_stats = compute_ape(pred_positions_full[1:], gt_positions_full[:len(pred_positions_full)-1])
+        ape_stats = compute_ape(pred_positions_aligned, gt_positions_aligned)
         print(f"  APE - Mean: {ape_stats['mean']*100:.2f}cm, RMSE: {ape_stats['rmse']*100:.2f}cm")
         
         # Compute RPE for this sequence
@@ -421,22 +432,22 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         print(f"  RPE - Trans: {rpe_stats['trans']['mean']*100:.2f}cm, Rot: {rpe_stats['rot']['mean']:.2f}°")
         
         # Save trajectories to CSV with global frame indices
-        save_trajectory_csv(pred_positions_full, gt_positions_full, 
-                           pred_rotations_full, gt_rotations_full,
+        save_trajectory_csv(pred_positions_aligned, gt_positions_aligned, 
+                           pred_rotations_full[:min_len], gt_rotations_full[:min_len],
                            seq_id, output_dir, frame_offset=all_frame_indices[0])
         
         # Plot full trajectory
         plot_trajectory_3d(
-            pred_positions_full,
-            gt_positions_full,
+            pred_positions_aligned,
+            gt_positions_aligned,
             seq_id,
             os.path.join(output_dir, f'trajectory_3d_{seq_id}.png')
         )
         
         # Create interactive HTML plot
         create_interactive_html_plot(
-            pred_positions_full,
-            gt_positions_full,
+            pred_positions_aligned,
+            gt_positions_aligned,
             seq_id,
             os.path.join(output_dir, f'trajectory_3d_{seq_id}_interactive.html')
         )
@@ -929,7 +940,7 @@ def main():
         print("Please ensure test sequences are in the test directory")
         return
     
-    test_dataset = AriaRawDataset(test_dir, sequence_length=11, stride=10)  # Use stride=10 to match training
+    test_dataset = AriaRawDataset(test_dir, sequence_length=21, stride=2)  # Use 21 frames and stride=2 to match training
     test_loader = DataLoader(
         test_dataset,
         batch_size=args.batch_size,
