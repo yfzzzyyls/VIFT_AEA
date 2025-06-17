@@ -157,13 +157,14 @@ class VIFTFromScratch(nn.Module):
         }
 
 
-def compute_loss(predictions, batch, alpha=3.0):
+def compute_loss(predictions, batch, alpha=10.0, beta=5.0):
     """Compute loss with quaternion representation for multi-step prediction
     
     Args:
         predictions: Model predictions with 'poses' key
         batch: Input batch with 'gt_poses' key
-        alpha: Balance factor for translation/rotation (default 3.0 for indoor scenes)
+        alpha: Scale factor for translation loss (default 10.0)
+        beta: Scale factor for scale consistency loss (default 5.0)
     """
     pred_poses = predictions['poses']  # [B, 10, 7]
     gt_poses = batch['gt_poses']  # [B, 10, 7]
@@ -177,20 +178,26 @@ def compute_loss(predictions, batch, alpha=3.0):
     # Translation loss
     trans_loss = F.smooth_l1_loss(pred_trans, gt_trans)
     
+    # Scale consistency loss - helps prevent scale drift
+    pred_scale = pred_trans.norm(dim=-1)  # [B, 10]
+    gt_scale = gt_trans.norm(dim=-1)      # [B, 10]
+    scale_loss = F.smooth_l1_loss(pred_scale, gt_scale)
+    
     # Rotation loss using numerically stable geodesic distance
     rot_loss = robust_geodesic_loss_stable(pred_rot, gt_rot)
     
-    if torch.isnan(trans_loss) or torch.isnan(rot_loss):
+    if torch.isnan(trans_loss) or torch.isnan(rot_loss) or torch.isnan(scale_loss):
         return None
     
-    # Combined loss with alpha scaling
-    # Divide translation loss by alpha to balance with rotation
-    total_loss = trans_loss / alpha + rot_loss
+    # Combined loss with proper weighting
+    # Translation needs higher weight as it's in meters
+    total_loss = alpha * trans_loss + beta * scale_loss + rot_loss
     
     return {
         'total_loss': total_loss,
         'trans_loss': trans_loss,
-        'rot_loss': rot_loss
+        'rot_loss': rot_loss,
+        'scale_loss': scale_loss
     }
 
 
@@ -256,7 +263,8 @@ def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=No
         progress_bar.set_postfix({
             'loss': f"{loss.item():.4f}",
             'trans': f"{loss_dict['trans_loss'].item():.4f}",
-            'rot': f"{loss_dict['rot_loss'].item():.4f}"
+            'rot': f"{loss_dict['rot_loss'].item():.4f}",
+            'scale': f"{loss_dict['scale_loss'].item():.4f}"
         })
     
     return total_loss / num_batches if num_batches > 0 else float('inf'), step

@@ -118,20 +118,16 @@ python process_aria.py
 # 3. Create train/val splits
 python prepare_aria_splits.py --source-dir aria_processed
 
-# 4. Train all components from scratch (with quaternion output)
-python train_aria_from_scratch.py \
-      --data-dir aria_processed \
-      --epochs 30 \
-      --batch-size 4 \
-      --lr 1e-4 \
-      --checkpoint-dir checkpoints_from_scratch \
-      --num-gpus 4
+# 4. Train all components from scratch (with quaternion output and improved loss)
+torchrun --nproc_per_node=4 train_aria_from_scratch.py --epochs 200 --distributed --batch-size 4
 
 # 5. Evaluate the trained model
 python evaluate_from_scratch.py \
       --checkpoint checkpoints_from_scratch/best_model.pt \
       --data-dir aria_processed \
-      --output-dir evaluation_from_scratch
+      --output-dir evaluation_from_scratch \
+      --batch-size 16 \
+      --num-workers 4
 
 # 5. Monitor training
 tensorboard --logdir checkpoints_from_scratch
@@ -169,26 +165,35 @@ python process_aria.py
 # 3. Create train/val/test splits
 python prepare_aria_splits.py --source-dir aria_processed
 
-# 4. Train all components from scratch (no pre-trained weights)
+# 4. Train all components from scratch (improved loss weighting)
 
-# Multi-GPU (4 GPUs)
+# Single GPU training
 python train_aria_from_scratch.py \
     --data-dir aria_processed \
-    --epochs 30 \
-    --batch-size 4 \
+    --epochs 50 \
+    --batch-size 16 \
     --lr 1e-4 \
     --checkpoint-dir checkpoints_from_scratch \
-    --num-gpus 4
+    --num-workers 4
+
+# Multi-GPU training with distributed data parallel
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --data-dir aria_processed \
+    --epochs 50 \
+    --batch-size 16 \
+    --checkpoint-dir checkpoints_distributed \
+    --distributed
 
 # 5. Monitor training progress
-# Check train.log for any errors
 tail -f train.log
 
 # 6. Evaluate trained model
 python evaluate_from_scratch.py \
     --checkpoint checkpoints_from_scratch/best_model.pt \
     --data-dir aria_processed \
-    --output-dir evaluation_from_scratch
+    --output-dir evaluation_from_scratch \
+    --batch-size 16 \
+    --num-workers 4
 ```
 
 ## Important: IMU Data Format
@@ -217,6 +222,29 @@ VIFT consists of three main components:
 
 The model predicts relative poses (3D translation + 3D rotation) between consecutive frames.
 
+## Key Improvements in This Implementation
+
+### 1. Corrected Loss Function
+- **Original**: Translation loss was incorrectly down-weighted (`trans_loss / 3 + rot_loss`)
+- **Fixed**: Proper weighting with `α × trans_loss + β × scale_loss + rot_loss`
+- Default weights: α=10.0, β=5.0 (translation needs higher weight as it's in meters)
+
+### 2. Scale Drift Prevention
+- Added explicit scale consistency loss term
+- Helps prevent accumulating scale errors in long sequences
+- Computes L1 loss between predicted and ground truth translation magnitudes
+
+### 3. Consistent IMU Preprocessing
+- Training and evaluation now use identical IMU preprocessing
+- Raw IMU data (including gravity) is used consistently
+- Prevents distribution shift between training and testing
+
+### 4. Improved Evaluation Metrics
+- Added APE (Absolute Pose Error) and RPE (Relative Pose Error) metrics
+- Scale drift percentage tracking
+- Interactive 3D HTML trajectory visualizations using Plotly
+- CSV export of trajectories for further analysis
+
 ## Performance Results
 
 | Model | Training Data | Test Data | Translation Error | Rotation Error |
@@ -239,20 +267,6 @@ VIFT_AEA/
 ├── process_aria.py                   # Unified Aria data processing
 ├── train_efficient.py                # Aria training script
 └── evaluate_stable_model.py          # Evaluation script
-```
-
-## Training Options
-
-### For KITTI Dataset
-Use the original VIFT training pipeline with Hydra configs:
-```bash
-python src/train.py experiment=latent_kitti_vio_paper
-```
-
-### For Aria Dataset
-Use the efficient training script:
-```bash
-python train_efficient.py --epochs 50 --batch-size 32 --lr 5e-5
 ```
 
 ## Troubleshooting
