@@ -46,11 +46,12 @@ def remove_gravity(imu_window: torch.Tensor) -> torch.Tensor:
     
     # Reshape to compute per-frame bias (11 frames x 10 IMU samples per frame)
     # Average across the 10 samples within each frame
-    accel_reshaped = accel.reshape(accel.shape[0], 11, 10, 3)
+    # Use contiguous() to ensure safe reshape on potentially non-contiguous tensors
+    accel_reshaped = accel.contiguous().view(accel.shape[0], 11, 10, 3)
     bias = accel_reshaped.mean(dim=2, keepdim=True)  # [B, 11, 1, 3]
     
     # Expand bias for each of the 10 samples in each frame (no memory copy)
-    bias_expanded = bias.expand(-1, 11, 10, -1).reshape(accel.shape)
+    bias_expanded = bias.expand(-1, 11, 10, -1).contiguous().view(accel.shape)
     
     # Remove bias from accelerometer
     accel_corrected = accel - bias_expanded
@@ -155,9 +156,9 @@ def integrate_trajectory(relative_poses, initial_pose=None):
         current_quat = current_rotation.as_quat()
         dot = np.dot(rel_quat, current_quat)
         # Handle both negative dot product and near-zero (≈180°) cases
-        if dot < 0.0 or np.isclose(dot, 0.0, atol=1e-8):
+        if dot < 0.0 or np.isclose(dot, 0.0, atol=1e-6):
             rel_quat = -rel_quat  # Flip sign to maintain shortest-arc convention
-        rel_quat = rel_quat / (np.linalg.norm(rel_quat) + 1e-8)  # Re-normalize after flip
+        # Note: rel_quat is already normalized above, no need to normalize again
         
         rel_rotation = R.from_quat(rel_quat)
         
@@ -264,8 +265,8 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
             # Move to device
             images = batch['images'].to(device)
             imu = batch['imu'].to(device)
-            # Remove gravity bias from IMU data to match training
-            imu = remove_gravity(imu)
+            # NOTE: Commenting out gravity removal to match training preprocessing
+            # imu = remove_gravity(imu)
             gt_poses = batch['gt_poses'].to(device)
             
             # Get predictions
@@ -588,6 +589,14 @@ def create_interactive_html_plot(pred_positions, gt_positions, sequence_name, ou
     # Create figure
     fig = go.Figure()
     
+    # Optimize for large sequences
+    if pred_positions.shape[0] > 10000:
+        # Subsample for performance
+        stride = max(1, pred_positions.shape[0] // 5000)
+        pred_positions_cm = pred_positions_cm[::stride]
+        gt_positions_cm = gt_positions_cm[::stride]
+        print(f"Note: Subsampled trajectory to {len(pred_positions_cm)} points for performance")
+    
     # Add ground truth trajectory
     fig.add_trace(go.Scatter3d(
         x=gt_positions_cm[:, 0],
@@ -689,6 +698,13 @@ def plot_trajectory_3d(pred_positions, gt_positions, sequence_name, output_path,
     ax.set_ylabel('Y (cm)')
     ax.set_zlabel('Z (cm)')
     
+    # Set equal aspect ratio for all axes
+    try:
+        ax.set_box_aspect([1, 1, 1])  # Available in matplotlib >= 3.4
+    except AttributeError:
+        # Fallback for older matplotlib versions
+        pass
+    
     if time_window:
         ax.set_title(f'Sequence {sequence_name} - First {time_window}\nGT Length: {gt_length:.1f}cm, Pred Length: {pred_length:.1f}cm')
     else:
@@ -738,6 +754,13 @@ def plot_rotation_3d(pred_rotations, gt_rotations, sequence_name, output_path, t
     ax.set_xlabel('X (rad)')
     ax.set_ylabel('Y (rad)')
     ax.set_zlabel('Z (rad)')
+    
+    # Set equal aspect ratio for all axes
+    try:
+        ax.set_box_aspect([1, 1, 1])  # Available in matplotlib >= 3.4
+    except AttributeError:
+        # Fallback for older matplotlib versions
+        pass
     
     if time_window:
         ax.set_title(f'Sequence {sequence_name} - Rotation First {time_window}\n'
@@ -903,7 +926,7 @@ def main():
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
-        pin_memory=True
+        pin_memory=device.type == 'cuda'
     )
     
     print(f"📁 Test dataset loaded: {len(test_dataset)} samples")
