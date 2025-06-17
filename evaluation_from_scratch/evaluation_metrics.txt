@@ -2,18 +2,25 @@ VIFT FROM SCRATCH EVALUATION RESULTS
 =====================================
 
 Translation Error (cm):
-  Mean:   3.16
-  Std:    3.78
-  Median: 1.69
-  95%:    10.22
-  Max:    27.97
+  Mean:   3.86
+  Std:    5.20
+  Median: 1.72
+  95%:    14.80
+  Max:    44.74
 
 Rotation Error (degrees):
-  Mean:   2.10
-  Std:    2.92
-  Median: 1.29
-  95%:    5.79
-  Max:    62.08
+  Mean:   1.76
+  Std:    3.45
+  Median: 0.61
+  95%:    7.37
+  Max:    47.19
 
-Note: High rotation error is expected due to Euler angle representation.
-Consider using quaternion representation for better results.
+Scale Drift (%):
+  Mean:   264.15
+  Std:    484.46
+  Median: 87.75
+  95%:    1166.61
+  Max:    6017.58
+
+Note: Model uses quaternion representation for rotations.
+Errors are computed using geodesic distance on SO(3).

@@ -3,6 +3,22 @@
 Train VIFT from scratch on Aria Everyday Activities dataset.
 This trains all components: Image Encoder + IMU Encoder + Pose Transformer.
 No pre-trained weights are used.
+
+Usage:
+    # Single GPU training (original mode)
+    python train_aria_from_scratch.py --batch-size 4 --epochs 30
+
+    # Multi-GPU training with DistributedDataParallel (recommended for 2+ GPUs)
+    # This provides ~2x speedup compared to DataParallel
+    torchrun --nproc_per_node=4 train_aria_from_scratch.py --distributed --batch-size 4
+
+    # Alternative launcher (deprecated but works)
+    python -m torch.distributed.launch --nproc_per_node=4 train_aria_from_scratch.py --distributed --batch-size 4
+
+    # Custom number of GPUs
+    torchrun --nproc_per_node=8 train_aria_from_scratch.py --distributed --batch-size 2
+
+Note: When using distributed training, the effective batch size is batch_size * num_gpus
 """
 
 import os
@@ -10,11 +26,12 @@ import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 from pathlib import Path
-from datetime import datetime
 from tqdm import tqdm
 import argparse
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -22,7 +39,35 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from src.models.components.vsvio import TransformerVIO
 from src.data.components.aria_raw_dataset import AriaRawDataModule
-from train_vift_aria_stable import robust_geodesic_loss
+
+
+def robust_geodesic_loss_stable(pred_quat, gt_quat):
+    """
+    Numerically stable quaternion geodesic loss using atan2.
+    This avoids the derivative blow-up of acos near |dot|=1.
+    """
+    # Reshape to [B*N, 4] for batch processing
+    original_shape = pred_quat.shape
+    pred_quat = pred_quat.reshape(-1, 4)
+    gt_quat = gt_quat.reshape(-1, 4)
+    
+    # Normalize quaternions with epsilon for stability
+    pred_quat = F.normalize(pred_quat, p=2, dim=-1, eps=1e-8)
+    gt_quat = F.normalize(gt_quat, p=2, dim=-1, eps=1e-8)
+    
+    # Compute dot product (handle double cover with abs)
+    dot_product = torch.sum(pred_quat * gt_quat, dim=-1)
+    abs_dot = dot_product.abs()
+    
+    # Use atan2(sqrt(1-x²), x) which has finite slope at |x|→1
+    # Clamp to avoid numerical issues in sqrt
+    abs_dot_clamped = abs_dot.clamp(max=1.0 - 1e-7)
+    angle = 2.0 * torch.atan2(
+        torch.sqrt(1.0 - abs_dot_clamped**2), 
+        abs_dot_clamped
+    )
+    
+    return angle.mean()
 
 
 class VIFTFromScratch(nn.Module):
@@ -84,15 +129,15 @@ class VIFTFromScratch(nn.Module):
         images = batch['images']  # [B, 11, 3, 256, 512]
         imu = batch['imu']        # [B, 110, 6]
         
-        # Get features from backbone
-        fv, fi = self.backbone.Feature_net(images, imu)  # fv: [B, 11, 512], fi: [B, 11, 256]
+        # Get features from backbone (which creates RGB-RGB pairs internally)
+        fv, fi = self.backbone.Feature_net(images, imu)  # fv: [B, 10, 512], fi: [B, 10, 256]
         
         # Concatenate visual and inertial features
-        combined_features = torch.cat([fv, fi], dim=-1)  # [B, 11, 768]
+        combined_features = torch.cat([fv, fi], dim=-1)  # [B, 10, 768]
         
-        # Predict poses for all transitions (first 10 timesteps)
-        # Each timestep predicts the transition to the next frame
-        transition_features = combined_features[:, :10, :]  # [B, 10, 768]
+        # Predict poses for all transitions
+        # Each timestep already represents a transition (src->tgt pair)
+        transition_features = combined_features  # [B, 10, 768]
         
         # Apply pose predictor to each timestep
         batch_size, seq_len, feat_dim = transition_features.shape
@@ -112,8 +157,14 @@ class VIFTFromScratch(nn.Module):
         }
 
 
-def compute_loss(predictions, batch, trans_weight=10.0, rot_weight=1.0):
-    """Compute loss with quaternion representation for multi-step prediction"""
+def compute_loss(predictions, batch, alpha=3.0):
+    """Compute loss with quaternion representation for multi-step prediction
+    
+    Args:
+        predictions: Model predictions with 'poses' key
+        batch: Input batch with 'gt_poses' key
+        alpha: Balance factor for translation/rotation (default 3.0 for indoor scenes)
+    """
     pred_poses = predictions['poses']  # [B, 10, 7]
     gt_poses = batch['gt_poses']  # [B, 10, 7]
     
@@ -126,14 +177,15 @@ def compute_loss(predictions, batch, trans_weight=10.0, rot_weight=1.0):
     # Translation loss
     trans_loss = F.smooth_l1_loss(pred_trans, gt_trans)
     
-    # Rotation loss using geodesic distance
-    rot_loss = robust_geodesic_loss(pred_rot, gt_rot)
+    # Rotation loss using numerically stable geodesic distance
+    rot_loss = robust_geodesic_loss_stable(pred_rot, gt_rot)
     
     if torch.isnan(trans_loss) or torch.isnan(rot_loss):
         return None
     
-    # Combined loss
-    total_loss = trans_weight * trans_loss + rot_weight * rot_loss
+    # Combined loss with alpha scaling
+    # Divide translation loss by alpha to balance with rotation
+    total_loss = trans_loss / alpha + rot_loss
     
     return {
         'total_loss': total_loss,
@@ -142,17 +194,18 @@ def compute_loss(predictions, batch, trans_weight=10.0, rot_weight=1.0):
     }
 
 
-def train_epoch(model, dataloader, optimizer, device, epoch):
+def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=None, global_step=0):
     """Train one epoch."""
     model.train()
     total_loss = 0
     num_batches = 0
+    step = global_step  # Use global step counter for gradient clipping
     
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}")
     for batch_idx, batch in enumerate(progress_bar):
         # Move to device
         batch = {
-            'images': batch['images'].to(device),
+            'images': batch['images'].to(device),      # [B, 11, 3, H, W]
             'imu': batch['imu'].to(device).float(),
             'gt_poses': batch['gt_poses'].to(device)
         }
@@ -178,10 +231,22 @@ def train_epoch(model, dataloader, optimizer, device, epoch):
         optimizer.zero_grad()
         loss.backward()
         
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        # Gradient clipping schedule
+        if step < 300:
+            clip_val = 1.0
+        elif step < 500:
+            clip_val = 2.0
+        else:
+            clip_val = 3.0
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_val)
         
         optimizer.step()
+        
+        # Step warmup scheduler if provided (per batch)
+        if warmup_scheduler is not None:
+            warmup_scheduler.step()
+        
+        step += 1  # Increment step counter
         
         # Update metrics
         total_loss += loss.item()
@@ -194,7 +259,7 @@ def train_epoch(model, dataloader, optimizer, device, epoch):
             'rot': f"{loss_dict['rot_loss'].item():.4f}"
         })
     
-    return total_loss / num_batches if num_batches > 0 else float('inf')
+    return total_loss / num_batches if num_batches > 0 else float('inf'), step
 
 
 def validate(model, dataloader, device):
@@ -209,7 +274,7 @@ def validate(model, dataloader, device):
         for batch in tqdm(dataloader, desc="Validation"):
             # Move to device
             batch = {
-                'images': batch['images'].to(device),
+                'images': batch['images'].to(device),      # [B, 11, 3, H, W]
                 'imu': batch['imu'].to(device).float(),
                 'gt_poses': batch['gt_poses'].to(device)
             }
@@ -256,6 +321,43 @@ def validate(model, dataloader, device):
     }
 
 
+def setup_distributed(args):
+    """Initialize distributed training if requested."""
+    if args.distributed:
+        # Get local rank from environment if not set
+        if args.local_rank == -1:
+            args.local_rank = int(os.environ.get('LOCAL_RANK', 0))
+        
+        # Set CUDA device before initializing process group
+        torch.cuda.set_device(args.local_rank)
+        device = torch.device('cuda', args.local_rank)
+        
+        # Initialize the process group
+        dist.init_process_group(
+            backend=args.backend,
+            init_method=args.init_method,
+            world_size=int(os.environ.get('WORLD_SIZE', 1)),
+            rank=int(os.environ.get('RANK', 0))
+        )
+        
+        # Get rank and world size
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        
+        print(f"[Rank {rank}/{world_size}] Distributed training initialized on GPU {args.local_rank}")
+        return device, rank, world_size
+    else:
+        # Non-distributed setup
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        return device, 0, 1
+
+
+def cleanup_distributed():
+    """Clean up distributed training."""
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Train VIFT from scratch on Aria data')
     parser.add_argument('--data-dir', type=str, default='aria_processed',
@@ -264,91 +366,144 @@ def main():
                         help='Number of training epochs')
     parser.add_argument('--batch-size', type=int, default=4,
                         help='Batch size per GPU')
-    parser.add_argument('--lr', type=float, default=3e-5,
+    parser.add_argument('--lr', type=float, default=1e-4,
                         help='Learning rate')
     parser.add_argument('--checkpoint-dir', type=str, default='checkpoints_from_scratch',
                         help='Directory to save checkpoints')
-    parser.add_argument('--device', type=str, default='cuda',
-                        help='Device to use')
     parser.add_argument('--num-workers', type=int, default=4,
                         help='Number of data loading workers')
-    parser.add_argument('--num-gpus', type=int, default=4,
-                        help='Number of GPUs to use')
+    
+    # Distributed training arguments
+    parser.add_argument('--distributed', action='store_true',
+                        help='Use distributed training with DDP')
+    parser.add_argument('--local-rank', type=int, default=-1,
+                        help='Local rank for distributed training (set automatically by torchrun)')
+    parser.add_argument('--backend', type=str, default='nccl',
+                        help='Distributed backend to use (nccl, gloo)')
+    parser.add_argument('--init-method', type=str, default='env://',
+                        help='URL to set up distributed training')
     
     args = parser.parse_args()
     
-    # Setup device
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    # Setup distributed training
+    device, rank, world_size = setup_distributed(args)
+    is_main_process = rank == 0
     
-    # Check available GPUs
-    if torch.cuda.is_available():
-        n_gpus = torch.cuda.device_count()
-        print(f"Available GPUs: {n_gpus}")
-        if args.num_gpus > n_gpus:
-            print(f"Warning: Requested {args.num_gpus} GPUs but only {n_gpus} available")
-            args.num_gpus = n_gpus
-    else:
-        print("No GPUs available, using CPU")
-        args.num_gpus = 0
-    
-    print(f"Using {args.num_gpus} GPU(s)")
+    # Only print from main process
+    if is_main_process:
+        if args.distributed:
+            print(f"Using Distributed Training with {world_size} GPUs")
+        else:
+            print(f"Using single GPU training")
     
     # Create checkpoint directory
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     
-    print("\n" + "="*60)
-    print("Training VIFT from Scratch on Aria Data")
-    print("="*60)
-    print("Training all components:")
-    print("- Image Encoder (6-layer CNN)")
-    print("- IMU Encoder (3-layer 1D CNN)")
-    print("- Pose Transformer (4 layers, 8 heads)")
-    print("- Quaternion output (3 trans + 4 quat)")
-    print("- Multi-step prediction (all 10 transitions)")
-    print(f"\nTraining Configuration:")
-    print(f"- GPUs: {args.num_gpus}")
-    print(f"- Batch size per GPU: {args.batch_size}")
-    print(f"- Total batch size: {args.batch_size * max(1, args.num_gpus)}")
-    print(f"- Learning rate: {args.lr}")
-    print(f"- Window stride: 10 (non-overlapping transitions)")
-    print("="*60 + "\n")
+    if is_main_process:
+        print("\n" + "="*60)
+        print("Training VIFT from Scratch on Aria Data")
+        print("="*60)
+        print("Training all components:")
+        print("- Image Encoder (6-layer CNN)")
+        print("- IMU Encoder (3-layer 1D CNN)")
+        print("- Pose Transformer (4 layers, 8 heads)")
+        print("- Quaternion output (3 trans + 4 quat)")
+        print("- Multi-step prediction (all 10 transitions)")
+        print(f"\nTraining Configuration:")
+        print(f"- Distributed: {'Yes (DDP)' if args.distributed else 'No'}")
+        print(f"- World size: {world_size}")
+        print(f"- Batch size per GPU: {args.batch_size}")
+        print(f"- Total batch size: {args.batch_size * world_size}")
+        print(f"- Learning rate: {args.lr}")
+        print(f"- Window stride: 10 (non-overlapping transitions)")
+        print("="*60 + "\n")
     
-    # Create data module with adjusted batch size for multi-GPU
-    effective_batch_size = args.batch_size * max(1, args.num_gpus)
+    # Create data module
+    # For DDP, each process loads its own subset of data
     data_module = AriaRawDataModule(
         data_dir=args.data_dir,
-        batch_size=effective_batch_size,
-        num_workers=args.num_workers * max(1, args.num_gpus),  # Scale workers with GPUs
+        batch_size=args.batch_size,  # Per GPU batch size
+        num_workers=args.num_workers,
         sequence_length=11,
         stride=10  # Ensures all transitions are covered (minimal frame overlap)
     )
     data_module.setup()
     
-    train_loader = data_module.train_dataloader()
-    val_loader = data_module.val_dataloader()
+    # Get datasets
+    train_dataset = data_module.train_dataset
+    val_dataset = data_module.val_dataset
     
-    print(f"Train samples: {len(data_module.train_dataset)}")
-    print(f"Val samples: {len(data_module.val_dataset)}")
+    # Create distributed samplers if using DDP
+    if args.distributed:
+        train_sampler = DistributedSampler(
+            train_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+            drop_last=True
+        )
+        val_sampler = DistributedSampler(
+            val_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=False,
+            drop_last=False
+        )
+    else:
+        train_sampler = None
+        val_sampler = None
+    
+    # Create data loaders
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        shuffle=(train_sampler is None),
+        sampler=train_sampler,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        drop_last=True
+    )
+    
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        sampler=val_sampler,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        drop_last=False
+    )
+    
+    if is_main_process:
+        print(f"Train samples: {len(train_dataset)}")
+        print(f"Val samples: {len(val_dataset)}")
     
     # Create model
     model = VIFTFromScratch()
+    model = model.to(device)
     
-    # Move to GPU and wrap with DataParallel if using multiple GPUs
-    if args.num_gpus > 1:
-        model = model.to(device)
-        model = nn.DataParallel(model, device_ids=list(range(args.num_gpus)))
-        print(f"Using DataParallel with {args.num_gpus} GPUs")
-    else:
-        model = model.to(device)
+    # Wrap with DDP if distributed
+    if args.distributed:
+        # Set find_unused_parameters=True because the TransformerVIO model
+        # has some unused parameters in its architecture
+        model = DDP(
+            model,
+            device_ids=[args.local_rank],
+            output_device=args.local_rank,
+            find_unused_parameters=True
+        )
+        if is_main_process:
+            print(f"Using DistributedDataParallel with {world_size} GPUs")
     
-    # Count parameters
-    base_model = model.module if hasattr(model, 'module') else model
-    total_params = sum(p.numel() for p in base_model.parameters())
-    trainable_params = sum(p.numel() for p in base_model.parameters() if p.requires_grad)
-    print(f"\nModel Parameters:")
-    print(f"  Total: {total_params:,}")
-    print(f"  Trainable: {trainable_params:,}")
+    # Count parameters (only on main process)
+    if is_main_process:
+        base_model = model.module if hasattr(model, 'module') else model
+        total_params = sum(p.numel() for p in base_model.parameters())
+        trainable_params = sum(p.numel() for p in base_model.parameters() if p.requires_grad)
+        print(f"\nModel Parameters:")
+        print(f"  Total: {total_params:,}")
+        print(f"  Trainable: {trainable_params:,}")
     
     # Create optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -368,59 +523,85 @@ def main():
     
     # Training loop
     best_val_loss = float('inf')
+    global_step = 0  # Track global step across epochs
     
     for epoch in range(1, args.epochs + 1):
-        print(f"\n{'='*60}")
-        print(f"Epoch {epoch}/{args.epochs}")
-        print(f"Learning rate: {optimizer.param_groups[0]['lr']:.2e}")
-        print(f"{'='*60}")
+        # Set epoch for distributed sampler
+        if args.distributed and train_sampler is not None:
+            train_sampler.set_epoch(epoch)
+        
+        if is_main_process:
+            print(f"\n{'='*60}")
+            print(f"Epoch {epoch}/{args.epochs}")
+            print(f"Learning rate: {optimizer.param_groups[0]['lr']:.2e}")
+            print(f"{'='*60}")
+        
+        # Determine if we're in warmup phase
+        warmup_scheduler_to_use = warmup_scheduler if global_step < warmup_steps else None
         
         # Train
-        train_loss = train_epoch(model, train_loader, optimizer, device, epoch)
+        train_loss, global_step = train_epoch(
+            model, train_loader, optimizer, device, epoch, 
+            warmup_scheduler=warmup_scheduler_to_use, global_step=global_step
+        )
         
         # Validate
         val_metrics = validate(model, val_loader, device)
         
-        # Step scheduler
-        if epoch <= 2:
-            # Warmup phase
-            warmup_scheduler.step()
-        else:
-            # Cosine annealing phase
+        # Step cosine scheduler after warmup phase (per epoch)
+        if global_step >= warmup_steps:
             cosine_scheduler.step()
         
-        print(f"\nEpoch {epoch} Summary:")
-        print(f"  Train Loss: {train_loss:.6f}")
-        print(f"  Val Loss: {val_metrics['loss']:.6f}")
-        print(f"  Val Trans Error: {val_metrics['trans_error']*100:.2f} cm")
-        print(f"  Val Rot Error: {val_metrics['rot_error']:.2f}°")
+        # Only print and save on main process
+        if is_main_process:
+            print(f"\nEpoch {epoch} Summary:")
+            print(f"  Train Loss: {train_loss:.6f}")
+            print(f"  Val Loss: {val_metrics['loss']:.6f}")
+            print(f"  Val Trans Error: {val_metrics['trans_error']*100:.2f} cm")
+            print(f"  Val Rot Error: {val_metrics['rot_error']:.2f}°")
         
-        # Save checkpoint
-        if val_metrics['loss'] < best_val_loss:
-            best_val_loss = val_metrics['loss']
-            # Get the base model state dict (unwrap DataParallel if needed)
+        # Save checkpoints only on main process
+        if is_main_process:
+            # Get model state dict (unwrap DDP/DataParallel if needed)
             model_state = model.module.state_dict() if hasattr(model, 'module') else model.state_dict()
             base_model = model.module if hasattr(model, 'module') else model
-            checkpoint = {
+            
+            # Save best checkpoint
+            if val_metrics['loss'] < best_val_loss:
+                best_val_loss = val_metrics['loss']
+                checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': model_state,
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': warmup_scheduler.state_dict() if global_step < warmup_steps else cosine_scheduler.state_dict(),
+                    'train_loss': train_loss,
+                    'val_metrics': val_metrics,
+                    'config': base_model.config.__dict__,
+                    'global_step': global_step
+                }
+                torch.save(checkpoint, checkpoint_dir / 'best_model.pt')
+                print("  ✓ New best model saved")
+            
+            # Save latest checkpoint (always create fresh dictionary)
+            latest_checkpoint = {
                 'epoch': epoch,
                 'model_state_dict': model_state,
                 'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': warmup_scheduler.state_dict() if epoch <= 2 else cosine_scheduler.state_dict(),
+                'scheduler_state_dict': warmup_scheduler.state_dict() if global_step < warmup_steps else cosine_scheduler.state_dict(),
                 'train_loss': train_loss,
                 'val_metrics': val_metrics,
-                'config': base_model.config.__dict__
+                'config': base_model.config.__dict__,
+                'global_step': global_step
             }
-            torch.save(checkpoint, checkpoint_dir / 'best_model.pt')
-            print("  ✓ New best model saved")
-        
-        # Save latest checkpoint
-        checkpoint['epoch'] = epoch
-        checkpoint['train_loss'] = train_loss
-        checkpoint['val_metrics'] = val_metrics
-        torch.save(checkpoint, checkpoint_dir / 'latest_model.pt')
+            torch.save(latest_checkpoint, checkpoint_dir / 'latest_model.pt')
     
-    print(f"\nTraining complete! Best val loss: {best_val_loss:.6f}")
-    print(f"Checkpoints saved to: {checkpoint_dir}")
+    # Final summary
+    if is_main_process:
+        print(f"\nTraining complete! Best val loss: {best_val_loss:.6f}")
+        print(f"Checkpoints saved to: {checkpoint_dir}")
+    
+    # Clean up distributed training
+    cleanup_distributed()
 
 
 if __name__ == "__main__":

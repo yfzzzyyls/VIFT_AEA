@@ -12,11 +12,17 @@ from pathlib import Path
 import argparse
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 from scipy.spatial.transform import Rotation as R
 from torch.utils.data import DataLoader
 import pandas as pd
 import json
+try:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    print("Warning: Plotly not available. Interactive HTML reports will be disabled.")
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -24,6 +30,33 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from train_aria_from_scratch import VIFTFromScratch
 from src.data.components.aria_raw_dataset import AriaRawDataset
+
+
+def remove_gravity(imu_window: torch.Tensor) -> torch.Tensor:
+    """Remove gravity bias from IMU accelerometer data
+    
+    Args:
+        imu_window: [B,110,6] tensor with (ax,ay,az,gx,gy,gz)
+    
+    Returns:
+        IMU tensor with gravity-bias removed from accelerometer
+    """
+    # Extract accelerometer data
+    accel = imu_window[..., :3]  # [B, 110, 3]
+    
+    # Reshape to compute per-frame bias (11 frames x 10 IMU samples per frame)
+    # Average across the 10 samples within each frame
+    accel_reshaped = accel.reshape(accel.shape[0], 11, 10, 3)
+    bias = accel_reshaped.mean(dim=2, keepdim=True)  # [B, 11, 1, 3]
+    
+    # Expand bias for each of the 10 samples in each frame (no memory copy)
+    bias_expanded = bias.expand(-1, 11, 10, -1).reshape(accel.shape)
+    
+    # Remove bias from accelerometer
+    accel_corrected = accel - bias_expanded
+    
+    # Concatenate back with gyroscope data
+    return torch.cat([accel_corrected, imu_window[..., 3:]], dim=-1)
 
 
 def load_checkpoint(checkpoint_path, device):
@@ -55,6 +88,31 @@ def load_checkpoint(checkpoint_path, device):
             print(f"   Val rotation error: {metrics['rot_error']:.2f}°")
     
     return model
+
+
+def compute_scale_drift(pred_poses, gt_poses):
+    """Compute scale drift metric for relative poses
+    
+    Args:
+        pred_poses: Predicted relative poses [N, 7]
+        gt_poses: Ground truth relative poses [N, 7]
+    
+    Returns:
+        scale_errors: Array of scale errors as percentages
+    """
+    scale_errors = []
+    
+    for i in range(len(pred_poses)):
+        # Get translation magnitudes
+        pred_trans_norm = np.linalg.norm(pred_poses[i, :3])
+        gt_trans_norm = np.linalg.norm(gt_poses[i, :3])
+        
+        # Avoid division by zero
+        if gt_trans_norm > 1e-6:
+            scale_error = 100.0 * abs(pred_trans_norm - gt_trans_norm) / gt_trans_norm
+            scale_errors.append(scale_error)
+    
+    return np.array(scale_errors)
 
 
 def integrate_trajectory(relative_poses, initial_pose=None):
@@ -92,6 +150,15 @@ def integrate_trajectory(relative_poses, initial_pose=None):
         if np.any(np.isnan(rel_quat)) or np.linalg.norm(rel_quat) < 0.5:
             rel_quat = np.array([0, 0, 0, 1])
         
+        # Fix quaternion double-cover ambiguity
+        # Ensure we take the shortest path by checking dot product
+        current_quat = current_rotation.as_quat()
+        dot = np.dot(rel_quat, current_quat)
+        # Handle both negative dot product and near-zero (≈180°) cases
+        if dot < 0.0 or np.isclose(dot, 0.0, atol=1e-8):
+            rel_quat = -rel_quat  # Flip sign to maintain shortest-arc convention
+        rel_quat = rel_quat / (np.linalg.norm(rel_quat) + 1e-8)  # Re-normalize after flip
+        
         rel_rotation = R.from_quat(rel_quat)
         
         # Apply transformation
@@ -103,6 +170,84 @@ def integrate_trajectory(relative_poses, initial_pose=None):
         absolute_rotations[i + 1] = current_rotation.as_quat()
     
     return absolute_positions, absolute_rotations
+
+
+def compute_ape(pred_positions, gt_positions):
+    """Compute Absolute Pose Error (APE) metrics
+    
+    Args:
+        pred_positions: Predicted absolute positions [N, 3]
+        gt_positions: Ground truth absolute positions [N, 3]
+    
+    Returns:
+        Dictionary with APE statistics
+    """
+    # Compute position errors
+    position_errors = np.linalg.norm(pred_positions - gt_positions, axis=1)
+    
+    ape_stats = {
+        'mean': np.mean(position_errors),
+        'std': np.std(position_errors),
+        'median': np.median(position_errors),
+        'min': np.min(position_errors),
+        'max': np.max(position_errors),
+        'rmse': np.sqrt(np.mean(position_errors**2))
+    }
+    
+    return ape_stats
+
+
+def compute_rpe(pred_poses, gt_poses, delta=1):
+    """Compute Relative Pose Error (RPE) metrics
+    
+    Args:
+        pred_poses: Predicted relative poses [N, 7] 
+        gt_poses: Ground truth relative poses [N, 7]
+        delta: Frame delta for computing RPE (default=1)
+    
+    Returns:
+        Dictionary with RPE translation and rotation statistics
+    """
+    trans_errors = []
+    rot_errors = []
+    
+    for i in range(0, len(pred_poses) - delta):
+        # Translation error
+        pred_trans = pred_poses[i:i+delta, :3].sum(axis=0)
+        gt_trans = gt_poses[i:i+delta, :3].sum(axis=0)
+        trans_error = np.linalg.norm(pred_trans - gt_trans)
+        trans_errors.append(trans_error)
+        
+        # Rotation error - compose quaternions
+        pred_rot = R.from_quat(pred_poses[i, 3:])
+        gt_rot = R.from_quat(gt_poses[i, 3:])
+        for j in range(1, delta):
+            pred_rot = pred_rot * R.from_quat(pred_poses[i+j, 3:])
+            gt_rot = gt_rot * R.from_quat(gt_poses[i+j, 3:])
+        
+        rel_rot = gt_rot.inv() * pred_rot
+        angle_error = np.abs(rel_rot.magnitude())
+        rot_errors.append(np.rad2deg(angle_error))
+    
+    trans_errors = np.array(trans_errors)
+    rot_errors = np.array(rot_errors)
+    
+    rpe_stats = {
+        'trans': {
+            'mean': np.mean(trans_errors),
+            'std': np.std(trans_errors),
+            'median': np.median(trans_errors),
+            'rmse': np.sqrt(np.mean(trans_errors**2))
+        },
+        'rot': {
+            'mean': np.mean(rot_errors),
+            'std': np.std(rot_errors),
+            'median': np.median(rot_errors),
+            'rmse': np.sqrt(np.mean(rot_errors**2))
+        }
+    }
+    
+    return rpe_stats
 
 
 def evaluate_model(model, test_loader, device, output_dir, test_sequences):
@@ -119,6 +264,8 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
             # Move to device
             images = batch['images'].to(device)
             imu = batch['imu'].to(device)
+            # Remove gravity bias from IMU data to match training
+            imu = remove_gravity(imu)
             gt_poses = batch['gt_poses'].to(device)
             
             # Get predictions
@@ -148,17 +295,21 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
                     gt_q = gt_q / (np.linalg.norm(gt_q) + 1e-8)
                     
                     # Compute angle between quaternions
-                    dot = np.abs(np.dot(pred_q, gt_q))
+                    dot = np.dot(pred_q, gt_q)
                     dot = np.clip(dot, -1.0, 1.0)
-                    angle = 2 * np.arccos(dot)
+                    angle = 2 * np.arccos(np.abs(dot))
                     rot_error = np.rad2deg(angle)
                     rot_errors.append(rot_error)
+                
+                # Compute scale drift
+                scale_errors = compute_scale_drift(pred_poses, gt_poses_sample)
                 
                 result = {
                     'pred_poses': pred_poses,  # [10, 7]
                     'gt_poses': gt_poses_sample,  # [10, 7]
                     'trans_errors': np.array(trans_errors),  # [10]
                     'rot_errors': np.array(rot_errors),  # [10]
+                    'scale_errors': scale_errors,  # Scale drift percentages
                     'seq_name': batch['seq_name'][i],
                     'start_idx': batch['start_idx'][i].item()
                 }
@@ -172,6 +323,7 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
     # Compute overall statistics
     all_trans_errors = np.concatenate([r['trans_errors'] for r in all_results])
     all_rot_errors = np.concatenate([r['rot_errors'] for r in all_results])
+    all_scale_errors = np.concatenate([r['scale_errors'] for r in all_results if len(r['scale_errors']) > 0])
     
     print("\n" + "="*50)
     print("📊 EVALUATION RESULTS")
@@ -189,6 +341,13 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
     print(f"   Median: {np.median(all_rot_errors):.2f}")
     print(f"   95%:    {np.percentile(all_rot_errors, 95):.2f}")
     print(f"   Max:    {np.max(all_rot_errors):.2f}")
+    
+    print(f"\n📐 Scale Drift (%):")
+    print(f"   Mean:   {np.mean(all_scale_errors):.2f}")
+    print(f"   Std:    {np.std(all_scale_errors):.2f}")
+    print(f"   Median: {np.median(all_scale_errors):.2f}")
+    print(f"   95%:    {np.percentile(all_scale_errors, 95):.2f}")
+    print(f"   Max:    {np.max(all_scale_errors):.2f}")
     print("="*50)
     
     # Save sample trajectories
@@ -243,10 +402,18 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         # For ground truth rotations, use the raw quaternions
         gt_rotations_full = gt_quaternions
         
-        # Save trajectories to CSV
+        # Compute APE for this sequence
+        ape_stats = compute_ape(pred_positions_full[1:], gt_positions_full[:len(pred_positions_full)-1])
+        print(f"  APE - Mean: {ape_stats['mean']*100:.2f}cm, RMSE: {ape_stats['rmse']*100:.2f}cm")
+        
+        # Compute RPE for this sequence
+        rpe_stats = compute_rpe(all_pred, np.concatenate([r['gt_poses'] for r in seq_results_sampled], axis=0))
+        print(f"  RPE - Trans: {rpe_stats['trans']['mean']*100:.2f}cm, Rot: {rpe_stats['rot']['mean']:.2f}°")
+        
+        # Save trajectories to CSV with global frame indices
         save_trajectory_csv(pred_positions_full, gt_positions_full, 
                            pred_rotations_full, gt_rotations_full,
-                           seq_id, output_dir)
+                           seq_id, output_dir, frame_offset=all_frame_indices[0])
         
         # Plot full trajectory
         plot_trajectory_3d(
@@ -254,6 +421,14 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
             gt_positions_full,
             seq_id,
             os.path.join(output_dir, f'trajectory_3d_{seq_id}.png')
+        )
+        
+        # Create interactive HTML plot
+        create_interactive_html_plot(
+            pred_positions_full,
+            gt_positions_full,
+            seq_id,
+            os.path.join(output_dir, f'trajectory_3d_{seq_id}_interactive.html')
         )
         
         # Plot rotation trajectory
@@ -317,7 +492,7 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
             )
     
     # Save numerical results
-    save_evaluation_metrics(all_trans_errors, all_rot_errors, output_dir)
+    save_evaluation_metrics(all_trans_errors, all_rot_errors, all_scale_errors, output_dir)
     
     print(f"\n📊 Generated outputs:")
     for seq_id in test_sequences:
@@ -327,18 +502,20 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
             print(f"   - trajectory_{seq_id}_pred.csv (predictions with errors)")
             print(f"   - trajectory_3d_{seq_id}.png, trajectory_3d_{seq_id}_1s.png, trajectory_3d_{seq_id}_5s.png")
             print(f"   - rotation_3d_{seq_id}.png, rotation_3d_{seq_id}_1s.png, rotation_3d_{seq_id}_5s.png")
+            if PLOTLY_AVAILABLE:
+                print(f"   - trajectory_3d_{seq_id}_interactive.html (interactive 3D plot)")
     
     return all_results
 
 
-def save_trajectory_csv(pred_positions, gt_positions, pred_rotations, gt_rotations, seq_id, output_dir):
+def save_trajectory_csv(pred_positions, gt_positions, pred_rotations, gt_rotations, seq_id, output_dir, frame_offset=0):
     """Save trajectory data to separate CSV files for ground truth and predictions"""
     
     # Save ground truth data
     gt_data = []
     for i in range(len(gt_positions)):
         row = {
-            'frame': i,
+            'frame': i + frame_offset,
             'x': gt_positions[i, 0],
             'y': gt_positions[i, 1],
             'z': gt_positions[i, 2]
@@ -364,7 +541,7 @@ def save_trajectory_csv(pred_positions, gt_positions, pred_rotations, gt_rotatio
     pred_data = []
     for i in range(len(pred_positions)):
         row = {
-            'frame': i,
+            'frame': i + frame_offset,
             'x': pred_positions[i, 0],
             'y': pred_positions[i, 1],
             'z': pred_positions[i, 2]
@@ -397,6 +574,92 @@ def save_trajectory_csv(pred_positions, gt_positions, pred_rotations, gt_rotatio
     pred_csv_path = os.path.join(output_dir, f'trajectory_{seq_id}_pred.csv')
     pred_df.to_csv(pred_csv_path, index=False)
     print(f"Saved predictions to {pred_csv_path}")
+
+
+def create_interactive_html_plot(pred_positions, gt_positions, sequence_name, output_path):
+    """Create interactive 3D trajectory plot using Plotly"""
+    if not PLOTLY_AVAILABLE:
+        return
+    
+    # Convert to centimeters
+    pred_positions_cm = pred_positions * 100
+    gt_positions_cm = gt_positions * 100
+    
+    # Create figure
+    fig = go.Figure()
+    
+    # Add ground truth trajectory
+    fig.add_trace(go.Scatter3d(
+        x=gt_positions_cm[:, 0],
+        y=gt_positions_cm[:, 1],
+        z=gt_positions_cm[:, 2],
+        mode='lines',
+        name='Ground Truth',
+        line=dict(color='blue', width=4),
+        hovertemplate='GT<br>X: %{x:.2f}cm<br>Y: %{y:.2f}cm<br>Z: %{z:.2f}cm<extra></extra>'
+    ))
+    
+    # Add predicted trajectory
+    fig.add_trace(go.Scatter3d(
+        x=pred_positions_cm[:, 0],
+        y=pred_positions_cm[:, 1],
+        z=pred_positions_cm[:, 2],
+        mode='lines',
+        name='Prediction',
+        line=dict(color='red', width=4, dash='dash'),
+        hovertemplate='Pred<br>X: %{x:.2f}cm<br>Y: %{y:.2f}cm<br>Z: %{z:.2f}cm<extra></extra>'
+    ))
+    
+    # Add start and end markers
+    fig.add_trace(go.Scatter3d(
+        x=[gt_positions_cm[0, 0]],
+        y=[gt_positions_cm[0, 1]],
+        z=[gt_positions_cm[0, 2]],
+        mode='markers',
+        name='Start',
+        marker=dict(color='green', size=10, symbol='circle'),
+        showlegend=True
+    ))
+    
+    fig.add_trace(go.Scatter3d(
+        x=[gt_positions_cm[-1, 0]],
+        y=[gt_positions_cm[-1, 1]],
+        z=[gt_positions_cm[-1, 2]],
+        mode='markers',
+        name='End',
+        marker=dict(color='red', size=10, symbol='x'),
+        showlegend=True
+    ))
+    
+    # Calculate path lengths and errors
+    gt_length = np.sum(np.linalg.norm(np.diff(gt_positions, axis=0), axis=1)) * 100
+    pred_length = np.sum(np.linalg.norm(np.diff(pred_positions, axis=0), axis=1)) * 100
+    ape_mean = np.mean(np.linalg.norm(pred_positions - gt_positions[:len(pred_positions)], axis=1)) * 100
+    
+    # Update layout
+    fig.update_layout(
+        title=dict(
+            text=f'Sequence {sequence_name} - Interactive 3D Trajectory<br>' +
+                 f'GT Length: {gt_length:.1f}cm, Pred Length: {pred_length:.1f}cm, APE: {ape_mean:.2f}cm',
+            font=dict(size=20)
+        ),
+        scene=dict(
+            xaxis_title='X (cm)',
+            yaxis_title='Y (cm)',
+            zaxis_title='Z (cm)',
+            aspectmode='data',
+            camera=dict(
+                eye=dict(x=1.5, y=1.5, z=1.5)
+            )
+        ),
+        width=1200,
+        height=800,
+        hovermode='closest'
+    )
+    
+    # Save HTML
+    fig.write_html(output_path, include_plotlyjs='cdn')
+    print(f"Saved interactive plot to {output_path}")
 
 
 def plot_trajectory_3d(pred_positions, gt_positions, sequence_name, output_path, time_window=None):
@@ -561,7 +824,7 @@ def plot_sample_trajectories(results, output_dir):
     print(f"\n📊 Plots saved to: {plot_dir}/")
 
 
-def save_evaluation_metrics(trans_errors, rot_errors, output_dir):
+def save_evaluation_metrics(trans_errors, rot_errors, scale_errors, output_dir):
     """Save evaluation metrics to file"""
     results_file = os.path.join(output_dir, 'evaluation_metrics.txt')
     with open(results_file, 'w') as f:
@@ -579,8 +842,14 @@ def save_evaluation_metrics(trans_errors, rot_errors, output_dir):
         f.write(f"  Median: {np.median(rot_errors):.2f}\n")
         f.write(f"  95%:    {np.percentile(rot_errors, 95):.2f}\n")
         f.write(f"  Max:    {np.max(rot_errors):.2f}\n\n")
-        f.write("Note: High rotation error is expected due to Euler angle representation.\n")
-        f.write("Consider using quaternion representation for better results.\n")
+        f.write("Scale Drift (%):\n")
+        f.write(f"  Mean:   {np.mean(scale_errors):.2f}\n")
+        f.write(f"  Std:    {np.std(scale_errors):.2f}\n")
+        f.write(f"  Median: {np.median(scale_errors):.2f}\n")
+        f.write(f"  95%:    {np.percentile(scale_errors, 95):.2f}\n")
+        f.write(f"  Max:    {np.max(scale_errors):.2f}\n\n")
+        f.write("Note: Model uses quaternion representation for rotations.\n")
+        f.write("Errors are computed using geodesic distance on SO(3).\n")
     
     print(f"\n💾 Results saved to: {results_file}")
 
