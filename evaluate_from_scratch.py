@@ -183,6 +183,11 @@ def integrate_trajectory(relative_poses, initial_pose=None):
         current_position += world_trans
         current_rotation = current_rotation * rel_rotation
         
+        # Re-normalize quaternion to prevent numerical drift
+        current_quat = current_rotation.as_quat()
+        current_quat = current_quat / (np.linalg.norm(current_quat) + 1e-8)
+        current_rotation = R.from_quat(current_quat)
+        
         absolute_positions[i + 1] = current_position
         absolute_rotations[i + 1] = current_rotation.as_quat()
     
@@ -281,11 +286,11 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
             # Move to device
             images = batch['images'].to(device)
             imu = batch['imu'].to(device)
-            # NOTE: Gravity removal is now done in the dataset for consistency
+            # No gravity removal - let the network handle it (following TransVIO approach)
             gt_poses = batch['gt_poses'].to(device)
             
             # Get predictions
-            predictions = model({'images': images, 'imu': imu})  # {'poses': [B, 20, 7]}
+            predictions = model({'images': images, 'imu': imu, 'gt_poses': gt_poses})  # {'poses': [B, 20, 7]}
             pred_poses_batch = predictions['poses']  # [B, 20, 7]
             
             # Process each sample in batch

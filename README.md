@@ -126,7 +126,7 @@ python evaluate_from_scratch.py \
       --checkpoint checkpoints_from_scratch/best_model.pt \
       --data-dir aria_processed \
       --output-dir evaluation_from_scratch \
-      --batch-size 16 \
+      --batch-size 4 \
       --num-workers 4
 
 # 5. Monitor training
