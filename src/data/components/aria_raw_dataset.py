@@ -100,6 +100,35 @@ class AriaRawDataset(Dataset):
     def __len__(self):
         return len(self.samples)
     
+    def _remove_gravity(self, imu_window):
+        """Remove gravity bias from IMU accelerometer data
+        
+        Args:
+            imu_window: [110,6] tensor with (ax,ay,az,gx,gy,gz)
+        
+        Returns:
+            IMU tensor with gravity-bias removed from accelerometer
+        """
+        # Validate IMU format
+        assert imu_window.shape[1] == 6, f"IMU must have 6 channels (ax,ay,az,gx,gy,gz), got {imu_window.shape[1]}"
+        
+        # Extract accelerometer data
+        accel = imu_window[:, :3]  # [110, 3]
+        
+        # Reshape to compute per-frame bias (11 frames x 10 IMU samples per frame)
+        # Average across the 10 samples within each frame
+        accel_reshaped = accel.view(11, 10, 3)
+        bias = accel_reshaped.mean(dim=1, keepdim=True)  # [11, 1, 3]
+        
+        # Expand bias for each of the 10 samples in each frame
+        bias_expanded = bias.expand(11, 10, 3).reshape(110, 3)
+        
+        # Remove bias from accelerometer
+        accel_corrected = accel - bias_expanded
+        
+        # Concatenate back with gyroscope data
+        return torch.cat([accel_corrected, imu_window[:, 3:]], dim=-1)
+    
     def __getitem__(self, idx):
         sample = self.samples[idx]
         
@@ -116,6 +145,24 @@ class AriaRawDataset(Dataset):
         
         # Reshape to [110, 6]
         imu_110 = imu.reshape(-1, 6)  # [110, 6]
+        
+        # Validate IMU data has expected format (ax, ay, az, gx, gy, gz)
+        # Gyroscope values should be reasonable (< 10 rad/s typical, < 20 rad/s extreme)
+        gyro_data = imu_110[:, 3:]  # Extract gyroscope columns
+        gyro_magnitude = torch.norm(gyro_data, dim=-1)
+        if gyro_magnitude.max() > 20.0:
+            raise ValueError(f"Gyroscope values too large (max: {gyro_magnitude.max():.2f} rad/s). "
+                           f"Expected IMU format: (ax, ay, az, gx, gy, gz)")
+        
+        # Check accelerometer range (typical range is ±40 m/s² for Aria)
+        accel_data = imu_110[:, :3]
+        accel_magnitude = torch.norm(accel_data, dim=-1)
+        if accel_magnitude.max() > 100.0:
+            raise ValueError(f"Accelerometer values too large (max: {accel_magnitude.max():.2f} m/s²). "
+                           f"Expected IMU format: (ax, ay, az, gx, gy, gz)")
+        
+        # Remove gravity bias from accelerometer for consistent preprocessing
+        imu_110 = self._remove_gravity(imu_110)
         
         # Get ground truth poses
         poses = sample['poses']

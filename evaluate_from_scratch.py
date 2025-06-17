@@ -75,8 +75,18 @@ def load_checkpoint(checkpoint_path, device):
         else:
             new_state_dict[k] = v
     
+    # Handle missing keys for backward compatibility
+    model_state = model.state_dict()
+    for key in model_state.keys():
+        if key not in new_state_dict:
+            print(f"Warning: Missing key '{key}' in checkpoint, using default initialization")
+            new_state_dict[key] = model_state[key]
+    
     model.load_state_dict(new_state_dict)
     model.eval()
+    
+    # Enable assertions in eval mode
+    torch.autograd.set_detect_anomaly(True)
     
     print(f"\n📊 Model Information:")
     print(f"   Loaded checkpoint from epoch {checkpoint['epoch']}")
@@ -265,8 +275,7 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
             # Move to device
             images = batch['images'].to(device)
             imu = batch['imu'].to(device)
-            # NOTE: Commenting out gravity removal to match training preprocessing
-            # imu = remove_gravity(imu)
+            # NOTE: Gravity removal is now done in the dataset for consistency
             gt_poses = batch['gt_poses'].to(device)
             
             # Get predictions

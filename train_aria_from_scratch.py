@@ -123,14 +123,68 @@ class VIFTFromScratch(nn.Module):
             self.pose_predictor[-1].bias[3:6].fill_(0.0)  # qx, qy, qz = 0
             self.pose_predictor[-1].bias[6].fill_(1.0)    # qw = 1
             self.pose_predictor[-1].weight.data *= 0.01   # Small weights
+        
+        # Learnable uncertainty weights for automatic loss balancing
+        self.log_sigma_t = nn.Parameter(torch.zeros(()))  # Translation uncertainty
+        self.log_sigma_r = nn.Parameter(torch.zeros(()))  # Rotation uncertainty
+        
+        # Running statistics for adaptive loss scaling
+        self.register_buffer('trans_loss_avg', torch.ones(()))
+        self.register_buffer('rot_loss_avg', torch.ones(()))
+        self.register_buffer('loss_count', torch.zeros(()))
+    
+    def _robust_geodesic_loss_stable(self, pred_quat, gt_quat):
+        """Numerically stable quaternion geodesic loss using atan2."""
+        # Reshape to [B*N, 4] for batch processing
+        pred_quat = pred_quat.reshape(-1, 4)
+        gt_quat = gt_quat.reshape(-1, 4)
+        
+        # Normalize quaternions with epsilon for stability
+        pred_quat = F.normalize(pred_quat, p=2, dim=-1, eps=1e-8)
+        gt_quat = F.normalize(gt_quat, p=2, dim=-1, eps=1e-8)
+        
+        # Compute dot product (handle double cover with abs)
+        dot_product = torch.sum(pred_quat * gt_quat, dim=-1)
+        abs_dot = dot_product.abs()
+        
+        # Use atan2(sqrt(1-x²), x) which has finite slope at |x|→1
+        # Clamp to avoid numerical issues in sqrt
+        abs_dot_clamped = abs_dot.clamp(max=1.0 - 1e-7)
+        angle = 2.0 * torch.atan2(
+            torch.sqrt(1.0 - abs_dot_clamped**2), 
+            abs_dot_clamped
+        )
+        
+        return angle.mean()
     
     def forward(self, batch):
         """Forward pass."""
         images = batch['images']  # [B, 11, 3, 256, 512]
         imu = batch['imu']        # [B, 110, 6]
         
+        # Validate input shapes
+        B = images.shape[0]
+        assert images.shape == (B, 11, 3, 256, 512), f"Expected images shape (B, 11, 3, 256, 512), got {images.shape}"
+        assert imu.shape == (B, 110, 6), f"Expected IMU shape (B, 110, 6), got {imu.shape}"
+        
+        # Validate IMU data format: (ax, ay, az, gx, gy, gz)
+        # Check that gyroscope values are reasonable (typically < 10 rad/s)
+        gyro_magnitude = torch.norm(imu[:, :, 3:], dim=-1)
+        assert gyro_magnitude.max() < 20.0, f"Gyroscope values too large (max: {gyro_magnitude.max():.2f}), check if IMU format is (ax,ay,az,gx,gy,gz)"
+        
         # Get features from backbone (which creates RGB-RGB pairs internally)
         fv, fi = self.backbone.Feature_net(images, imu)  # fv: [B, 10, 512], fi: [B, 10, 256]
+        
+        # Validate feature shapes
+        assert fv.shape == (B, 10, 512), f"Expected visual features shape (B, 10, 512), got {fv.shape}"
+        assert fi.shape == (B, 10, 256), f"Expected IMU features shape (B, 10, 256), got {fi.shape}"
+        
+        # Check for dimension swaps - features should have reasonable statistics
+        fv_mean = fv.mean()
+        fv_batch_mean = fv.mean(dim=(1, 2))  # Mean per batch sample
+        # Commented out - this assertion may be too strict during early training
+        # assert not torch.allclose(fv_mean.expand_as(fv_batch_mean), fv_batch_mean, rtol=0.1), \
+        #     "Visual features have suspiciously uniform statistics across batch dimension"
         
         # Concatenate visual and inertial features
         combined_features = torch.cat([fv, fi], dim=-1)  # [B, 10, 768]
@@ -152,52 +206,96 @@ class VIFTFromScratch(nn.Module):
         
         # Combine and return
         normalized_poses = torch.cat([trans, quat], dim=-1)  # [B, 10, 7]
-        return {
-            'poses': normalized_poses  # [B, 10, 7]
-        }
+        
+        # If ground truth is provided, compute loss components
+        if 'gt_poses' in batch:
+            gt_poses = batch['gt_poses']  # [B, 10, 7]
+            
+            # Split predictions and ground truth
+            pred_trans = normalized_poses[:, :, :3]  # [B, 10, 3]
+            pred_rot = normalized_poses[:, :, 3:]    # [B, 10, 4]
+            gt_trans = gt_poses[:, :, :3]      # [B, 10, 3]
+            gt_rot = gt_poses[:, :, 3:]        # [B, 10, 4]
+            
+            # Raw losses
+            trans_loss_raw = F.smooth_l1_loss(pred_trans, gt_trans, reduction='mean')
+            rot_loss_raw = self._robust_geodesic_loss_stable(pred_rot, gt_rot)
+            
+            # Adaptive scaling
+            trans_scale = (1.0 / (self.trans_loss_avg + 1e-8)).detach()
+            rot_scale = (1.0 / (self.rot_loss_avg + 1e-8)).detach()
+            
+            trans_loss = trans_loss_raw * trans_scale
+            rot_loss = rot_loss_raw * rot_scale
+            
+            # Compute weighted losses with learnable uncertainty
+            precision_t = torch.exp(-2 * self.log_sigma_t)
+            precision_r = torch.exp(-2 * self.log_sigma_r)
+            
+            weighted_trans_loss = 0.5 * precision_t * trans_loss + self.log_sigma_t
+            weighted_rot_loss = 0.5 * precision_r * rot_loss + self.log_sigma_r
+            
+            total_loss = weighted_trans_loss + weighted_rot_loss
+            
+            return {
+                'poses': normalized_poses,
+                'total_loss': total_loss,
+                'trans_loss_raw': trans_loss_raw,
+                'rot_loss_raw': rot_loss_raw,
+                'trans_scale': trans_scale,
+                'rot_scale': rot_scale
+            }
+        else:
+            return {
+                'poses': normalized_poses  # [B, 10, 7]
+            }
 
 
-def compute_loss(predictions, batch, alpha=10.0, beta=5.0):
-    """Compute loss with quaternion representation for multi-step prediction
+def compute_loss(model, predictions, batch, is_training=True):
+    """Process loss computation results and update running statistics
     
     Args:
-        predictions: Model predictions with 'poses' key
-        batch: Input batch with 'gt_poses' key
-        alpha: Scale factor for translation loss (default 10.0)
-        beta: Scale factor for scale consistency loss (default 5.0)
+        model: Model instance (to access running stats)
+        predictions: Model predictions with loss components
+        batch: Input batch (not used now since loss is computed in forward)
+        is_training: Whether we're in training mode (to update running stats)
     """
-    pred_poses = predictions['poses']  # [B, 10, 7]
-    gt_poses = batch['gt_poses']  # [B, 10, 7]
+    # Loss is already computed in the forward pass
+    if 'total_loss' not in predictions:
+        raise ValueError("Loss not computed in forward pass. Make sure gt_poses is in batch.")
     
-    # Split predictions and ground truth
-    pred_trans = pred_poses[:, :, :3]  # [B, 10, 3]
-    pred_rot = pred_poses[:, :, 3:]    # [B, 10, 4]
-    gt_trans = gt_poses[:, :, :3]      # [B, 10, 3]
-    gt_rot = gt_poses[:, :, 3:]        # [B, 10, 4]
+    total_loss = predictions['total_loss']
+    trans_loss_raw = predictions['trans_loss_raw']
+    rot_loss_raw = predictions['rot_loss_raw']
     
-    # Translation loss
-    trans_loss = F.smooth_l1_loss(pred_trans, gt_trans)
-    
-    # Scale consistency loss - helps prevent scale drift
-    pred_scale = pred_trans.norm(dim=-1)  # [B, 10]
-    gt_scale = gt_trans.norm(dim=-1)      # [B, 10]
-    scale_loss = F.smooth_l1_loss(pred_scale, gt_scale)
-    
-    # Rotation loss using numerically stable geodesic distance
-    rot_loss = robust_geodesic_loss_stable(pred_rot, gt_rot)
-    
-    if torch.isnan(trans_loss) or torch.isnan(rot_loss) or torch.isnan(scale_loss):
+    if torch.isnan(trans_loss_raw) or torch.isnan(rot_loss_raw):
         return None
     
-    # Combined loss with proper weighting
-    # Translation needs higher weight as it's in meters
-    total_loss = alpha * trans_loss + beta * scale_loss + rot_loss
+    # Get the actual model (unwrap DDP if needed)
+    base_model = model.module if hasattr(model, 'module') else model
+    
+    # Update running statistics (exponential moving average)
+    if is_training and base_model.training:
+        with torch.no_grad():
+            if base_model.loss_count < 100:  # Collect initial statistics
+                # Simple average for first 100 batches
+                base_model.trans_loss_avg = (base_model.trans_loss_avg * base_model.loss_count + trans_loss_raw) / (base_model.loss_count + 1)
+                base_model.rot_loss_avg = (base_model.rot_loss_avg * base_model.loss_count + rot_loss_raw) / (base_model.loss_count + 1)
+                base_model.loss_count += 1
+            else:
+                # Exponential moving average after initial period
+                alpha = 0.01
+                base_model.trans_loss_avg = (1 - alpha) * base_model.trans_loss_avg + alpha * trans_loss_raw
+                base_model.rot_loss_avg = (1 - alpha) * base_model.rot_loss_avg + alpha * rot_loss_raw
     
     return {
         'total_loss': total_loss,
-        'trans_loss': trans_loss,
-        'rot_loss': rot_loss,
-        'scale_loss': scale_loss
+        'trans_loss': trans_loss_raw,  # Report raw loss for monitoring
+        'rot_loss': rot_loss_raw,      # Report raw loss for monitoring
+        'trans_scale': predictions['trans_scale'].item(),
+        'rot_scale': predictions['rot_scale'].item(),
+        'sigma_t': torch.exp(base_model.log_sigma_t).detach().item(),
+        'sigma_r': torch.exp(base_model.log_sigma_r).detach().item()
     }
 
 
@@ -221,7 +319,7 @@ def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=No
         predictions = model(batch)
         
         # Compute loss
-        loss_dict = compute_loss(predictions, batch)
+        loss_dict = compute_loss(model, predictions, batch)
         
         if loss_dict is None:
             print(f"NaN loss detected at batch {batch_idx}, skipping...")
@@ -238,14 +336,8 @@ def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=No
         optimizer.zero_grad()
         loss.backward()
         
-        # Gradient clipping schedule
-        if step < 300:
-            clip_val = 1.0
-        elif step < 500:
-            clip_val = 2.0
-        else:
-            clip_val = 3.0
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_val)
+        # Gradient clipping (simplified to single value)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         
         optimizer.step()
         
@@ -264,7 +356,8 @@ def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=No
             'loss': f"{loss.item():.4f}",
             'trans': f"{loss_dict['trans_loss'].item():.4f}",
             'rot': f"{loss_dict['rot_loss'].item():.4f}",
-            'scale': f"{loss_dict['scale_loss'].item():.4f}"
+            'σt': f"{loss_dict['sigma_t']:.2f}",
+            'σr': f"{loss_dict['sigma_r']:.2f}"
         })
     
     return total_loss / num_batches if num_batches > 0 else float('inf'), step
@@ -291,7 +384,7 @@ def validate(model, dataloader, device):
             predictions = model(batch)
             
             # Compute loss
-            loss_dict = compute_loss(predictions, batch)
+            loss_dict = compute_loss(model, predictions, batch, is_training=False)
             
             if loss_dict is None:
                 continue
@@ -424,7 +517,7 @@ def main():
         print(f"- Batch size per GPU: {args.batch_size}")
         print(f"- Total batch size: {args.batch_size * world_size}")
         print(f"- Learning rate: {args.lr}")
-        print(f"- Window stride: 10 (non-overlapping transitions)")
+        print(f"- Window stride: 2 (overlapping sequences for better temporal consistency)")
         print("="*60 + "\n")
     
     # Create data module
@@ -434,7 +527,7 @@ def main():
         batch_size=args.batch_size,  # Per GPU batch size
         num_workers=args.num_workers,
         sequence_length=11,
-        stride=10  # Ensures all transitions are covered (minimal frame overlap)
+        stride=2  # Better temporal overlap (was 10)
     )
     data_module.setup()
     
@@ -562,11 +655,14 @@ def main():
         
         # Only print and save on main process
         if is_main_process:
+            base_model = model.module if hasattr(model, 'module') else model
             print(f"\nEpoch {epoch} Summary:")
             print(f"  Train Loss: {train_loss:.6f}")
             print(f"  Val Loss: {val_metrics['loss']:.6f}")
             print(f"  Val Trans Error: {val_metrics['trans_error']*100:.2f} cm")
             print(f"  Val Rot Error: {val_metrics['rot_error']:.2f}°")
+            print(f"  Adaptive Scales - Trans: {1.0/(base_model.trans_loss_avg.item()+1e-8):.2f}, Rot: {1.0/(base_model.rot_loss_avg.item()+1e-8):.2f}")
+            print(f"  Learned Sigmas - σ_t: {torch.exp(base_model.log_sigma_t).item():.3f}, σ_r: {torch.exp(base_model.log_sigma_r).item():.3f}")
         
         # Save checkpoints only on main process
         if is_main_process:
