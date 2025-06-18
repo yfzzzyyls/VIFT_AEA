@@ -207,7 +207,8 @@ class AriaRawDataset(Dataset):
         accel_magnitude = torch.norm(accel_data, dim=-1)
         if accel_magnitude.max() > 100.0:
             import warnings
-            warnings.warn(f"Large accelerometer values detected in {self.sequence_names[index]}: "
+            seq_name = sample.get('seq_name', f'index_{idx}')
+            warnings.warn(f"Large accelerometer values detected in {seq_name}: "
                          f"max={accel_magnitude.max():.2f} m/s². These will be handled by runtime checks.")
         
         # Remove gravity bias from accelerometer for consistent preprocessing
