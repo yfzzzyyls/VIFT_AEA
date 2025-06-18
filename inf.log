@@ -1,3 +1,4 @@
+Warning: Plotly not available. Interactive HTML reports will be disabled.
 
 🖥️  Using device: cuda
 
@@ -6,67 +7,1976 @@ Evaluating VIFT Model Trained from Scratch
 ============================================================
 
 📊 Model Information:
-   Loaded checkpoint from epoch 18
-   Validation loss: 0.0747
-   Val translation error: 2.19 cm
-   Val rotation error: 4.19°
+   Loaded checkpoint from epoch 70
+   Validation loss: -3.0506
+   Val translation error: 2.99 cm
+   Val rotation error: 0.73°
+Found 4 sequences in aria_processed/test
+Created 3920 samples with window size 21
+
+Found test sequences: ['016', '017', '018', '019']
 
 📁 Test sequences: ['016', '017', '018', '019']
 Found 4 sequences in aria_processed/test
-Created 396 samples with window size 11
-📁 Test dataset loaded: 396 samples
+Created 3920 samples with window size 21
+📁 Test dataset loaded: 3920 samples
 
 🔍 Evaluating on test sequences...
-Processing batches:   0%|          | 0/25 [00:00<?, ?it/s]Processing batches:   4%|▍         | 1/25 [00:01<00:33,  1.39s/it]Processing batches:  12%|█▏        | 3/25 [00:01<00:10,  2.10it/s]Processing batches:  20%|██        | 5/25 [00:01<00:05,  3.55it/s]Processing batches:  28%|██▊       | 7/25 [00:02<00:03,  4.91it/s]Processing batches:  36%|███▌      | 9/25 [00:02<00:02,  6.11it/s]Processing batches:  44%|████▍     | 11/25 [00:02<00:01,  7.11it/s]Processing batches:  52%|█████▏    | 13/25 [00:02<00:01,  7.91it/s]Processing batches:  60%|██████    | 15/25 [00:02<00:01,  8.52it/s]Processing batches:  68%|██████▊   | 17/25 [00:03<00:00,  8.98it/s]Processing batches:  76%|███████▌  | 19/25 [00:03<00:00,  9.35it/s]Processing batches:  84%|████████▍ | 21/25 [00:03<00:00,  8.78it/s]Processing batches:  92%|█████████▏| 23/25 [00:03<00:00,  9.18it/s]Processing batches: 100%|██████████| 25/25 [00:03<00:00,  9.81it/s]Processing batches: 100%|██████████| 25/25 [00:03<00:00,  6.39it/s]
+   Using Sim(3) alignment for scale correction
+Processing batches:   0%|          | 0/980 [00:00<?, ?it/s]Processing batches:   0%|          | 1/980 [00:01<18:19,  1.12s/it]Processing batches:   0%|          | 2/980 [00:01<08:34,  1.90it/s]Processing batches:   0%|          | 3/980 [00:01<05:25,  3.00it/s]Processing batches:   1%|          | 5/980 [00:01<03:09,  5.15it/s]Processing batches:   1%|          | 6/980 [00:01<02:45,  5.90it/s]Processing batches:   1%|          | 7/980 [00:01<02:25,  6.67it/s]Processing batches:   1%|          | 8/980 [00:01<02:13,  7.26it/s]Processing batches:   1%|          | 9/980 [00:01<02:05,  7.76it/s]Processing batches:   1%|          | 10/980 [00:02<01:58,  8.15it/s]Processing batches:   1%|          | 12/980 [00:02<01:42,  9.41it/s]Processing batches:   1%|▏         | 13/980 [00:02<01:42,  9.42it/s]Processing batches:   1%|▏         | 14/980 [00:02<01:42,  9.41it/s]Processing batches:   2%|▏         | 16/980 [00:02<01:40,  9.55it/s]Processing batches:   2%|▏         | 17/980 [00:02<01:41,  9.48it/s]Processing batches:   2%|▏         | 18/980 [00:02<01:41,  9.46it/s]Processing batches:   2%|▏         | 20/980 [00:03<01:34, 10.20it/s]Processing batches:   2%|▏         | 22/980 [00:03<01:36,  9.91it/s]Processing batches:   2%|▏         | 24/980 [00:03<01:36,  9.86it/s]Processing batches:   3%|▎         | 25/980 [00:03<01:37,  9.75it/s]Processing batches:   3%|▎         | 26/980 [00:03<01:38,  9.68it/s]Processing batches:   3%|▎         | 28/980 [00:03<01:31, 10.35it/s]Processing batches:   3%|▎         | 30/980 [00:04<01:34, 10.02it/s][DBG] Seq 016 win 000  Δt_pred=[-0.00125405  0.00769989 -0.00548976]  Δt_gt=[-0.00158659 -0.0015403  -0.00043069]
+[DBG]   |Δt_pred|/|Δt_gt| = 4.234
+[DBG]   angle between pred and gt = 110.4°
+[ℹ️  Window] Seq 016 win    0  win_scale=  0.91
+[ℹ️  ΔT] mean_pred_jump= 1.16cm  mean_gt_jump= 1.28cm
+[DBG] Seq 016 win 001  Δt_pred=[-0.00074791  0.00494513 -0.00788032]  Δt_gt=[-0.00157798 -0.00266855 -0.00131026]
+[DBG]   |Δt_pred|/|Δt_gt| = 2.773
+[DBG]   angle between pred and gt = 93.1°
+[DBG] Seq 016 win 002  Δt_pred=[-0.00063503  0.00312262 -0.01214375]  Δt_gt=[-0.00343455 -0.01066989 -0.00289128]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.085
+[DBG]   angle between pred and gt = 88.4°
+[DBG] Seq 016 win 003  Δt_pred=[-0.00279711 -0.00208567 -0.00608908]  Δt_gt=[-0.00331696 -0.01542683 -0.00443269]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.428
+[DBG]   angle between pred and gt = 53.5°
+[DBG] Seq 016 win 004  Δt_pred=[-0.00138685 -0.00039318 -0.00867936]  Δt_gt=[-0.00433175 -0.00784939 -0.00458772]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.874
+[DBG]   angle between pred and gt = 56.5°
+[DBG] Seq 016 win 005  Δt_pred=[-0.00384187  0.00177125 -0.00520332]  Δt_gt=[-0.00575162 -0.00089943 -0.00485699]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.885
+[DBG]   angle between pred and gt = 25.8°
+[DBG] Seq 016 win 006  Δt_pred=[-0.00892888 -0.00395951 -0.00334401]  Δt_gt=[-0.01237541 -0.00259416 -0.00626643]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.732
+[DBG]   angle between pred and gt = 13.4°
+[DBG] Seq 016 win 007  Δt_pred=[-0.01491756 -0.00424848 -0.04054141]  Δt_gt=[-0.02280183 -0.01404734 -0.01321893]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.453
+[DBG]   angle between pred and gt = 43.8°
+[DBG] Seq 016 win 008  Δt_pred=[-0.01798161 -0.01573492 -0.00418926]  Δt_gt=[-0.01555176 -0.00912841 -0.01293448]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.093
+[DBG]   angle between pred and gt = 27.5°
+[DBG] Seq 016 win 009  Δt_pred=[-0.01296929 -0.00838683  0.0033045 ]  Δt_gt=[-0.00878349  0.00871383 -0.00868901]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.045
+[DBG]   angle between pred and gt = 87.1°
+[DBG] Seq 016 win 010  Δt_pred=[-0.00799173 -0.00519857  0.00698205]  Δt_gt=[-0.0039543   0.01337953 -0.00898478]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.712
+[DBG]   angle between pred and gt = 120.9°
+[ℹ️  Window] Seq 016 win   10  win_scale=  0.91
+[ℹ️  ΔT] mean_pred_jump= 1.53cm  mean_gt_jump= 1.69cm
+[DBG] Seq 016 win 011  Δt_pred=[-0.00723222 -0.00389068  0.0077057 ]  Δt_gt=[-0.00371438  0.01690378 -0.00741403]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.598
+[DBG]   angle between pred and gt = 116.9°
+[DBG] Seq 016 win 012  Δt_pred=[ 0.00381424  0.00071867 -0.00142385]  Δt_gt=[ 0.00383244  0.01856381 -0.00598726]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.208
+[DBG]   angle between pred and gt = 63.6°
+[DBG] Seq 016 win 013  Δt_pred=[ 0.00771614 -0.00681932  0.00050839]  Δt_gt=[ 0.00732252  0.01366034 -0.00603125]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.620
+[DBG]   angle between pred and gt = 103.4°
+[DBG] Seq 016 win 014  Δt_pred=[-0.00184811 -0.00403685  0.00740286]  Δt_gt=[ 0.00039915  0.01096646 -0.00495526]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.717
+[DBG]   angle between pred and gt = 141.8°
+[DBG] Seq 016 win 015  Δt_pred=[-0.00230437 -0.00318446  0.00559312]  Δt_gt=[-0.00027766  0.01035012 -0.0008958 ]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.658
+[DBG]   angle between pred and gt = 121.7°
+[DBG] Seq 016 win 016  Δt_pred=[ 0.00187098 -0.00072577  0.0007438 ]  Δt_gt=[0.00135004 0.00460154 0.00517533]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.303
+[DBG]   angle between pred and gt = 78.4°
+[DBG] Seq 016 win 017  Δt_pred=[ 0.00335378 -0.00030415  0.00165612]  Δt_gt=[0.00368939 0.00278528 0.00722889]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.437
+[DBG]   angle between pred and gt = 43.1°
+[DBG] Seq 016 win 018  Δt_pred=[ 0.00012012 -0.00224362 -0.0029402 ]  Δt_gt=[ 0.00111422 -0.00049555  0.00423785]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.839
+[DBG]   angle between pred and gt = 133.4°
+[DBG] Seq 016 win 019  Δt_pred=[ 0.00037235 -0.00360734 -0.00100455]  Δt_gt=[-0.00075497 -0.00788818  0.00305301]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.443
+[DBG]   angle between pred and gt = 38.2°
+[DBG] Seq 016 win 020  Δt_pred=[ 0.00592488 -0.00952807 -0.00400715]  Δt_gt=[ 0.00212415 -0.00832242  0.00500516]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.198
+[DBG]   angle between pred and gt = 52.7°
+[ℹ️  Window] Seq 016 win   20  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 2.37cm  mean_gt_jump= 2.32cm
+[DBG] Seq 016 win 021  Δt_pred=[ 0.00045261 -0.00917299  0.00682472]  Δt_gt=[0.00234689 0.0022463  0.00470399]
+[DBG]   |Δt_pred|/|Δt_gt| = 2.002
+[DBG]   angle between pred and gt = 78.9°
+[DBG] Seq 016 win 022  Δt_pred=[0.00573504 0.01654598 0.0209664 ]  Δt_gt=[0.01002289 0.03051673 0.00674186]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.832
+[DBG]   angle between pred and gt = 38.3°
+[DBG] Seq 016 win 023  Δt_pred=[0.03472588 0.05545565 0.0050454 ]  Δt_gt=[0.02363582 0.05492677 0.00728701]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.089
+[DBG]   angle between pred and gt = 9.1°
+[DBG] Seq 016 win 024  Δt_pred=[0.01067637 0.02957094 0.00971731]  Δt_gt=[0.01478144 0.04741479 0.00465561]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.660
+[DBG]   angle between pred and gt = 12.1°
+[DBG] Seq 016 win 025  Δt_pred=[0.01099523 0.02286019 0.00548241]  Δt_gt=[0.0011782  0.01669881 0.00443472]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.499
+[DBG]   angle between pred and gt = 21.2°
+[DBG] Seq 016 win 026  Δt_pred=[-0.0064455  -0.01593261  0.00930607]  Δt_gt=[-0.00312719 -0.00255043  0.0044716 ]
+[DBG]   |Δt_pred|/|Δt_gt| = 3.245
+[DBG]   angle between pred and gt = 29.6°
+[DBG] Seq 016 win 027  Δt_pred=[-0.00832712 -0.00896662  0.00580398]  Δt_gt=[-0.00536779 -0.01020566  0.00292751]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.138
+[DBG]   angle between pred and gt = 18.0°
+[DBG] Seq 016 win 028  Δt_pred=[-0.0045685  -0.00485022 -0.00017814]  Δt_gt=[-0.00401068 -0.00558176 -0.00065775]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.965
+[DBG]   angle between pred and gt = 8.5°
+[DBG] Seq 016 win 029  Δt_pred=[-0.0044933  -0.00309902 -0.00890882]  Δt_gt=[-0.00753966 -0.01006201 -0.00698976]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.726
+[DBG]   angle between pred and gt = 32.1°
+[ℹ️  Window] Seq 016 win   30  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 1.45cm  mean_gt_jump= 1.47cm
+[ℹ️  Window] Seq 016 win   40  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump= 2.52cm  mean_gt_jump= 2.19cm
+[ℹ️  Window] Seq 016 win   50  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 3.52cm  mean_gt_jump= 3.40cm
+[ℹ️  Window] Seq 016 win   60  win_scale=  1.00
+[ℹ️  ΔT] mean_pred_jump= 3.59cm  mean_gt_jump= 3.60cm
+[ℹ️  Window] Seq 016 win   70  win_scale=  0.90
+[ℹ️  ΔT] mean_pred_jump= 3.93cm  mean_gt_jump= 4.35cm
+[ℹ️  Window] Seq 016 win   80  win_scale=  0.84
+[ℹ️  ΔT] mean_pred_jump= 2.89cm  mean_gt_jump= 3.44cm
+[ℹ️  Window] Seq 016 win   90  win_scale=  0.95
+[ℹ️  ΔT] mean_pred_jump= 2.53cm  mean_gt_jump= 2.66cm
+[ℹ️  Window] Seq 016 win  100  win_scale=  0.95
+[ℹ️  ΔT] mean_pred_jump= 2.90cm  mean_gt_jump= 3.07cm
+[⚠️  Window]  Seq 016, start   108  T_err=  5.16 cm  R_err= 0.69°  Scale μ=66.45%
+[⚠️  Window]  Seq 016, start   109  T_err=  5.17 cm  R_err= 0.64°  Scale μ=60.66%
+[ℹ️  Window] Seq 016 win  110  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 5.60cm  mean_gt_jump= 5.71cm
+[⚠️  Window]  Seq 016, start   110  T_err=  5.11 cm  R_err= 0.67°  Scale μ=50.45%
+[⚠️  Window]  Seq 016, start   111  T_err=  5.07 cm  R_err= 0.71°  Scale μ=48.93%
+[⚠️  Window]  Seq 016, start   112  T_err=  5.05 cm  R_err= 0.75°  Scale μ=46.43%
+[⚠️  Window]  Seq 016, start   113  T_err=  5.09 cm  R_err= 0.73°  Scale μ=57.12%
+[⚠️  Window]  Seq 016, start   114  T_err=  5.01 cm  R_err= 0.74°  Scale μ=60.14%
+[⚠️  Window]  Seq 016, start   118  T_err=  5.03 cm  R_err= 1.29°  Scale μ=53.58%
+[⚠️  Window]  Seq 016, start   119  T_err=  5.18 cm  R_err= 1.30°  Scale μ=53.65%
+[ℹ️  Window] Seq 016 win  120  win_scale=  0.90
+[ℹ️  ΔT] mean_pred_jump= 6.00cm  mean_gt_jump= 6.63cm
+[⚠️  Window]  Seq 016, start   120  T_err=  5.31 cm  R_err= 1.30°  Scale μ=53.67%
+Processing batches:   3%|▎         | 32/980 [00:04<01:35,  9.94it/s]Processing batches:   3%|▎         | 33/980 [00:04<01:36,  9.83it/s]Processing batches:   3%|▎         | 34/980 [00:04<01:37,  9.75it/s]Processing batches:   4%|▎         | 36/980 [00:04<01:30, 10.39it/s]Processing batches:   4%|▍         | 38/980 [00:04<01:33, 10.03it/s]Processing batches:   4%|▍         | 40/980 [00:05<01:34,  9.94it/s]Processing batches:   4%|▍         | 41/980 [00:05<01:35,  9.83it/s]Processing batches:   4%|▍         | 42/980 [00:05<01:36,  9.75it/s]Processing batches:   4%|▍         | 43/980 [00:05<01:35,  9.79it/s]Processing batches:   5%|▍         | 45/980 [00:05<01:31, 10.25it/s]Processing batches:   5%|▍         | 47/980 [00:05<01:32, 10.12it/s]Processing batches:   5%|▌         | 49/980 [00:05<01:34,  9.86it/s]Processing batches:   5%|▌         | 50/980 [00:06<01:35,  9.78it/s]Processing batches:   5%|▌         | 51/980 [00:06<01:35,  9.73it/s]Processing batches:   5%|▌         | 53/980 [00:06<01:30, 10.27it/s]Processing batches:   6%|▌         | 55/980 [00:06<01:32, 10.05it/s]Processing batches:   6%|▌         | 57/980 [00:06<01:33,  9.83it/s]Processing batches:   6%|▌         | 58/980 [00:06<01:34,  9.75it/s]Processing batches:   6%|▌         | 60/980 [00:07<01:28, 10.39it/s]Processing batches:   6%|▋         | 62/980 [00:07<01:31, 10.01it/s]Processing batches:   7%|▋         | 64/980 [00:07<01:32,  9.90it/s]Processing batches:   7%|▋         | 65/980 [00:07<01:33,  9.80it/s]Processing batches:   7%|▋         | 66/980 [00:07<01:34,  9.72it/s]Processing batches:   7%|▋         | 68/980 [00:07<01:28, 10.34it/s]Processing batches:   7%|▋         | 70/980 [00:08<01:31,  9.97it/s]Processing batches:   7%|▋         | 72/980 [00:08<01:31,  9.90it/s]Processing batches:   7%|▋         | 73/980 [00:08<01:32,  9.77it/s]Processing batches:   8%|▊         | 74/980 [00:08<01:33,  9.69it/s]Processing batches:   8%|▊         | 76/980 [00:08<01:28, 10.27it/s]Processing batches:   8%|▊         | 78/980 [00:08<01:30,  9.96it/s]Processing batches:   8%|▊         | 79/980 [00:08<01:30,  9.97it/s]Processing batches:   8%|▊         | 80/980 [00:09<01:31,  9.82it/s]Processing batches:   8%|▊         | 81/980 [00:09<01:32,  9.67it/s]Processing batches:   8%|▊         | 82/980 [00:09<01:33,  9.56it/s]Processing batches:   9%|▊         | 84/980 [00:09<01:27, 10.27it/s]Processing batches:   9%|▉         | 86/980 [00:09<01:29,  9.93it/s]Processing batches:   9%|▉         | 88/980 [00:09<01:29, 10.00it/s]Processing batches:   9%|▉         | 89/980 [00:09<01:30,  9.88it/s]Processing batches:   9%|▉         | 90/980 [00:10<01:31,  9.77it/s]Processing batches:   9%|▉         | 91/980 [00:10<01:30,  9.78it/s]Processing batches:   9%|▉         | 93/980 [00:10<01:26, 10.21it/s]Processing batches:  10%|▉         | 95/980 [00:10<01:28, 10.01it/s]Processing batches:  10%|▉         | 96/980 [00:10<01:29,  9.82it/s]Processing batches:  10%|▉         | 97/980 [00:10<01:30,  9.71it/s]Processing batches:  10%|█         | 98/980 [00:10<01:31,  9.61it/s]Processing batches:  10%|█         | 100/980 [00:11<01:25, 10.30it/s]Processing batches:  10%|█         | 102/980 [00:11<01:28,  9.92it/s]Processing batches:  11%|█         | 104/980 [00:11<01:28,  9.87it/s]Processing batches:  11%|█         | 105/980 [00:11<01:29,  9.74it/s]Processing batches:  11%|█         | 106/980 [00:11<01:30,  9.68it/s]Processing batches:  11%|█         | 108/980 [00:11<01:24, 10.34it/s]Processing batches:  11%|█         | 110/980 [00:12<01:27,  9.93it/s]Processing batches:  11%|█▏        | 111/980 [00:12<01:27,  9.91it/s]Processing batches:  11%|█▏        | 112/980 [00:12<01:28,  9.78it/s]Processing batches:  12%|█▏        | 113/980 [00:12<01:29,  9.70it/s]Processing batches:  12%|█▏        | 114/980 [00:12<01:29,  9.63it/s]Processing batches:  12%|█▏        | 116/980 [00:12<01:22, 10.44it/s]Processing batches:  12%|█▏        | 118/980 [00:12<01:26,  9.97it/s]Processing batches:  12%|█▏        | 120/980 [00:13<01:26,  9.89it/s]Processing batches:  12%|█▏        | 121/980 [00:13<01:28,  9.76it/s]Processing batches:  12%|█▏        | 122/980 [00:13<01:28,  9.68it/s]Processing batches:  13%|█▎        | 124/980 [00:13<01:22, 10.32it/s]Processing batches:  13%|█▎        | 126/980 [00:13<01:25,  9.94it/s]Processing batches:  13%|█▎        | 128/980 [00:13<01:26,  9.88it/s]Processing batches:  13%|█▎        | 129/980 [00:14<01:27,  9.75it/s]Processing batches:  13%|█▎        | 130/980 [00:14<01:27,  9.68it/s]Processing batches:  13%|█▎        | 132/980 [00:14<01:22, 10.33it/s]Processing batches:  14%|█▎        | 134/980 [00:14<01:24,  9.96it/s]Processing batches:  14%|█▍        | 135/980 [00:14<01:24,  9.95it/s]Processing batches:  14%|█▍        | 136/980 [00:14<01:26,  9.79it/s]Processing batches:  14%|█▍        | 137/980 [00:14<01:27,  9.64it/s]Processing batches:  14%|█▍        | 138/980 [00:14<01:27,  9.59it/s]Processing batches:  14%|█▍        | 140/980 [00:15<01:21, 10.33it/s]Processing batches:  14%|█▍        | 142/980 [00:15<01:24,  9.97it/s]Processing batches:  15%|█▍        | 144/980 [00:15<01:24,  9.89it/s]Processing batches:  15%|█▍        | 145/980 [00:15<01:25,  9.75it/s]Processing batches:  15%|█▍        | 146/980 [00:15<01:26,  9.63it/s]Processing batches:  15%|█▌        | 148/980 [00:15<01:21, 10.25it/s]Processing batches:  15%|█▌        | 150/980 [00:16<01:23,  9.91it/s]Processing batches:  16%|█▌        | 152/980 [00:16<01:23,  9.86it/s]Processing batches:  16%|█▌        | 153/980 [00:16<01:24,  9.74it/s]Processing batches:  16%|█▌        | 154/980 [00:16<01:25,  9.63it/s]Processing batches:  16%|█▌        | 156/980 [00:16<01:20, 10.23it/s]Processing batches:  16%|█▌        | 158/980 [00:16<01:22,  9.93it/s]Processing batches:  16%|█▋        | 160/980 [00:17<01:23,  9.86it/s]Processing batches:  16%|█▋        | 161/980 [00:17<01:24,  9.73it/s]Processing batches:  17%|█▋        | 162/980 [00:17<01:24,  9.66it/s]Processing batches:  17%|█▋        | 164/980 [00:17<01:19, 10.26it/s]Processing batches:  17%|█▋        | 166/980 [00:17<01:21,  9.95it/s]Processing batches:  17%|█▋        | 168/980 [00:17<01:22,  9.89it/s]Processing batches:  17%|█▋        | 169/980 [00:18<01:23,  9.76it/s]Processing batches:  17%|█▋        | 170/980 [00:18<01:23,  9.69it/s]Processing batches:  18%|█▊        | 172/980 [00:18<01:19, 10.22it/s]Processing batches:  18%|█▊        | 174/980 [00:18<01:21,  9.84it/s]Processing batches:  18%|█▊        | 176/980 [00:18<01:22,  9.80it/s]Processing batches:  18%|█▊        | 177/980 [00:18<01:22,  9.72it/s]Processing batches:  18%|█▊        | 178/980 [00:18<01:23,  9.65it/s]Processing batches:  18%|█▊        | 180/980 [00:19<01:18, 10.21it/s]Processing batches:  19%|█▊        | 182/980 [00:19<01:20,  9.88it/s]Processing batches:  19%|█▉        | 184/980 [00:19<01:20,  9.86it/s]Processing batches:  19%|█▉        | 185/980 [00:19<01:21,  9.76it/s]Processing batches:  19%|█▉        | 186/980 [00:19<01:22,  9.65it/s]Processing batches:  19%|█▉        | 188/980 [00:19<01:18, 10.15it/s]Processing batches:  19%|█▉        | 190/980 [00:20<01:20,  9.86it/s]Processing batches:  20%|█▉        | 192/980 [00:20<01:20,  9.81it/s]Processing batches:  20%|█▉        | 193/980 [00:20<01:21,  9.70it/s]Processing batches:  20%|█▉        | 194/980 [00:20<01:21,  9.64it/s]Processing batches:  20%|██        | 196/980 [00:20<01:17, 10.07it/s]Processing batches:  20%|██        | 197/980 [00:20<01:19,  9.89it/s]Processing batches:  20%|██        | 198/980 [00:21<01:20,  9.76it/s]Processing batches:  20%|██        | 199/980 [00:21<01:21,  9.62it/s]Processing batches:  20%|██        | 200/980 [00:21<01:21,  9.56it/s]Processing batches:  21%|██        | 201/980 [00:21<01:21,  9.53it/s]Processing batches:  21%|██        | 202/980 [00:21<01:21,  9.52it/s]Processing batches:  21%|██        | 204/980 [00:21<01:15, 10.28it/s]Processing batches:  21%|██        | 206/980 [00:21<01:18,  9.92it/s]Processing batches:  21%|██        | 207/980 [00:21<01:19,  9.78it/s][⚠️  Window]  Seq 016, start   121  T_err=  5.39 cm  R_err= 1.32°  Scale μ=53.73%
+[⚠️  Window]  Seq 016, start   122  T_err=  5.34 cm  R_err= 1.34°  Scale μ=54.55%
+[⚠️  Window]  Seq 016, start   123  T_err=  5.28 cm  R_err= 1.37°  Scale μ=69.23%
+[⚠️  Window]  Seq 016, start   124  T_err=  5.07 cm  R_err= 1.36°  Scale μ=67.51%
+[ℹ️  Window] Seq 016 win  130  win_scale=  0.83
+[ℹ️  ΔT] mean_pred_jump= 3.26cm  mean_gt_jump= 3.91cm
+[ℹ️  Window] Seq 016 win  140  win_scale=  0.96
+[ℹ️  ΔT] mean_pred_jump= 2.96cm  mean_gt_jump= 3.09cm
+[ℹ️  Window] Seq 016 win  150  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 3.20cm  mean_gt_jump= 3.27cm
+[ℹ️  Window] Seq 016 win  160  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 2.67cm  mean_gt_jump= 2.69cm
+[ℹ️  Window] Seq 016 win  170  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump= 1.81cm  mean_gt_jump= 1.79cm
+[ℹ️  Window] Seq 016 win  180  win_scale=  1.05
+[ℹ️  ΔT] mean_pred_jump= 1.01cm  mean_gt_jump= 0.97cm
+[ℹ️  Window] Seq 016 win  190  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump= 0.81cm  mean_gt_jump= 0.81cm
+[ℹ️  Window] Seq 016 win  200  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 1.67cm  mean_gt_jump= 1.69cm
+[ℹ️  Window] Seq 016 win  210  win_scale=  1.00
+[ℹ️  ΔT] mean_pred_jump= 3.95cm  mean_gt_jump= 3.94cm
+[ℹ️  Window] Seq 016 win  220  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 6.12cm  mean_gt_jump= 5.98cm
+[ℹ️  Window] Seq 016 win  230  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump= 4.54cm  mean_gt_jump= 4.14cm
+[ℹ️  Window] Seq 016 win  240  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 1.67cm  mean_gt_jump= 1.57cm
+[ℹ️  Window] Seq 016 win  250  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 1.05cm  mean_gt_jump= 0.99cm
+[ℹ️  Window] Seq 016 win  260  win_scale=  1.00
+[ℹ️  ΔT] mean_pred_jump= 1.41cm  mean_gt_jump= 1.41cm
+[ℹ️  Window] Seq 016 win  270  win_scale=  0.92
+[ℹ️  ΔT] mean_pred_jump= 1.63cm  mean_gt_jump= 1.77cm
+[ℹ️  Window] Seq 016 win  280  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump= 1.23cm  mean_gt_jump= 1.15cm
+[ℹ️  Window] Seq 016 win  290  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.84cm  mean_gt_jump= 0.80cm
+[ℹ️  Window] Seq 016 win  300  win_scale=  0.89
+[ℹ️  ΔT] mean_pred_jump= 0.68cm  mean_gt_jump= 0.77cm
+[ℹ️  Window] Seq 016 win  310  win_scale=  0.84
+[ℹ️  ΔT] mean_pred_jump= 0.55cm  mean_gt_jump= 0.66cm
+[ℹ️  Window] Seq 016 win  320  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.45cm  mean_gt_jump= 0.43cm
+[ℹ️  Window] Seq 016 win  330  win_scale=  1.13
+[ℹ️  ΔT] mean_pred_jump= 0.94cm  mean_gt_jump= 0.84cm
+[ℹ️  Window] Seq 016 win  340  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 1.58cm  mean_gt_jump= 1.49cm
+[ℹ️  Window] Seq 016 win  350  win_scale=  0.92
+[ℹ️  ΔT] mean_pred_jump= 2.16cm  mean_gt_jump= 2.36cm
+[ℹ️  Window] Seq 016 win  360  win_scale=  0.88
+[ℹ️  ΔT] mean_pred_jump= 3.10cm  mean_gt_jump= 3.51cm
+[ℹ️  Window] Seq 016 win  370  win_scale=  0.90
+[ℹ️  ΔT] mean_pred_jump= 3.12cm  mean_gt_jump= 3.48cm
+[ℹ️  Window] Seq 016 win  380  win_scale=  0.88
+[ℹ️  ΔT] mean_pred_jump= 2.14cm  mean_gt_jump= 2.44cm
+[ℹ️  Window] Seq 016 win  390  win_scale=  0.78
+[ℹ️  ΔT] mean_pred_jump= 1.25cm  mean_gt_jump= 1.60cm
+[ℹ️  Window] Seq 016 win  400  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 1.16cm  mean_gt_jump= 1.19cm
+[ℹ️  Window] Seq 016 win  410  win_scale=  0.91
+[ℹ️  ΔT] mean_pred_jump= 1.06cm  mean_gt_jump= 1.17cm
+[ℹ️  Window] Seq 016 win  420  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.76cm  mean_gt_jump= 0.73cm
+[ℹ️  Window] Seq 016 win  430  win_scale=  0.94
+[ℹ️  ΔT] mean_pred_jump= 0.27cm  mean_gt_jump= 0.29cm
+[ℹ️  Window] Seq 016 win  440  win_scale=  1.05
+[ℹ️  ΔT] mean_pred_jump= 0.20cm  mean_gt_jump= 0.19cm
+[ℹ️  Window] Seq 016 win  450  win_scale=  1.16
+[ℹ️  ΔT] mean_pred_jump= 0.27cm  mean_gt_jump= 0.23cm
+[ℹ️  Window] Seq 016 win  460  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 0.29cm  mean_gt_jump= 0.30cm
+[ℹ️  Window] Seq 016 win  470  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump= 1.30cm  mean_gt_jump= 1.21cm
+[ℹ️  Window] Seq 016 win  480  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump= 2.81cm  mean_gt_jump= 2.78cm
+[ℹ️  Window] Seq 016 win  490  win_scale=  0.95
+[ℹ️  ΔT] mean_pred_jump= 2.27cm  mean_gt_jump= 2.39cm
+[ℹ️  Window] Seq 016 win  500  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 1.38cm  mean_gt_jump= 1.42cm
+[ℹ️  Window] Seq 016 win  510  win_scale=  0.85
+[ℹ️  ΔT] mean_pred_jump= 1.09cm  mean_gt_jump= 1.28cm
+[ℹ️  Window] Seq 016 win  520  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 1.09cm  mean_gt_jump= 1.10cm
+[ℹ️  Window] Seq 016 win  530  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 1.05cm  mean_gt_jump= 1.07cm
+[ℹ️  Window] Seq 016 win  540  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 0.86cm  mean_gt_jump= 0.88cm
+[ℹ️  Window] Seq 016 win  550  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 0.58cm  mean_gt_jump= 0.54cm
+[ℹ️  Window] Seq 016 win  560  win_scale=  1.00
+[ℹ️  ΔT] mean_pred_jump= 2.69cm  mean_gt_jump= 2.69cm
+[ℹ️  Window] Seq 016 win  570  win_scale=  0.94
+[ℹ️  ΔT] mean_pred_jump= 3.51cm  mean_gt_jump= 3.73cm
+[ℹ️  Window] Seq 016 win  580  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 4.33cm  mean_gt_jump= 4.37cm
+[ℹ️  Window] Seq 016 win  590  win_scale=  0.95
+[ℹ️  ΔT] mean_pred_jump= 5.85cm  mean_gt_jump= 6.17cm
+[ℹ️  Window] Seq 016 win  600  win_scale=  0.84
+[ℹ️  ΔT] mean_pred_jump= 4.78cm  mean_gt_jump= 5.72cm
+[ℹ️  Window] Seq 016 win  610  win_scale=  0.95
+[ℹ️  ΔT] mean_pred_jump= 5.34cm  mean_gt_jump= 5.61cm
+[ℹ️  Window] Seq 016 win  620  win_scale=  0.91
+[ℹ️  ΔT] mean_pred_jump= 5.19cm  mean_gt_jump= 5.73cm
+[ℹ️  Window] Seq 016 win  630  win_scale=  0.96
+[ℹ️  ΔT] mean_pred_jump= 5.01cm  mean_gt_jump= 5.23cm
+[ℹ️  Window] Seq 016 win  640  win_scale=  1.05
+[ℹ️  ΔT] mean_pred_jump= 4.04cm  mean_gt_jump= 3.83cm
+[ℹ️  Window] Seq 016 win  650  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump= 2.95cm  mean_gt_jump= 3.03cm
+[ℹ️  Window] Seq 016 win  660  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 3.25cm  mean_gt_jump= 3.29cm
+[ℹ️  Window] Seq 016 win  670  win_scale=  0.88
+[ℹ️  ΔT] mean_pred_jump= 3.78cm  mean_gt_jump= 4.30cm
+[ℹ️  Window] Seq 016 win  680  win_scale=  0.96
+[ℹ️  ΔT] mean_pred_jump= 4.51cm  mean_gt_jump= 4.68cm
+[ℹ️  Window] Seq 016 win  690  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump= 3.70cm  mean_gt_jump= 3.80cm
+[ℹ️  Window] Seq 016 win  700  win_scale=  1.16
+[ℹ️  ΔT] mean_pred_jump= 2.67cm  mean_gt_jump= 2.31cm
+[ℹ️  Window] Seq 016 win  710  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 0.94cm  mean_gt_jump= 0.97cm
+[ℹ️  Window] Seq 016 win  720  win_scale=  0.96
+[ℹ️  ΔT] mean_pred_jump= 0.74cm  mean_gt_jump= 0.77cm
+[ℹ️  Window] Seq 016 win  730  win_scale=  0.94
+[ℹ️  ΔT] mean_pred_jump= 0.54cm  mean_gt_jump= 0.57cm
+[ℹ️  Window] Seq 016 win  740  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 0.50cm  mean_gt_jump= 0.51cm
+[ℹ️  Window] Seq 016 win  750  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 0.55cm  mean_gt_jump= 0.56cm
+[ℹ️  Window] Seq 016 win  760  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 0.43cm  mean_gt_jump= 0.44cm
+[ℹ️  Window] Seq 016 win  770  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 0.30cm  mean_gt_jump= 0.29cm
+[ℹ️  Window] Seq 016 win  780  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 0.26cm  mean_gt_jump= 0.25cm
+[ℹ️  Window] Seq 016 win  790  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 2.30cm  mean_gt_jump= 2.25cm
+[ℹ️  Window] Seq 016 win  800  win_scale=  0.87
+[ℹ️  ΔT] mean_pred_jump= 3.33cm  mean_gt_jump= 3.84cm
+[ℹ️  Window] Seq 016 win  810  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 4.07cm  mean_gt_jump= 3.85cm
+[ℹ️  Window] Seq 016 win  820  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump= 3.09cm  mean_gt_jump= 2.88cm
+[ℹ️  Window] Seq 016 win  830  win_scale=  0.97
+Processing batches:  21%|██        | 208/980 [00:22<01:19,  9.69it/s]Processing batches:  21%|██▏       | 209/980 [00:22<01:20,  9.62it/s]Processing batches:  21%|██▏       | 210/980 [00:22<01:20,  9.56it/s]Processing batches:  22%|██▏       | 212/980 [00:22<01:14, 10.25it/s]Processing batches:  22%|██▏       | 214/980 [00:22<01:16, 10.00it/s]Processing batches:  22%|██▏       | 215/980 [00:22<01:17,  9.88it/s]Processing batches:  22%|██▏       | 216/980 [00:22<01:18,  9.76it/s]Processing batches:  22%|██▏       | 217/980 [00:22<01:19,  9.62it/s]Processing batches:  22%|██▏       | 218/980 [00:23<01:19,  9.54it/s]Processing batches:  22%|██▏       | 220/980 [00:23<01:13, 10.28it/s]Processing batches:  23%|██▎       | 222/980 [00:23<01:15, 10.05it/s]Processing batches:  23%|██▎       | 223/980 [00:23<01:17,  9.83it/s]Processing batches:  23%|██▎       | 224/980 [00:23<01:17,  9.71it/s]Processing batches:  23%|██▎       | 225/980 [00:23<01:18,  9.60it/s]Processing batches:  23%|██▎       | 226/980 [00:23<01:19,  9.53it/s]Processing batches:  23%|██▎       | 228/980 [00:24<01:11, 10.47it/s]Processing batches:  23%|██▎       | 230/980 [00:24<01:13, 10.16it/s]Processing batches:  24%|██▎       | 232/980 [00:24<01:15,  9.87it/s]Processing batches:  24%|██▍       | 233/980 [00:24<01:16,  9.76it/s]Processing batches:  24%|██▍       | 234/980 [00:24<01:17,  9.66it/s]Processing batches:  24%|██▍       | 236/980 [00:24<01:12, 10.29it/s]Processing batches:  24%|██▍       | 238/980 [00:25<01:13, 10.05it/s]Processing batches:  24%|██▍       | 239/980 [00:25<01:14,  9.91it/s]Processing batches:  24%|██▍       | 240/980 [00:25<01:15,  9.79it/s]Processing batches:  25%|██▍       | 241/980 [00:25<01:16,  9.72it/s]Processing batches:  25%|██▍       | 243/980 [00:25<01:10, 10.43it/s]Processing batches:  25%|██▌       | 245/980 [00:25<01:13, 10.05it/s]Processing batches:  25%|██▌       | 247/980 [00:25<01:14,  9.85it/s]Processing batches:  25%|██▌       | 248/980 [00:26<01:15,  9.73it/s]Processing batches:  25%|██▌       | 249/980 [00:26<01:15,  9.63it/s]Processing batches:  26%|██▌       | 251/980 [00:26<01:11, 10.13it/s]Processing batches:  26%|██▌       | 253/980 [00:26<01:14,  9.81it/s]Processing batches:  26%|██▌       | 254/980 [00:26<01:13,  9.83it/s]Processing batches:  26%|██▌       | 255/980 [00:26<01:14,  9.73it/s]Processing batches:  26%|██▌       | 256/980 [00:26<01:15,  9.65it/s]Processing batches:  26%|██▌       | 257/980 [00:26<01:15,  9.54it/s]Processing batches:  26%|██▋       | 259/980 [00:27<01:10, 10.26it/s][ℹ️  ΔT] mean_pred_jump= 2.32cm  mean_gt_jump= 2.40cm
+[ℹ️  Window] Seq 016 win  840  win_scale=  0.85
+[ℹ️  ΔT] mean_pred_jump= 2.41cm  mean_gt_jump= 2.82cm
+[ℹ️  Window] Seq 016 win  850  win_scale=  1.16
+[ℹ️  ΔT] mean_pred_jump= 1.65cm  mean_gt_jump= 1.43cm
+[ℹ️  Window] Seq 016 win  860  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump= 0.37cm  mean_gt_jump= 0.38cm
+[ℹ️  Window] Seq 016 win  870  win_scale=  0.94
+[ℹ️  ΔT] mean_pred_jump= 0.23cm  mean_gt_jump= 0.24cm
+[ℹ️  Window] Seq 016 win  880  win_scale=  1.08
+[ℹ️  ΔT] mean_pred_jump= 1.50cm  mean_gt_jump= 1.38cm
+[ℹ️  Window] Seq 016 win  890  win_scale=  1.00
+[ℹ️  ΔT] mean_pred_jump= 3.32cm  mean_gt_jump= 3.33cm
+[ℹ️  Window] Seq 016 win  900  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 3.28cm  mean_gt_jump= 3.19cm
+[ℹ️  Window] Seq 016 win  910  win_scale=  0.87
+[ℹ️  ΔT] mean_pred_jump= 1.51cm  mean_gt_jump= 1.74cm
+[ℹ️  Window] Seq 016 win  920  win_scale=  0.82
+[ℹ️  ΔT] mean_pred_jump= 1.40cm  mean_gt_jump= 1.71cm
+[ℹ️  Window] Seq 016 win  930  win_scale=  0.95
+[ℹ️  ΔT] mean_pred_jump= 1.92cm  mean_gt_jump= 2.02cm
+[ℹ️  Window] Seq 016 win  940  win_scale=  1.33
+[ℹ️  ΔT] mean_pred_jump= 1.61cm  mean_gt_jump= 1.21cm
+[ℹ️  Window] Seq 016 win  950  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump= 0.47cm  mean_gt_jump= 0.49cm
+[ℹ️  Window] Seq 016 win  960  win_scale=  0.96
+[ℹ️  ΔT] mean_pred_jump= 0.30cm  mean_gt_jump= 0.32cm
+[ℹ️  Window] Seq 016 win  970  win_scale=  0.94
+[ℹ️  ΔT] mean_pred_jump= 0.18cm  mean_gt_jump= 0.19cm
+[DBG] Seq 017 win 000  Δt_pred=[-0.00038366  0.01058293 -0.02783158]  Δt_gt=[-0.01466808 -0.00164645 -0.00854901]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.746
+[DBG]   angle between pred and gt = 63.6°
+[ℹ️  Window] Seq 017 win    0  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump= 3.28cm  mean_gt_jump= 3.06cm
+[DBG] Seq 017 win 001  Δt_pred=[ 0.00051907  0.00991062 -0.02995332]  Δt_gt=[-0.01627595 -0.0036643  -0.01145121]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.559
+[DBG]   angle between pred and gt = 62.2°
+[DBG] Seq 017 win 002  Δt_pred=[ 0.00206481  0.00546548 -0.03164361]  Δt_gt=[-0.01840873 -0.00386406 -0.01405409]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.370
+[DBG]   angle between pred and gt = 59.3°
+[DBG] Seq 017 win 003  Δt_pred=[-0.00138044 -0.01927475 -0.02104605]  Δt_gt=[-0.03704613 -0.00522548 -0.03139464]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.585
+[DBG]   angle between pred and gt = 54.4°
+[DBG] Seq 017 win 004  Δt_pred=[ 0.00588058 -0.00656842 -0.02629844]  Δt_gt=[-0.01449763  0.0018553  -0.01528216]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.312
+[DBG]   angle between pred and gt = 58.7°
+[DBG] Seq 017 win 005  Δt_pred=[ 0.01154852  0.0052053  -0.01922908]  Δt_gt=[-0.01064426  0.00498364 -0.01468453]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.224
+[DBG]   angle between pred and gt = 64.7°
+[DBG] Seq 017 win 006  Δt_pred=[ 0.01588536  0.02337673 -0.00710534]  Δt_gt=[-0.001639    0.01167453 -0.02848715]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.945
+[DBG]   angle between pred and gt = 60.0°
+[DBG] Seq 017 win 007  Δt_pred=[ 0.01445687  0.03474606 -0.00528404]  Δt_gt=[ 0.00895514  0.01024122 -0.01291691]
+[DBG]   |Δt_pred|/|Δt_gt| = 2.026
+[DBG]   angle between pred and gt = 39.1°
+[DBG] Seq 017 win 008  Δt_pred=[ 0.0140772   0.03865784 -0.0084473 ]  Δt_gt=[ 0.01457483  0.01658184 -0.01032368]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.723
+[DBG]   angle between pred and gt = 24.2°
+[DBG] Seq 017 win 009  Δt_pred=[ 0.01225841  0.04969217 -0.01605795]  Δt_gt=[ 0.04716159  0.04808845 -0.01036969]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.787
+[DBG]   angle between pred and gt = 31.0°
+[DBG] Seq 017 win 010  Δt_pred=[ 0.01459926  0.03995125 -0.00157212]  Δt_gt=[0.02822812 0.03104426 0.00256921]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.013
+[DBG]   angle between pred and gt = 22.9°
+[ℹ️  Window] Seq 017 win   10  win_scale=  1.11
+[ℹ️  ΔT] mean_pred_jump= 2.62cm  mean_gt_jump= 2.36cm
+[DBG] Seq 017 win 011  Δt_pred=[0.01649202 0.04255595 0.0024071 ]  Δt_gt=[0.02727971 0.03148375 0.00762452]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.079
+[DBG]   angle between pred and gt = 20.9°
+[DBG] Seq 017 win 012  Δt_pred=[0.01288747 0.02303553 0.04601763]  Δt_gt=[0.038155   0.05322186 0.02822153]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.744
+[DBG]   angle between pred and gt = 37.1°
+[DBG] Seq 017 win 013  Δt_pred=[0.00904709 0.0080004  0.01872038]  Δt_gt=[0.00897067 0.01951639 0.02064424]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.748
+[DBG]   angle between pred and gt = 20.0°
+[DBG] Seq 017 win 014  Δt_pred=[0.01767839 0.00139468 0.03970648]  Δt_gt=[0.01063639 0.01876005 0.01753203]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.565
+[DBG]   angle between pred and gt = 41.1°
+[DBG] Seq 017 win 015  Δt_pred=[ 0.01559702 -0.00611609  0.03834527]  Δt_gt=[0.01155319 0.03155501 0.03160853]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.907
+[DBG]   angle between pred and gt = 51.6°
+[DBG] Seq 017 win 016  Δt_pred=[-0.00152653 -0.00577685  0.01876032]  Δt_gt=[0.00214587 0.00999072 0.01353452]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.161
+[DBG]   angle between pred and gt = 54.7°
+[DBG] Seq 017 win 017  Δt_pred=[-0.00090945  0.00972077  0.01483009]  Δt_gt=[0.00288272 0.00758842 0.01088062]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.308
+[DBG]   angle between pred and gt = 15.3°
+[DBG] Seq 017 win 018  Δt_pred=[0.00473247 0.01510725 0.00572989]  Δt_gt=[0.00324681 0.00640667 0.0080118 ]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.565
+[DBG]   angle between pred and gt = 29.2°
+[DBG] Seq 017 win 019  Δt_pred=[0.0101629  0.00924698 0.02465187]  Δt_gt=[0.01545043 0.01146203 0.00606549]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.399
+[DBG]   angle between pred and gt = 43.6°
+[DBG] Seq 017 win 020  Δt_pred=[ 0.00875895  0.01366582 -0.00595782]  Δt_gt=[ 0.00655535  0.00402988 -0.00189296]
+[DBG]   |Δt_pred|/|Δt_gt| = 2.182
+[DBG]   angle between pred and gt = 25.4°
+[ℹ️  Window] Seq 017 win   20  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 1.35cm  mean_gt_jump= 1.31cm
+[DBG] Seq 017 win 021  Δt_pred=[ 0.00944589  0.00618671 -0.00382597]  Δt_gt=[ 0.00571608  0.00518505 -0.00441522]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.341
+[DBG]   angle between pred and gt = 13.7°
+[DBG] Seq 017 win 022  Δt_pred=[ 0.007033    0.00785119 -0.00415944]  Δt_gt=[ 0.01304673  0.01340384 -0.01383854]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.487
+[DBG]   angle between pred and gt = 15.1°
+[DBG] Seq 017 win 023  Δt_pred=[ 0.01117904  0.01435696 -0.01016285]  Δt_gt=[ 0.00860167  0.00753406 -0.00883378]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.442
+[DBG]   angle between pred and gt = 12.4°
+[DBG] Seq 017 win 024  Δt_pred=[ 0.01099462  0.01804411 -0.01516254]  Δt_gt=[ 0.00860169  0.00792183 -0.00992745]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.695
+[DBG]   angle between pred and gt = 13.4°
+[DBG] Seq 017 win 025  Δt_pred=[ 0.00591828  0.00887125 -0.02340142]  Δt_gt=[ 0.01608233  0.01635164 -0.01965737]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.851
+[DBG]   angle between pred and gt = 25.7°
+[DBG] Seq 017 win 026  Δt_pred=[ 0.00836055  0.00953433 -0.01415039]  Δt_gt=[ 0.00855559  0.00799588 -0.00897822]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.288
+[DBG]   angle between pred and gt = 11.4°
+[DBG] Seq 017 win 027  Δt_pred=[ 0.0054019   0.00199471 -0.00851683]  Δt_gt=[ 0.00806583  0.00692336 -0.00838367]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.759
+[DBG]   angle between pred and gt = 22.3°
+[DBG] Seq 017 win 028  Δt_pred=[ 0.00214353 -0.00258604 -0.00373507]  Δt_gt=[ 0.0104511   0.00755914 -0.01488073]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.255
+[DBG]   angle between pred and gt = 53.8°
+[DBG] Seq 017 win 029  Δt_pred=[ 0.00137147  0.00092678 -0.00372972]  Δt_gt=[-0.00049353 -0.00110211 -0.00336414]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.142
+[DBG]   angle between pred and gt = 41.9°
+[ℹ️  Window] Seq 017 win   30  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump= 0.94cm  mean_gt_jump= 0.88cm
+[ℹ️  Window] Seq 017 win   40  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump= 0.56cm  mean_gt_jump= 0.49cm
+[ℹ️  Window] Seq 017 win   50  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.36cm  mean_gt_jump= 0.35cm
+[ℹ️  Window] Seq 017 win   60  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 0.44cm  mean_gt_jump= 0.43cm
+Processing batches:  27%|██▋       | 261/980 [00:27<01:12,  9.93it/s]Processing batches:  27%|██▋       | 263/980 [00:27<01:12,  9.85it/s]Processing batches:  27%|██▋       | 264/980 [00:27<01:13,  9.73it/s]Processing batches:  27%|██▋       | 265/980 [00:27<01:13,  9.67it/s]Processing batches:  27%|██▋       | 267/980 [00:27<01:09, 10.33it/s]Processing batches:  27%|██▋       | 269/980 [00:28<01:11,  9.99it/s]Processing batches:  28%|██▊       | 271/980 [00:28<01:11,  9.91it/s]Processing batches:  28%|██▊       | 272/980 [00:28<01:12,  9.81it/s]Processing batches:  28%|██▊       | 273/980 [00:28<01:12,  9.73it/s]Processing batches:  28%|██▊       | 274/980 [00:28<01:12,  9.78it/s]Processing batches:  28%|██▊       | 276/980 [00:28<01:07, 10.40it/s]Processing batches:  28%|██▊       | 278/980 [00:29<01:09, 10.13it/s]Processing batches:  29%|██▊       | 280/980 [00:29<01:10,  9.86it/s]Processing batches:  29%|██▊       | 281/980 [00:29<01:11,  9.79it/s]Processing batches:  29%|██▉       | 282/980 [00:29<01:11,  9.79it/s]Processing batches:  29%|██▉       | 284/980 [00:29<01:06, 10.41it/s]Processing batches:  29%|██▉       | 286/980 [00:29<01:08, 10.17it/s]Processing batches:  29%|██▉       | 288/980 [00:30<01:09,  9.89it/s]Processing batches:  29%|██▉       | 289/980 [00:30<01:10,  9.77it/s]Processing batches:  30%|██▉       | 290/980 [00:30<01:10,  9.77it/s]Processing batches:  30%|██▉       | 292/980 [00:30<01:06, 10.38it/s]Processing batches:  30%|███       | 294/980 [00:30<01:07, 10.17it/s]Processing batches:  30%|███       | 296/980 [00:30<01:09,  9.90it/s]Processing batches:  30%|███       | 297/980 [00:31<01:09,  9.81it/s]Processing batches:  30%|███       | 298/980 [00:31<01:09,  9.78it/s]Processing batches:  31%|███       | 300/980 [00:31<01:04, 10.50it/s]Processing batches:  31%|███       | 302/980 [00:31<01:06, 10.18it/s]Processing batches:  31%|███       | 304/980 [00:31<01:08,  9.90it/s]Processing batches:  31%|███       | 305/980 [00:31<01:08,  9.80it/s]Processing batches:  31%|███       | 306/980 [00:31<01:09,  9.74it/s]Processing batches:  31%|███▏      | 308/980 [00:32<01:04, 10.45it/s]Processing batches:  32%|███▏      | 310/980 [00:32<01:06, 10.12it/s]Processing batches:  32%|███▏      | 312/980 [00:32<01:07,  9.87it/s]Processing batches:  32%|███▏      | 313/980 [00:32<01:08,  9.78it/s]Processing batches:  32%|███▏      | 314/980 [00:32<01:08,  9.78it/s]Processing batches:  32%|███▏      | 316/980 [00:32<01:03, 10.40it/s]Processing batches:  32%|███▏      | 318/980 [00:33<01:05, 10.13it/s]Processing batches:  33%|███▎      | 320/980 [00:33<01:06,  9.87it/s]Processing batches:  33%|███▎      | 321/980 [00:33<01:07,  9.79it/s]Processing batches:  33%|███▎      | 322/980 [00:33<01:07,  9.73it/s]Processing batches:  33%|███▎      | 324/980 [00:33<01:03, 10.30it/s]Processing batches:  33%|███▎      | 326/980 [00:33<01:04, 10.07it/s]Processing batches:  33%|███▎      | 328/980 [00:34<01:06,  9.81it/s]Processing batches:  34%|███▎      | 329/980 [00:34<01:06,  9.74it/s]Processing batches:  34%|███▎      | 330/980 [00:34<01:06,  9.72it/s]Processing batches:  34%|███▍      | 332/980 [00:34<01:03, 10.21it/s]Processing batches:  34%|███▍      | 334/980 [00:34<01:04, 10.02it/s]Processing batches:  34%|███▍      | 335/980 [00:34<01:05,  9.90it/s]Processing batches:  34%|███▍      | 336/980 [00:34<01:05,  9.77it/s]Processing batches:  34%|███▍      | 337/980 [00:35<01:06,  9.68it/s]Processing batches:  34%|███▍      | 338/980 [00:35<01:06,  9.72it/s]Processing batches:  35%|███▍      | 340/980 [00:35<01:01, 10.38it/s]Processing batches:  35%|███▍      | 342/980 [00:35<01:03, 10.09it/s]Processing batches:  35%|███▌      | 344/980 [00:35<01:04,  9.83it/s]Processing batches:  35%|███▌      | 345/980 [00:35<01:05,  9.75it/s]Processing batches:  35%|███▌      | 346/980 [00:35<01:05,  9.75it/s]Processing batches:  36%|███▌      | 348/980 [00:36<01:01, 10.25it/s]Processing batches:  36%|███▌      | 350/980 [00:36<01:02, 10.05it/s]Processing batches:  36%|███▌      | 352/980 [00:36<01:04,  9.81it/s]Processing batches:  36%|███▌      | 353/980 [00:36<01:04,  9.74it/s]Processing batches:  36%|███▌      | 354/980 [00:36<01:04,  9.73it/s]Processing batches:  36%|███▋      | 356/980 [00:36<01:01, 10.19it/s]Processing batches:  37%|███▋      | 358/980 [00:37<01:02, 10.03it/s]Processing batches:  37%|███▋      | 359/980 [00:37<01:02,  9.90it/s]Processing batches:  37%|███▋      | 360/980 [00:37<01:03,  9.78it/s]Processing batches:  37%|███▋      | 361/980 [00:37<01:03,  9.69it/s]Processing batches:  37%|███▋      | 362/980 [00:37<01:03,  9.69it/s]Processing batches:  37%|███▋      | 364/980 [00:37<00:59, 10.33it/s]Processing batches:  37%|███▋      | 366/980 [00:37<01:01, 10.03it/s]Processing batches:  37%|███▋      | 367/980 [00:38<01:01,  9.89it/s]Processing batches:  38%|███▊      | 368/980 [00:38<01:02,  9.77it/s]Processing batches:  38%|███▊      | 369/980 [00:38<01:03,  9.69it/s]Processing batches:  38%|███▊      | 370/980 [00:38<01:02,  9.75it/s]Processing batches:  38%|███▊      | 372/980 [00:38<00:58, 10.40it/s]Processing batches:  38%|███▊      | 374/980 [00:38<01:00, 10.05it/s]Processing batches:  38%|███▊      | 376/980 [00:38<01:01,  9.80it/s]Processing batches:  38%|███▊      | 377/980 [00:39<01:01,  9.73it/s]Processing batches:  39%|███▊      | 378/980 [00:39<01:01,  9.78it/s]Processing batches:  39%|███▉      | 380/980 [00:39<00:59, 10.07it/s]Processing batches:  39%|███▉      | 382/980 [00:39<01:00,  9.91it/s]Processing batches:  39%|███▉      | 383/980 [00:39<01:00,  9.80it/s]Processing batches:  39%|███▉      | 384/980 [00:39<01:01,  9.71it/s]Processing batches:  39%|███▉      | 385/980 [00:39<01:01,  9.64it/s]Processing batches:  39%|███▉      | 387/980 [00:40<00:58, 10.18it/s]Processing batches:  40%|███▉      | 389/980 [00:40<00:59,  9.88it/s]Processing batches:  40%|███▉      | 390/980 [00:40<00:59,  9.84it/s]Processing batches:  40%|███▉      | 391/980 [00:40<01:00,  9.71it/s]Processing batches:  40%|████      | 392/980 [00:40<01:01,  9.63it/s]Processing batches:  40%|████      | 393/980 [00:40<01:01,  9.58it/s]Processing batches:  40%|████      | 395/980 [00:40<00:57, 10.25it/s]Processing batches:  41%|████      | 397/980 [00:41<00:59,  9.87it/s]Processing batches:  41%|████      | 398/980 [00:41<00:59,  9.86it/s]Processing batches:  41%|████      | 399/980 [00:41<00:59,  9.75it/s]Processing batches:  41%|████      | 400/980 [00:41<00:59,  9.68it/s]Processing batches:  41%|████      | 401/980 [00:41<01:00,  9.60it/s]Processing batches:  41%|████      | 403/980 [00:41<00:56, 10.23it/s]Processing batches:  41%|████▏     | 405/980 [00:41<00:58,  9.90it/s]Processing batches:  41%|████▏     | 406/980 [00:41<00:58,  9.87it/s]Processing batches:  42%|████▏     | 407/980 [00:42<00:58,  9.75it/s]Processing batches:  42%|████▏     | 408/980 [00:42<00:59,  9.61it/s]Processing batches:  42%|████▏     | 409/980 [00:42<00:59,  9.54it/s]Processing batches:  42%|████▏     | 411/980 [00:42<00:55, 10.22it/s]Processing batches:  42%|████▏     | 413/980 [00:42<00:57,  9.80it/s]Processing batches:  42%|████▏     | 414/980 [00:42<00:57,  9.77it/s]Processing batches:  42%|████▏     | 415/980 [00:42<00:58,  9.67it/s]Processing batches:  42%|████▏     | 416/980 [00:43<00:58,  9.60it/s]Processing batches:  43%|████▎     | 417/980 [00:43<00:59,  9.48it/s]Processing batches:  43%|████▎     | 419/980 [00:43<00:55, 10.14it/s]Processing batches:  43%|████▎     | 420/980 [00:43<00:56,  9.95it/s]Processing batches:  43%|████▎     | 421/980 [00:43<00:57,  9.75it/s]Processing batches:  43%|████▎     | 423/980 [00:43<00:57,  9.73it/s]Processing batches:  43%|████▎     | 424/980 [00:43<00:57,  9.66it/s]Processing batches:  43%|████▎     | 425/980 [00:43<00:57,  9.59it/s]Processing batches:  44%|████▎     | 427/980 [00:44<00:54, 10.12it/s]Processing batches:  44%|████▎     | 428/980 [00:44<00:55,  9.88it/s]Processing batches:  44%|████▍     | 429/980 [00:44<00:56,  9.72it/s]Processing batches:  44%|████▍     | 431/980 [00:44<00:56,  9.71it/s]Processing batches:  44%|████▍     | 432/980 [00:44<00:56,  9.63it/s]Processing batches:  44%|████▍     | 433/980 [00:44<00:57,  9.57it/s]Processing batches:  44%|████▍     | 435/980 [00:44<00:53, 10.20it/s]Processing batches:  45%|████▍     | 437/980 [00:45<00:55,  9.86it/s]Processing batches:  45%|████▍     | 438/980 [00:45<00:54,  9.88it/s]Processing batches:  45%|████▍     | 439/980 [00:45<00:55,  9.76it/s]Processing batches:  45%|████▍     | 440/980 [00:45<00:56,  9.62it/s]Processing batches:  45%|████▌     | 441/980 [00:45<00:56,  9.52it/s]Processing batches:  45%|████▌     | 443/980 [00:45<00:52, 10.20it/s]Processing batches:  45%|████▌     | 445/980 [00:45<00:54,  9.88it/s][ℹ️  Window] Seq 017 win   70  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 0.95cm  mean_gt_jump= 0.93cm
+[ℹ️  Window] Seq 017 win   80  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 1.44cm  mean_gt_jump= 1.38cm
+[ℹ️  Window] Seq 017 win   90  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 1.97cm  mean_gt_jump= 1.93cm
+[ℹ️  Window] Seq 017 win  100  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 1.96cm  mean_gt_jump= 1.89cm
+[ℹ️  Window] Seq 017 win  110  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 1.22cm  mean_gt_jump= 1.20cm
+[ℹ️  Window] Seq 017 win  120  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump= 2.16cm  mean_gt_jump= 1.97cm
+[ℹ️  Window] Seq 017 win  130  win_scale=  1.11
+[ℹ️  ΔT] mean_pred_jump= 1.80cm  mean_gt_jump= 1.62cm
+[ℹ️  Window] Seq 017 win  140  win_scale=  0.81
+[ℹ️  ΔT] mean_pred_jump= 0.25cm  mean_gt_jump= 0.31cm
+[ℹ️  Window] Seq 017 win  150  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.27cm  mean_gt_jump= 0.26cm
+[ℹ️  Window] Seq 017 win  160  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump= 0.30cm  mean_gt_jump= 0.27cm
+[ℹ️  Window] Seq 017 win  170  win_scale=  1.21
+[ℹ️  ΔT] mean_pred_jump= 0.23cm  mean_gt_jump= 0.19cm
+[ℹ️  Window] Seq 017 win  180  win_scale=  1.18
+[ℹ️  ΔT] mean_pred_jump= 0.13cm  mean_gt_jump= 0.11cm
+[ℹ️  Window] Seq 017 win  190  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 0.10cm  mean_gt_jump= 0.09cm
+[ℹ️  Window] Seq 017 win  200  win_scale=  1.05
+[ℹ️  ΔT] mean_pred_jump= 0.11cm  mean_gt_jump= 0.11cm
+[ℹ️  Window] Seq 017 win  210  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 0.98cm  mean_gt_jump= 0.96cm
+[ℹ️  Window] Seq 017 win  220  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 1.17cm  mean_gt_jump= 1.17cm
+[ℹ️  Window] Seq 017 win  230  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 0.57cm  mean_gt_jump= 0.54cm
+[ℹ️  Window] Seq 017 win  240  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump= 0.55cm  mean_gt_jump= 0.50cm
+[ℹ️  Window] Seq 017 win  250  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 0.87cm  mean_gt_jump= 0.89cm
+[ℹ️  Window] Seq 017 win  260  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 1.07cm  mean_gt_jump= 1.04cm
+[ℹ️  Window] Seq 017 win  270  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 0.61cm  mean_gt_jump= 0.57cm
+[ℹ️  Window] Seq 017 win  280  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 0.28cm  mean_gt_jump= 0.25cm
+[ℹ️  Window] Seq 017 win  290  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 0.16cm  mean_gt_jump= 0.15cm
+[ℹ️  Window] Seq 017 win  300  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump= 0.18cm  mean_gt_jump= 0.16cm
+[ℹ️  Window] Seq 017 win  310  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump= 0.22cm  mean_gt_jump= 0.21cm
+[ℹ️  Window] Seq 017 win  320  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.22cm  mean_gt_jump= 0.21cm
+[ℹ️  Window] Seq 017 win  330  win_scale=  1.20
+[ℹ️  ΔT] mean_pred_jump= 0.14cm  mean_gt_jump= 0.12cm
+[ℹ️  Window] Seq 017 win  340  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump= 0.07cm  mean_gt_jump= 0.07cm
+[ℹ️  Window] Seq 017 win  350  win_scale=  1.28
+[ℹ️  ΔT] mean_pred_jump= 0.11cm  mean_gt_jump= 0.08cm
+[ℹ️  Window] Seq 017 win  360  win_scale=  1.25
+[ℹ️  ΔT] mean_pred_jump= 0.13cm  mean_gt_jump= 0.10cm
+[ℹ️  Window] Seq 017 win  370  win_scale=  1.18
+[ℹ️  ΔT] mean_pred_jump= 0.24cm  mean_gt_jump= 0.20cm
+[ℹ️  Window] Seq 017 win  380  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 0.33cm  mean_gt_jump= 0.33cm
+[ℹ️  Window] Seq 017 win  390  win_scale=  1.13
+[ℹ️  ΔT] mean_pred_jump= 0.33cm  mean_gt_jump= 0.29cm
+[ℹ️  Window] Seq 017 win  400  win_scale=  1.34
+[ℹ️  ΔT] mean_pred_jump= 0.32cm  mean_gt_jump= 0.24cm
+[ℹ️  Window] Seq 017 win  410  win_scale=  1.29
+[ℹ️  ΔT] mean_pred_jump= 0.30cm  mean_gt_jump= 0.23cm
+[ℹ️  Window] Seq 017 win  420  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.19cm  mean_gt_jump= 0.18cm
+[ℹ️  Window] Seq 017 win  430  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 0.12cm  mean_gt_jump= 0.11cm
+[ℹ️  Window] Seq 017 win  440  win_scale=  0.94
+[ℹ️  ΔT] mean_pred_jump= 0.07cm  mean_gt_jump= 0.08cm
+[ℹ️  Window] Seq 017 win  450  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 0.06cm  mean_gt_jump= 0.06cm
+[ℹ️  Window] Seq 017 win  460  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 0.14cm  mean_gt_jump= 0.14cm
+[ℹ️  Window] Seq 017 win  470  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 0.54cm  mean_gt_jump= 0.48cm
+[ℹ️  Window] Seq 017 win  480  win_scale=  1.25
+[ℹ️  ΔT] mean_pred_jump= 0.60cm  mean_gt_jump= 0.48cm
+[ℹ️  Window] Seq 017 win  490  win_scale=  1.32
+[ℹ️  ΔT] mean_pred_jump= 0.69cm  mean_gt_jump= 0.53cm
+[ℹ️  Window] Seq 017 win  500  win_scale=  1.13
+[ℹ️  ΔT] mean_pred_jump= 0.69cm  mean_gt_jump= 0.61cm
+[ℹ️  Window] Seq 017 win  510  win_scale=  1.09
+[ℹ️  ΔT] mean_pred_jump= 0.40cm  mean_gt_jump= 0.37cm
+[ℹ️  Window] Seq 017 win  520  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 0.33cm  mean_gt_jump= 0.34cm
+[ℹ️  Window] Seq 017 win  530  win_scale=  1.14
+[ℹ️  ΔT] mean_pred_jump= 0.53cm  mean_gt_jump= 0.46cm
+[ℹ️  Window] Seq 017 win  540  win_scale=  1.28
+[ℹ️  ΔT] mean_pred_jump= 0.50cm  mean_gt_jump= 0.39cm
+[ℹ️  Window] Seq 017 win  550  win_scale=  0.82
+[ℹ️  ΔT] mean_pred_jump= 0.20cm  mean_gt_jump= 0.24cm
+[ℹ️  Window] Seq 017 win  560  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump= 0.34cm  mean_gt_jump= 0.32cm
+[ℹ️  Window] Seq 017 win  570  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump= 0.39cm  mean_gt_jump= 0.36cm
+[ℹ️  Window] Seq 017 win  580  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 0.39cm  mean_gt_jump= 0.38cm
+[ℹ️  Window] Seq 017 win  590  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 0.34cm  mean_gt_jump= 0.33cm
+[ℹ️  Window] Seq 017 win  600  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 0.24cm  mean_gt_jump= 0.22cm
+[ℹ️  Window] Seq 017 win  610  win_scale=  1.21
+[ℹ️  ΔT] mean_pred_jump= 0.22cm  mean_gt_jump= 0.18cm
+[ℹ️  Window] Seq 017 win  620  win_scale=  1.14
+[ℹ️  ΔT] mean_pred_jump= 0.30cm  mean_gt_jump= 0.27cm
+[ℹ️  Window] Seq 017 win  630  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 0.57cm  mean_gt_jump= 0.51cm
+[ℹ️  Window] Seq 017 win  640  win_scale=  1.08
+[ℹ️  ΔT] mean_pred_jump= 0.61cm  mean_gt_jump= 0.57cm
+[ℹ️  Window] Seq 017 win  650  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump= 0.68cm  mean_gt_jump= 0.70cm
+[ℹ️  Window] Seq 017 win  660  win_scale=  1.11
+[ℹ️  ΔT] mean_pred_jump= 0.71cm  mean_gt_jump= 0.64cm
+[ℹ️  Window] Seq 017 win  670  win_scale=  1.09
+[ℹ️  ΔT] mean_pred_jump= 0.48cm  mean_gt_jump= 0.44cm
+[ℹ️  Window] Seq 017 win  680  win_scale=  1.11
+[ℹ️  ΔT] mean_pred_jump= 0.63cm  mean_gt_jump= 0.56cm
+[ℹ️  Window] Seq 017 win  690  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump= 0.45cm  mean_gt_jump= 0.39cm
+[ℹ️  Window] Seq 017 win  700  win_scale=  1.16
+[ℹ️  ΔT] mean_pred_jump= 0.17cm  mean_gt_jump= 0.15cm
+[ℹ️  Window] Seq 017 win  710  win_scale=  1.32
+[ℹ️  ΔT] mean_pred_jump= 0.44cm  mean_gt_jump= 0.34cm
+[ℹ️  Window] Seq 017 win  720  win_scale=  1.05
+[ℹ️  ΔT] mean_pred_jump= 0.46cm  mean_gt_jump= 0.44cm
+[ℹ️  Window] Seq 017 win  730  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 0.23cm  mean_gt_jump= 0.21cm
+[ℹ️  Window] Seq 017 win  740  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.10cm  mean_gt_jump= 0.09cm
+[ℹ️  Window] Seq 017 win  750  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump= 0.07cm  mean_gt_jump= 0.07cm
+[ℹ️  Window] Seq 017 win  760  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump= 0.06cm  mean_gt_jump= 0.06cm
+[ℹ️  Window] Seq 017 win  770  win_scale=  0.91
+[ℹ️  ΔT] mean_pred_jump= 0.06cm  mean_gt_jump= 0.06cm
+[ℹ️  Window] Seq 017 win  780  win_scale=  0.92
+[ℹ️  ΔT] mean_pred_jump= 0.08cm  mean_gt_jump= 0.09cm
+[ℹ️  Window] Seq 017 win  790  win_scale=  0.96
+[ℹ️  ΔT] mean_pred_jump= 0.08cm  mean_gt_jump= 0.08cm
+[ℹ️  Window] Seq 017 win  800  win_scale=  1.02
+Processing batches:  46%|████▌     | 446/980 [00:46<00:53,  9.91it/s]Processing batches:  46%|████▌     | 447/980 [00:46<00:54,  9.78it/s]Processing batches:  46%|████▌     | 448/980 [00:46<00:55,  9.63it/s]Processing batches:  46%|████▌     | 449/980 [00:46<00:55,  9.57it/s]Processing batches:  46%|████▌     | 451/980 [00:46<00:52, 10.14it/s]Processing batches:  46%|████▌     | 452/980 [00:46<00:53,  9.92it/s]Processing batches:  46%|████▌     | 453/980 [00:46<00:54,  9.74it/s]Processing batches:  46%|████▋     | 454/980 [00:46<00:54,  9.70it/s]Processing batches:  46%|████▋     | 455/980 [00:46<00:54,  9.61it/s]Processing batches:  47%|████▋     | 456/980 [00:47<00:55,  9.50it/s]Processing batches:  47%|████▋     | 457/980 [00:47<00:55,  9.48it/s]Processing batches:  47%|████▋     | 459/980 [00:47<00:50, 10.23it/s]Processing batches:  47%|████▋     | 461/980 [00:47<00:52,  9.86it/s]Processing batches:  47%|████▋     | 463/980 [00:47<00:52,  9.82it/s]Processing batches:  47%|████▋     | 464/980 [00:47<00:53,  9.69it/s]Processing batches:  47%|████▋     | 465/980 [00:48<00:53,  9.58it/s]Processing batches:  48%|████▊     | 467/980 [00:48<00:50, 10.12it/s]Processing batches:  48%|████▊     | 468/980 [00:48<00:51,  9.95it/s]Processing batches:  48%|████▊     | 469/980 [00:48<00:52,  9.80it/s]Processing batches:  48%|████▊     | 471/980 [00:48<00:52,  9.78it/s]Processing batches:  48%|████▊     | 472/980 [00:48<00:52,  9.65it/s]Processing batches:  48%|████▊     | 473/980 [00:48<00:52,  9.59it/s]Processing batches:  48%|████▊     | 475/980 [00:49<00:49, 10.15it/s]Processing batches:  49%|████▊     | 476/980 [00:49<00:50,  9.93it/s]Processing batches:  49%|████▊     | 477/980 [00:49<00:51,  9.81it/s]Processing batches:  49%|████▉     | 479/980 [00:49<00:51,  9.79it/s]Processing batches:  49%|████▉     | 480/980 [00:49<00:51,  9.67it/s]Processing batches:  49%|████▉     | 481/980 [00:49<00:51,  9.60it/s]Processing batches:  49%|████▉     | 483/980 [00:49<00:48, 10.19it/s]Processing batches:  49%|████▉     | 485/980 [00:50<00:50,  9.85it/s]Processing batches:  50%|████▉     | 487/980 [00:50<00:50,  9.82it/s]Processing batches:  50%|████▉     | 488/980 [00:50<00:50,  9.74it/s]Processing batches:  50%|████▉     | 489/980 [00:50<00:50,  9.66it/s]Processing batches:  50%|█████     | 490/980 [00:50<00:50,  9.73it/s]Processing batches:  50%|█████     | 492/980 [00:50<00:48, 10.10it/s]Processing batches:  50%|█████     | 493/980 [00:50<00:49,  9.85it/s]Processing batches:  50%|█████     | 494/980 [00:50<00:49,  9.88it/s]Processing batches:  51%|█████     | 495/980 [00:51<00:50,  9.68it/s]Processing batches:  51%|█████     | 496/980 [00:51<00:50,  9.54it/s]Processing batches:  51%|█████     | 497/980 [00:51<00:51,  9.45it/s][ℹ️  ΔT] mean_pred_jump= 0.06cm  mean_gt_jump= 0.06cm
+[ℹ️  Window] Seq 017 win  810  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 0.06cm  mean_gt_jump= 0.06cm
+[ℹ️  Window] Seq 017 win  820  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 0.05cm  mean_gt_jump= 0.05cm
+[ℹ️  Window] Seq 017 win  830  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump= 0.20cm  mean_gt_jump= 0.17cm
+[ℹ️  Window] Seq 017 win  840  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 0.54cm  mean_gt_jump= 0.48cm
+[ℹ️  Window] Seq 017 win  850  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 0.56cm  mean_gt_jump= 0.54cm
+[ℹ️  Window] Seq 017 win  860  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump= 0.50cm  mean_gt_jump= 0.47cm
+[ℹ️  Window] Seq 017 win  870  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 0.66cm  mean_gt_jump= 0.64cm
+[ℹ️  Window] Seq 017 win  880  win_scale=  1.08
+[ℹ️  ΔT] mean_pred_jump= 0.66cm  mean_gt_jump= 0.61cm
+[ℹ️  Window] Seq 017 win  890  win_scale=  0.96
+[ℹ️  ΔT] mean_pred_jump= 0.35cm  mean_gt_jump= 0.36cm
+[ℹ️  Window] Seq 017 win  900  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 0.25cm  mean_gt_jump= 0.26cm
+[ℹ️  Window] Seq 017 win  910  win_scale=  1.14
+[ℹ️  ΔT] mean_pred_jump= 1.20cm  mean_gt_jump= 1.05cm
+[ℹ️  Window] Seq 017 win  920  win_scale=  1.00
+[ℹ️  ΔT] mean_pred_jump= 1.59cm  mean_gt_jump= 1.59cm
+[ℹ️  Window] Seq 017 win  930  win_scale=  1.11
+[ℹ️  ΔT] mean_pred_jump= 1.21cm  mean_gt_jump= 1.09cm
+[ℹ️  Window] Seq 017 win  940  win_scale=  1.00
+[ℹ️  ΔT] mean_pred_jump= 0.73cm  mean_gt_jump= 0.73cm
+[ℹ️  Window] Seq 017 win  950  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 0.51cm  mean_gt_jump= 0.48cm
+[ℹ️  Window] Seq 017 win  960  win_scale=  1.23
+[ℹ️  ΔT] mean_pred_jump= 0.26cm  mean_gt_jump= 0.21cm
+[ℹ️  Window] Seq 017 win  970  win_scale=  0.86
+[ℹ️  ΔT] mean_pred_jump= 0.06cm  mean_gt_jump= 0.07cm
+[DBG] Seq 018 win 000  Δt_pred=[ 2.8698361e-03 -3.3096410e-05 -2.7031982e-03]  Δt_gt=[-3.0864205e-05  1.8869720e-03  2.7526377e-04]
+[DBG]   |Δt_pred|/|Δt_gt| = 2.067
+[DBG]   angle between pred and gt = 96.8°
+[ℹ️  Window] Seq 018 win    0  win_scale=  1.17
+[ℹ️  ΔT] mean_pred_jump= 1.35cm  mean_gt_jump= 1.16cm
+[DBG] Seq 018 win 001  Δt_pred=[ 0.00663739  0.00616228 -0.00896671]  Δt_gt=[7.2990035e-05 3.3061637e-03 2.7343965e-05]
+[DBG]   |Δt_pred|/|Δt_gt| = 3.854
+[DBG]   angle between pred and gt = 60.7°
+[DBG] Seq 018 win 002  Δt_pred=[ 0.00296273  0.00414216 -0.00509683]  Δt_gt=[ 0.00020709  0.00180167 -0.00011105]
+[DBG]   |Δt_pred|/|Δt_gt| = 3.966
+[DBG]   angle between pred and gt = 48.7°
+[DBG] Seq 018 win 003  Δt_pred=[ 0.00187505 -0.00109468 -0.00127659]  Δt_gt=[ 0.00048077  0.00164456 -0.00098145]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.276
+[DBG]   angle between pred and gt = 85.9°
+[DBG] Seq 018 win 004  Δt_pred=[ 7.8290259e-04 -1.9474491e-03 -7.9361256e-05]  Δt_gt=[ 0.00034475  0.00114391 -0.00093143]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.387
+[DBG]   angle between pred and gt = 126.3°
+[DBG] Seq 018 win 005  Δt_pred=[ 0.00055873 -0.00290521  0.00087697]  Δt_gt=[ 0.00037292  0.00064058 -0.00082527]
+[DBG]   |Δt_pred|/|Δt_gt| = 2.782
+[DBG]   angle between pred and gt = 134.0°
+[DBG] Seq 018 win 006  Δt_pred=[0.00234557 0.01190509 0.00396789]  Δt_gt=[-0.00145462  0.01273563 -0.00666056]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.884
+[DBG]   angle between pred and gt = 48.7°
+[DBG] Seq 018 win 007  Δt_pred=[-0.00178594  0.01432991  0.01321045]  Δt_gt=[ 0.00181646  0.0367703  -0.00557177]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.526
+[DBG]   angle between pred and gt = 51.9°
+[DBG] Seq 018 win 008  Δt_pred=[0.00405794 0.01049283 0.0117133 ]  Δt_gt=[0.00421519 0.02248464 0.00144137]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.709
+[DBG]   angle between pred and gt = 43.5°
+[DBG] Seq 018 win 009  Δt_pred=[0.00111701 0.00791832 0.01899636]  Δt_gt=[0.00911241 0.03312996 0.00307308]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.597
+[DBG]   angle between pred and gt = 62.3°
+[DBG] Seq 018 win 010  Δt_pred=[-0.00019207  0.00591019  0.00362102]  Δt_gt=[0.00446757 0.00999538 0.00157021]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.627
+[DBG]   angle between pred and gt = 33.6°
+[ℹ️  Window] Seq 018 win   10  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump= 1.22cm  mean_gt_jump= 1.26cm
+[DBG] Seq 018 win 011  Δt_pred=[-0.00075793 -0.00350249  0.00959194]  Δt_gt=[0.00703439 0.01273678 0.00199132]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.697
+[DBG]   angle between pred and gt = 101.8°
+[DBG] Seq 018 win 012  Δt_pred=[ 0.00115457 -0.00402491  0.00974546]  Δt_gt=[0.00557213 0.00645848 0.00103166]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.234
+[DBG]   angle between pred and gt = 96.0°
+[DBG] Seq 018 win 013  Δt_pred=[-0.00101918 -0.00377733  0.00201405]  Δt_gt=[2.3665770e-03 1.1376446e-03 5.2205946e-06]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.676
+[DBG]   angle between pred and gt = 125.4°
+[DBG] Seq 018 win 014  Δt_pred=[-0.00036139 -0.00195209  0.00110771]  Δt_gt=[ 0.00362351 -0.00091281 -0.00113625]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.582
+[DBG]   angle between pred and gt = 95.1°
+[DBG] Seq 018 win 015  Δt_pred=[ 0.00094998  0.00053101 -0.00380675]  Δt_gt=[ 0.00129916 -0.00282587 -0.0026976 ]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.962
+[DBG]   angle between pred and gt = 52.1°
+[DBG] Seq 018 win 016  Δt_pred=[ 0.00175222 -0.00097929 -0.00058269]  Δt_gt=[-0.00058411 -0.00272517 -0.00200663]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.609
+[DBG]   angle between pred and gt = 66.9°
+[DBG] Seq 018 win 017  Δt_pred=[-0.00395652 -0.0164638   0.00943305]  Δt_gt=[-0.00350624 -0.01689576 -0.00705723]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.040
+[DBG]   angle between pred and gt = 51.4°
+[DBG] Seq 018 win 018  Δt_pred=[-0.00136561 -0.01234088  0.00155694]  Δt_gt=[-0.00125054 -0.01476798 -0.00362685]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.820
+[DBG]   angle between pred and gt = 20.9°
+[DBG] Seq 018 win 019  Δt_pred=[-0.00653123 -0.03454291  0.00870234]  Δt_gt=[-0.00089065 -0.02737385 -0.00601421]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.292
+[DBG]   angle between pred and gt = 27.7°
+[DBG] Seq 018 win 020  Δt_pred=[-0.00542378 -0.0214972   0.01452066]  Δt_gt=[ 0.00207382 -0.01738372 -0.00057695]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.513
+[DBG]   angle between pred and gt = 40.3°
+[ℹ️  Window] Seq 018 win   20  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 3.30cm  mean_gt_jump= 3.11cm
+[DBG] Seq 018 win 021  Δt_pred=[ 0.00096858 -0.00510903  0.00392713]  Δt_gt=[-0.00205666 -0.00686335 -0.00075736]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.904
+[DBG]   angle between pred and gt = 50.1°
+[DBG] Seq 018 win 022  Δt_pred=[-0.01138185 -0.01058844 -0.00773091]  Δt_gt=[-0.02211716 -0.01663877 -0.00834985]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.601
+[DBG]   angle between pred and gt = 11.1°
+[DBG] Seq 018 win 023  Δt_pred=[-0.018673    0.04084807 -0.05106565]  Δt_gt=[-0.03078555 -0.00845003 -0.01461723]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.937
+[DBG]   angle between pred and gt = 65.9°
+[DBG] Seq 018 win 024  Δt_pred=[-0.01286336  0.02395516 -0.02354633]  Δt_gt=[-0.01419641 -0.00048852 -0.00591271]
+[DBG]   |Δt_pred|/|Δt_gt| = 2.338
+[DBG]   angle between pred and gt = 55.9°
+[DBG] Seq 018 win 025  Δt_pred=[-0.02974766  0.0153343  -0.03108335]  Δt_gt=[-0.01947668  0.00327111 -0.00864716]
+[DBG]   |Δt_pred|/|Δt_gt| = 2.119
+[DBG]   angle between pred and gt = 24.2°
+[DBG] Seq 018 win 026  Δt_pred=[-0.00390733  0.00392549 -0.0109034 ]  Δt_gt=[-0.00851448  0.0019867  -0.00190719]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.367
+[DBG]   angle between pred and gt = 55.6°
+[DBG] Seq 018 win 027  Δt_pred=[ 0.0016969   0.01067762 -0.00629083]  Δt_gt=[-0.00182861  0.0003851   0.00058463]
+[DBG]   |Δt_pred|/|Δt_gt| = 6.388
+[DBG]   angle between pred and gt = 96.3°
+[DBG] Seq 018 win 028  Δt_pred=[ 0.00271907  0.01209886 -0.00932863]  Δt_gt=[-0.00175933  0.00187778  0.00239654]
+[DBG]   |Δt_pred|/|Δt_gt| = 4.413
+[DBG]   angle between pred and gt = 94.6°
+[DBG] Seq 018 win 029  Δt_pred=[ 0.00586711  0.00381999 -0.01438049]  Δt_gt=[-0.00062259  0.00169285  0.00135695]
+[DBG]   |Δt_pred|/|Δt_gt| = 7.086
+[DBG]   angle between pred and gt = 117.6°
+Processing batches:  51%|█████     | 499/980 [00:51<00:47, 10.08it/s]Processing batches:  51%|█████     | 500/980 [00:51<00:48,  9.87it/s]Processing batches:  51%|█████     | 501/980 [00:51<00:49,  9.75it/s]Processing batches:  51%|█████     | 502/980 [00:51<00:48,  9.81it/s]Processing batches:  51%|█████▏    | 503/980 [00:51<00:49,  9.68it/s]Processing batches:  51%|█████▏    | 504/980 [00:51<00:49,  9.59it/s]Processing batches:  52%|█████▏    | 505/980 [00:52<00:49,  9.53it/s]Processing batches:  52%|█████▏    | 507/980 [00:52<00:46, 10.23it/s]Processing batches:  52%|█████▏    | 509/980 [00:52<00:47,  9.88it/s]Processing batches:  52%|█████▏    | 510/980 [00:52<00:47,  9.91it/s]Processing batches:  52%|█████▏    | 511/980 [00:52<00:47,  9.78it/s]Processing batches:  52%|█████▏    | 512/980 [00:52<00:48,  9.63it/s]Processing batches:  52%|█████▏    | 513/980 [00:52<00:48,  9.56it/s]Processing batches:  53%|█████▎    | 515/980 [00:53<00:45, 10.18it/s]Processing batches:  53%|█████▎    | 517/980 [00:53<00:46,  9.86it/s]Processing batches:  53%|█████▎    | 519/980 [00:53<00:46,  9.84it/s]Processing batches:  53%|█████▎    | 520/980 [00:53<00:47,  9.74it/s]Processing batches:  53%|█████▎    | 521/980 [00:53<00:47,  9.65it/s]Processing batches:  53%|█████▎    | 522/980 [00:53<00:47,  9.65it/s]Processing batches:  53%|█████▎    | 524/980 [00:54<00:45, 10.11it/s]Processing batches:  54%|█████▎    | 525/980 [00:54<00:45,  9.94it/s]Processing batches:  54%|█████▎    | 526/980 [00:54<00:45,  9.94it/s]Processing batches:  54%|█████▍    | 527/980 [00:54<00:46,  9.78it/s]Processing batches:  54%|█████▍    | 528/980 [00:54<00:46,  9.67it/s]Processing batches:  54%|█████▍    | 529/980 [00:54<00:46,  9.60it/s]Processing batches:  54%|█████▍    | 530/980 [00:54<00:46,  9.63it/s]Processing batches:  54%|█████▍    | 532/980 [00:54<00:43, 10.20it/s]Processing batches:  54%|█████▍    | 534/980 [00:55<00:44,  9.98it/s]Processing batches:  55%|█████▍    | 535/980 [00:55<00:45,  9.85it/s]Processing batches:  55%|█████▍    | 536/980 [00:55<00:45,  9.74it/s]Processing batches:  55%|█████▍    | 537/980 [00:55<00:45,  9.65it/s]Processing batches:  55%|█████▍    | 538/980 [00:55<00:45,  9.71it/s]Processing batches:  55%|█████▌    | 540/980 [00:55<00:42, 10.35it/s]Processing batches:  55%|█████▌    | 542/980 [00:55<00:43, 10.06it/s]Processing batches:  56%|█████▌    | 544/980 [00:56<00:44,  9.80it/s]Processing batches:  56%|█████▌    | 545/980 [00:56<00:44,  9.69it/s]Processing batches:  56%|█████▌    | 546/980 [00:56<00:44,  9.71it/s]Processing batches:  56%|█████▌    | 548/980 [00:56<00:42, 10.11it/s]Processing batches:  56%|█████▌    | 550/980 [00:56<00:43,  9.98it/s]Processing batches:  56%|█████▌    | 551/980 [00:56<00:43,  9.86it/s]Processing batches:  56%|█████▋    | 552/980 [00:56<00:44,  9.70it/s]Processing batches:  56%|█████▋    | 553/980 [00:56<00:44,  9.61it/s]Processing batches:  57%|█████▋    | 554/980 [00:57<00:44,  9.68it/s]Processing batches:  57%|█████▋    | 556/980 [00:57<00:41, 10.15it/s]Processing batches:  57%|█████▋    | 558/980 [00:57<00:42,  9.99it/s]Processing batches:  57%|█████▋    | 559/980 [00:57<00:42,  9.85it/s]Processing batches:  57%|█████▋    | 560/980 [00:57<00:43,  9.74it/s]Processing batches:  57%|█████▋    | 561/980 [00:57<00:43,  9.65it/s]Processing batches:  57%|█████▋    | 562/980 [00:57<00:43,  9.67it/s]Processing batches:  58%|█████▊    | 564/980 [00:58<00:40, 10.15it/s]Processing batches:  58%|█████▊    | 565/980 [00:58<00:41,  9.95it/s]Processing batches:  58%|█████▊    | 566/980 [00:58<00:41,  9.96it/s]Processing batches:  58%|█████▊    | 567/980 [00:58<00:42,  9.81it/s]Processing batches:  58%|█████▊    | 568/980 [00:58<00:42,  9.70it/s]Processing batches:  58%|█████▊    | 569/980 [00:58<00:42,  9.61it/s]Processing batches:  58%|█████▊    | 570/980 [00:58<00:42,  9.67it/s]Processing batches:  58%|█████▊    | 572/980 [00:58<00:39, 10.26it/s]Processing batches:  59%|█████▊    | 574/980 [00:59<00:40, 10.00it/s]Processing batches:  59%|█████▊    | 575/980 [00:59<00:41,  9.86it/s]Processing batches:  59%|█████▉    | 576/980 [00:59<00:41,  9.72it/s]Processing batches:  59%|█████▉    | 577/980 [00:59<00:42,  9.59it/s]Processing batches:  59%|█████▉    | 578/980 [00:59<00:41,  9.63it/s]Processing batches:  59%|█████▉    | 580/980 [00:59<00:39, 10.12it/s]Processing batches:  59%|█████▉    | 581/980 [00:59<00:40,  9.91it/s]Processing batches:  59%|█████▉    | 582/980 [00:59<00:40,  9.90it/s]Processing batches:  59%|█████▉    | 583/980 [01:00<00:40,  9.76it/s]Processing batches:  60%|█████▉    | 584/980 [01:00<00:41,  9.61it/s]Processing batches:  60%|█████▉    | 585/980 [01:00<00:41,  9.56it/s]Processing batches:  60%|█████▉    | 587/980 [01:00<00:38, 10.25it/s]Processing batches:  60%|██████    | 589/980 [01:00<00:39,  9.90it/s]Processing batches:  60%|██████    | 590/980 [01:00<00:39,  9.91it/s]Processing batches:  60%|██████    | 591/980 [01:00<00:39,  9.77it/s]Processing batches:  60%|██████    | 592/980 [01:00<00:40,  9.68it/s]Processing batches:  61%|██████    | 593/980 [01:01<00:40,  9.62it/s]Processing batches:  61%|██████    | 594/980 [01:01<00:39,  9.69it/s]Processing batches:  61%|██████    | 596/980 [01:01<00:37, 10.37it/s]Processing batches:  61%|██████    | 598/980 [01:01<00:37, 10.09it/s]Processing batches:  61%|██████    | 600/980 [01:01<00:38,  9.82it/s]Processing batches:  61%|██████▏   | 601/980 [01:01<00:38,  9.75it/s]Processing batches:  61%|██████▏   | 602/980 [01:01<00:38,  9.76it/s]Processing batches:  62%|██████▏   | 604/980 [01:02<00:36, 10.41it/s]Processing batches:  62%|██████▏   | 606/980 [01:02<00:36, 10.15it/s]Processing batches:  62%|██████▏   | 608/980 [01:02<00:37,  9.84it/s]Processing batches:  62%|██████▏   | 609/980 [01:02<00:38,  9.71it/s]Processing batches:  62%|██████▏   | 610/980 [01:02<00:38,  9.66it/s]Processing batches:  62%|██████▏   | 612/980 [01:02<00:36, 10.18it/s]Processing batches:  63%|██████▎   | 614/980 [01:03<00:36, 10.00it/s]Processing batches:  63%|██████▎   | 615/980 [01:03<00:36,  9.87it/s]Processing batches:  63%|██████▎   | 616/980 [01:03<00:37,  9.75it/s]Processing batches:  63%|██████▎   | 617/980 [01:03<00:37,  9.66it/s]Processing batches:  63%|██████▎   | 618/980 [01:03<00:37,  9.63it/s]Processing batches:  63%|██████▎   | 620/980 [01:03<00:34, 10.30it/s]Processing batches:  63%|██████▎   | 622/980 [01:03<00:35, 10.05it/s]Processing batches:  64%|██████▎   | 623/980 [01:04<00:36,  9.91it/s]Processing batches:  64%|██████▎   | 624/980 [01:04<00:36,  9.78it/s]Processing batches:  64%|██████▍   | 625/980 [01:04<00:36,  9.68it/s]Processing batches:  64%|██████▍   | 626/980 [01:04<00:36,  9.63it/s]Processing batches:  64%|██████▍   | 628/980 [01:04<00:34, 10.29it/s]Processing batches:  64%|██████▍   | 630/980 [01:04<00:34, 10.04it/s]Processing batches:  64%|██████▍   | 631/980 [01:04<00:35,  9.90it/s]Processing batches:  64%|██████▍   | 632/980 [01:04<00:35,  9.78it/s]Processing batches:  65%|██████▍   | 633/980 [01:05<00:35,  9.67it/s]Processing batches:  65%|██████▍   | 634/980 [01:05<00:35,  9.68it/s]Processing batches:  65%|██████▍   | 636/980 [01:05<00:33, 10.34it/s]Processing batches:  65%|██████▌   | 638/980 [01:05<00:34, 10.05it/s]Processing batches:  65%|██████▌   | 639/980 [01:05<00:34,  9.90it/s]Processing batches:  65%|██████▌   | 640/980 [01:05<00:34,  9.77it/s]Processing batches:  65%|██████▌   | 641/980 [01:05<00:35,  9.67it/s]Processing batches:  66%|██████▌   | 642/980 [01:05<00:34,  9.67it/s]Processing batches:  66%|██████▌   | 644/980 [01:06<00:32, 10.35it/s]Processing batches:  66%|██████▌   | 646/980 [01:06<00:33, 10.01it/s]Processing batches:  66%|██████▌   | 647/980 [01:06<00:33,  9.86it/s]Processing batches:  66%|██████▌   | 648/980 [01:06<00:34,  9.74it/s]Processing batches:  66%|██████▌   | 649/980 [01:06<00:34,  9.61it/s]Processing batches:  66%|██████▋   | 650/980 [01:06<00:34,  9.65it/s]Processing batches:  67%|██████▋   | 652/980 [01:06<00:32, 10.19it/s]Processing batches:  67%|██████▋   | 654/980 [01:07<00:32,  9.98it/s]Processing batches:  67%|██████▋   | 655/980 [01:07<00:33,  9.85it/s]Processing batches:  67%|██████▋   | 656/980 [01:07<00:33,  9.72it/s]Processing batches:  67%|██████▋   | 657/980 [01:07<00:33,  9.64it/s]Processing batches:  67%|██████▋   | 658/980 [01:07<00:33,  9.65it/s]Processing batches:  67%|██████▋   | 660/980 [01:07<00:30, 10.39it/s]Processing batches:  68%|██████▊   | 662/980 [01:07<00:31, 10.10it/s]Processing batches:  68%|██████▊   | 664/980 [01:08<00:32,  9.84it/s]Processing batches:  68%|██████▊   | 665/980 [01:08<00:32,  9.71it/s]Processing batches:  68%|██████▊   | 666/980 [01:08<00:32,  9.64it/s]Processing batches:  68%|██████▊   | 668/980 [01:08<00:30, 10.16it/s]Processing batches:  68%|██████▊   | 670/980 [01:08<00:30, 10.02it/s]Processing batches:  68%|██████▊   | 671/980 [01:08<00:31,  9.88it/s]Processing batches:  69%|██████▊   | 672/980 [01:09<00:31,  9.76it/s]Processing batches:  69%|██████▊   | 673/980 [01:09<00:31,  9.68it/s]Processing batches:  69%|██████▉   | 674/980 [01:09<00:31,  9.63it/s]Processing batches:  69%|██████▉   | 676/980 [01:09<00:29, 10.20it/s]Processing batches:  69%|██████▉   | 678/980 [01:09<00:30, 10.03it/s]Processing batches:  69%|██████▉   | 679/980 [01:09<00:30,  9.89it/s]Processing batches:  69%|██████▉   | 680/980 [01:09<00:30,  9.77it/s][ℹ️  Window] Seq 018 win   30  win_scale=  0.95
+[ℹ️  ΔT] mean_pred_jump= 4.27cm  mean_gt_jump= 4.49cm
+[ℹ️  Window] Seq 018 win   40  win_scale=  0.87
+[ℹ️  ΔT] mean_pred_jump= 3.62cm  mean_gt_jump= 4.16cm
+[ℹ️  Window] Seq 018 win   50  win_scale=  0.87
+[ℹ️  ΔT] mean_pred_jump= 3.10cm  mean_gt_jump= 3.59cm
+[ℹ️  Window] Seq 018 win   60  win_scale=  0.90
+[ℹ️  ΔT] mean_pred_jump= 4.06cm  mean_gt_jump= 4.54cm
+[ℹ️  Window] Seq 018 win   70  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 3.68cm  mean_gt_jump= 3.52cm
+[ℹ️  Window] Seq 018 win   80  win_scale=  1.11
+[ℹ️  ΔT] mean_pred_jump= 1.49cm  mean_gt_jump= 1.34cm
+[ℹ️  Window] Seq 018 win   90  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump= 1.79cm  mean_gt_jump= 1.84cm
+[ℹ️  Window] Seq 018 win  100  win_scale=  0.90
+[ℹ️  ΔT] mean_pred_jump= 1.68cm  mean_gt_jump= 1.87cm
+[ℹ️  Window] Seq 018 win  110  win_scale=  0.88
+[ℹ️  ΔT] mean_pred_jump= 1.24cm  mean_gt_jump= 1.42cm
+[ℹ️  Window] Seq 018 win  120  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump= 1.00cm  mean_gt_jump= 1.04cm
+[ℹ️  Window] Seq 018 win  130  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 0.98cm  mean_gt_jump= 0.96cm
+[ℹ️  Window] Seq 018 win  140  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 0.95cm  mean_gt_jump= 0.93cm
+[ℹ️  Window] Seq 018 win  150  win_scale=  1.09
+[ℹ️  ΔT] mean_pred_jump= 0.56cm  mean_gt_jump= 0.52cm
+[ℹ️  Window] Seq 018 win  160  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 0.18cm  mean_gt_jump= 0.16cm
+[ℹ️  Window] Seq 018 win  170  win_scale=  1.13
+[ℹ️  ΔT] mean_pred_jump= 0.55cm  mean_gt_jump= 0.49cm
+[ℹ️  Window] Seq 018 win  180  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump= 1.09cm  mean_gt_jump= 1.02cm
+[ℹ️  Window] Seq 018 win  190  win_scale=  1.27
+[ℹ️  ΔT] mean_pred_jump= 0.90cm  mean_gt_jump= 0.71cm
+[ℹ️  Window] Seq 018 win  200  win_scale=  1.19
+[ℹ️  ΔT] mean_pred_jump= 0.63cm  mean_gt_jump= 0.52cm
+[ℹ️  Window] Seq 018 win  210  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump= 1.50cm  mean_gt_jump= 1.40cm
+[ℹ️  Window] Seq 018 win  220  win_scale=  0.85
+[ℹ️  ΔT] mean_pred_jump= 2.16cm  mean_gt_jump= 2.53cm
+[ℹ️  Window] Seq 018 win  230  win_scale=  0.89
+[ℹ️  ΔT] mean_pred_jump= 3.28cm  mean_gt_jump= 3.66cm
+[ℹ️  Window] Seq 018 win  240  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 3.10cm  mean_gt_jump= 3.01cm
+[ℹ️  Window] Seq 018 win  250  win_scale=  0.96
+[ℹ️  ΔT] mean_pred_jump= 1.75cm  mean_gt_jump= 1.82cm
+[ℹ️  Window] Seq 018 win  260  win_scale=  0.93
+[ℹ️  ΔT] mean_pred_jump= 1.13cm  mean_gt_jump= 1.22cm
+[ℹ️  Window] Seq 018 win  270  win_scale=  0.63
+[ℹ️  ΔT] mean_pred_jump= 0.30cm  mean_gt_jump= 0.48cm
+[ℹ️  Window] Seq 018 win  280  win_scale=  0.89
+[ℹ️  ΔT] mean_pred_jump= 0.31cm  mean_gt_jump= 0.35cm
+[ℹ️  Window] Seq 018 win  290  win_scale=  1.00
+[ℹ️  ΔT] mean_pred_jump= 0.30cm  mean_gt_jump= 0.30cm
+[ℹ️  Window] Seq 018 win  300  win_scale=  0.93
+[ℹ️  ΔT] mean_pred_jump= 0.21cm  mean_gt_jump= 0.23cm
+[ℹ️  Window] Seq 018 win  310  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump= 0.61cm  mean_gt_jump= 0.60cm
+[ℹ️  Window] Seq 018 win  320  win_scale=  0.95
+[ℹ️  ΔT] mean_pred_jump= 1.71cm  mean_gt_jump= 1.80cm
+[ℹ️  Window] Seq 018 win  330  win_scale=  0.89
+[ℹ️  ΔT] mean_pred_jump= 2.66cm  mean_gt_jump= 2.99cm
+[ℹ️  Window] Seq 018 win  340  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump= 2.33cm  mean_gt_jump= 2.31cm
+[ℹ️  Window] Seq 018 win  350  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump= 0.95cm  mean_gt_jump= 0.89cm
+[ℹ️  Window] Seq 018 win  360  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 0.42cm  mean_gt_jump= 0.41cm
+[ℹ️  Window] Seq 018 win  370  win_scale=  1.27
+[ℹ️  ΔT] mean_pred_jump= 0.26cm  mean_gt_jump= 0.21cm
+[ℹ️  Window] Seq 018 win  380  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.22cm  mean_gt_jump= 0.21cm
+[ℹ️  Window] Seq 018 win  390  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 0.40cm  mean_gt_jump= 0.40cm
+[ℹ️  Window] Seq 018 win  400  win_scale=  1.08
+[ℹ️  ΔT] mean_pred_jump= 0.31cm  mean_gt_jump= 0.29cm
+[ℹ️  Window] Seq 018 win  410  win_scale=  1.05
+[ℹ️  ΔT] mean_pred_jump= 0.14cm  mean_gt_jump= 0.14cm
+[ℹ️  Window] Seq 018 win  420  win_scale=  0.96
+[ℹ️  ΔT] mean_pred_jump= 0.32cm  mean_gt_jump= 0.33cm
+[ℹ️  Window] Seq 018 win  430  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 1.31cm  mean_gt_jump= 1.23cm
+[ℹ️  Window] Seq 018 win  440  win_scale=  0.92
+[ℹ️  ΔT] mean_pred_jump= 2.22cm  mean_gt_jump= 2.41cm
+[ℹ️  Window] Seq 018 win  450  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 2.18cm  mean_gt_jump= 2.21cm
+[ℹ️  Window] Seq 018 win  460  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 0.99cm  mean_gt_jump= 1.00cm
+[ℹ️  Window] Seq 018 win  470  win_scale=  1.22
+[ℹ️  ΔT] mean_pred_jump= 1.28cm  mean_gt_jump= 1.05cm
+[ℹ️  Window] Seq 018 win  480  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 2.84cm  mean_gt_jump= 2.54cm
+[ℹ️  Window] Seq 018 win  490  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 2.38cm  mean_gt_jump= 2.43cm
+[ℹ️  Window] Seq 018 win  500  win_scale=  0.89
+[ℹ️  ΔT] mean_pred_jump= 1.30cm  mean_gt_jump= 1.46cm
+[ℹ️  Window] Seq 018 win  510  win_scale=  0.93
+[ℹ️  ΔT] mean_pred_jump= 1.13cm  mean_gt_jump= 1.22cm
+[ℹ️  Window] Seq 018 win  520  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump= 0.64cm  mean_gt_jump= 0.56cm
+[ℹ️  Window] Seq 018 win  530  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 0.39cm  mean_gt_jump= 0.35cm
+[ℹ️  Window] Seq 018 win  540  win_scale=  0.92
+[ℹ️  ΔT] mean_pred_jump= 0.65cm  mean_gt_jump= 0.70cm
+[ℹ️  Window] Seq 018 win  550  win_scale=  0.92
+[ℹ️  ΔT] mean_pred_jump= 0.65cm  mean_gt_jump= 0.70cm
+[ℹ️  Window] Seq 018 win  560  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 1.04cm  mean_gt_jump= 0.99cm
+[ℹ️  Window] Seq 018 win  570  win_scale=  0.96
+[ℹ️  ΔT] mean_pred_jump= 1.89cm  mean_gt_jump= 1.97cm
+[ℹ️  Window] Seq 018 win  580  win_scale=  0.83
+[ℹ️  ΔT] mean_pred_jump= 1.53cm  mean_gt_jump= 1.84cm
+[ℹ️  Window] Seq 018 win  590  win_scale=  1.11
+[ℹ️  ΔT] mean_pred_jump= 1.95cm  mean_gt_jump= 1.76cm
+[ℹ️  Window] Seq 018 win  600  win_scale=  1.21
+[ℹ️  ΔT] mean_pred_jump= 1.78cm  mean_gt_jump= 1.47cm
+[ℹ️  Window] Seq 018 win  610  win_scale=  0.90
+[ℹ️  ΔT] mean_pred_jump= 0.45cm  mean_gt_jump= 0.50cm
+[ℹ️  Window] Seq 018 win  620  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 0.43cm  mean_gt_jump= 0.43cm
+[ℹ️  Window] Seq 018 win  630  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump= 0.39cm  mean_gt_jump= 0.40cm
+[ℹ️  Window] Seq 018 win  640  win_scale=  1.05
+[ℹ️  ΔT] mean_pred_jump= 0.65cm  mean_gt_jump= 0.62cm
+[ℹ️  Window] Seq 018 win  650  win_scale=  0.93
+[ℹ️  ΔT] mean_pred_jump= 0.85cm  mean_gt_jump= 0.91cm
+[ℹ️  Window] Seq 018 win  660  win_scale=  0.88
+[ℹ️  ΔT] mean_pred_jump= 0.66cm  mean_gt_jump= 0.75cm
+[ℹ️  Window] Seq 018 win  670  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 0.40cm  mean_gt_jump= 0.41cm
+[ℹ️  Window] Seq 018 win  680  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump= 0.47cm  mean_gt_jump= 0.46cm
+[ℹ️  Window] Seq 018 win  690  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 1.64cm  mean_gt_jump= 1.66cm
+[ℹ️  Window] Seq 018 win  700  win_scale=  0.94
+[ℹ️  ΔT] mean_pred_jump= 2.45cm  mean_gt_jump= 2.62cm
+[ℹ️  Window] Seq 018 win  710  win_scale=  1.09
+[ℹ️  ΔT] mean_pred_jump= 2.65cm  mean_gt_jump= 2.42cm
+[ℹ️  Window] Seq 018 win  720  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump= 1.87cm  mean_gt_jump= 1.70cm
+[ℹ️  Window] Seq 018 win  730  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 0.78cm  mean_gt_jump= 0.70cm
+[ℹ️  Window] Seq 018 win  740  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 0.24cm  mean_gt_jump= 0.21cm
+[ℹ️  Window] Seq 018 win  750  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump= 0.23cm  mean_gt_jump= 0.23cm
+[ℹ️  Window] Seq 018 win  760  win_scale=  0.98
+Processing batches:  69%|██████▉   | 681/980 [01:09<00:30,  9.67it/s]Processing batches:  70%|██████▉   | 682/980 [01:10<00:31,  9.59it/s]Processing batches:  70%|██████▉   | 684/980 [01:10<00:29, 10.16it/s]Processing batches:  70%|██████▉   | 685/980 [01:10<00:29,  9.93it/s]Processing batches:  70%|███████   | 686/980 [01:10<00:29,  9.93it/s]Processing batches:  70%|███████   | 687/980 [01:10<00:30,  9.73it/s]Processing batches:  70%|███████   | 688/980 [01:10<00:30,  9.59it/s]Processing batches:  70%|███████   | 689/980 [01:10<00:30,  9.54it/s]Processing batches:  70%|███████   | 690/980 [01:10<00:30,  9.65it/s]Processing batches:  71%|███████   | 692/980 [01:11<00:28, 10.08it/s]Processing batches:  71%|███████   | 693/980 [01:11<00:28,  9.90it/s]Processing batches:  71%|███████   | 695/980 [01:11<00:28,  9.85it/s]Processing batches:  71%|███████   | 696/980 [01:11<00:29,  9.73it/s]Processing batches:  71%|███████   | 697/980 [01:11<00:29,  9.66it/s]Processing batches:  71%|███████   | 698/980 [01:11<00:29,  9.72it/s]Processing batches:  71%|███████▏  | 700/980 [01:11<00:27, 10.30it/s]Processing batches:  72%|███████▏  | 702/980 [01:12<00:27, 10.06it/s]Processing batches:  72%|███████▏  | 703/980 [01:12<00:27,  9.92it/s]Processing batches:  72%|███████▏  | 704/980 [01:12<00:28,  9.78it/s]Processing batches:  72%|███████▏  | 705/980 [01:12<00:28,  9.67it/s]Processing batches:  72%|███████▏  | 706/980 [01:12<00:28,  9.65it/s]Processing batches:  72%|███████▏  | 708/980 [01:12<00:26, 10.33it/s]Processing batches:  72%|███████▏  | 710/980 [01:12<00:26, 10.04it/s]Processing batches:  73%|███████▎  | 711/980 [01:12<00:27,  9.89it/s]Processing batches:  73%|███████▎  | 712/980 [01:13<00:27,  9.76it/s]Processing batches:  73%|███████▎  | 713/980 [01:13<00:27,  9.66it/s]Processing batches:  73%|███████▎  | 714/980 [01:13<00:27,  9.67it/s]Processing batches:  73%|███████▎  | 716/980 [01:13<00:25, 10.33it/s]Processing batches:  73%|███████▎  | 718/980 [01:13<00:26, 10.02it/s]Processing batches:  73%|███████▎  | 719/980 [01:13<00:26,  9.88it/s]Processing batches:  73%|███████▎  | 720/980 [01:13<00:26,  9.77it/s]Processing batches:  74%|███████▎  | 721/980 [01:13<00:26,  9.68it/s]Processing batches:  74%|███████▎  | 722/980 [01:14<00:26,  9.73it/s]Processing batches:  74%|███████▍  | 724/980 [01:14<00:25, 10.18it/s]Processing batches:  74%|███████▍  | 726/980 [01:14<00:25, 10.03it/s]Processing batches:  74%|███████▍  | 727/980 [01:14<00:25,  9.89it/s]Processing batches:  74%|███████▍  | 728/980 [01:14<00:25,  9.77it/s]Processing batches:  74%|███████▍  | 729/980 [01:14<00:25,  9.67it/s]Processing batches:  74%|███████▍  | 730/980 [01:14<00:25,  9.65it/s]Processing batches:  75%|███████▍  | 732/980 [01:15<00:23, 10.36it/s]Processing batches:  75%|███████▍  | 734/980 [01:15<00:24, 10.07it/s]Processing batches:  75%|███████▌  | 736/980 [01:15<00:24,  9.81it/s]Processing batches:  75%|███████▌  | 737/980 [01:15<00:25,  9.68it/s]Processing batches:  75%|███████▌  | 738/980 [01:15<00:24,  9.69it/s][ℹ️  ΔT] mean_pred_jump= 0.39cm  mean_gt_jump= 0.39cm
+[ℹ️  Window] Seq 018 win  770  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 0.55cm  mean_gt_jump= 0.54cm
+[ℹ️  Window] Seq 018 win  780  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.42cm  mean_gt_jump= 0.40cm
+[ℹ️  Window] Seq 018 win  790  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 0.57cm  mean_gt_jump= 0.54cm
+[ℹ️  Window] Seq 018 win  800  win_scale=  1.05
+[ℹ️  ΔT] mean_pred_jump= 1.94cm  mean_gt_jump= 1.85cm
+[ℹ️  Window] Seq 018 win  810  win_scale=  0.93
+[ℹ️  ΔT] mean_pred_jump= 2.17cm  mean_gt_jump= 2.33cm
+[ℹ️  Window] Seq 018 win  820  win_scale=  1.05
+[ℹ️  ΔT] mean_pred_jump= 2.29cm  mean_gt_jump= 2.18cm
+[ℹ️  Window] Seq 018 win  830  win_scale=  1.21
+[ℹ️  ΔT] mean_pred_jump= 2.05cm  mean_gt_jump= 1.69cm
+[ℹ️  Window] Seq 018 win  840  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.60cm  mean_gt_jump= 0.58cm
+[ℹ️  Window] Seq 018 win  850  win_scale=  0.94
+[ℹ️  ΔT] mean_pred_jump= 0.28cm  mean_gt_jump= 0.30cm
+[ℹ️  Window] Seq 018 win  860  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 0.69cm  mean_gt_jump= 0.61cm
+[ℹ️  Window] Seq 018 win  870  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump= 0.77cm  mean_gt_jump= 0.76cm
+[ℹ️  Window] Seq 018 win  880  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.39cm  mean_gt_jump= 0.38cm
+[ℹ️  Window] Seq 018 win  890  win_scale=  1.27
+[ℹ️  ΔT] mean_pred_jump= 1.05cm  mean_gt_jump= 0.82cm
+[ℹ️  Window] Seq 018 win  900  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump= 1.07cm  mean_gt_jump= 0.97cm
+[ℹ️  Window] Seq 018 win  910  win_scale=  0.95
+[ℹ️  ΔT] mean_pred_jump= 0.44cm  mean_gt_jump= 0.46cm
+[ℹ️  Window] Seq 018 win  920  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 0.44cm  mean_gt_jump= 0.43cm
+[ℹ️  Window] Seq 018 win  930  win_scale=  1.09
+[ℹ️  ΔT] mean_pred_jump= 1.84cm  mean_gt_jump= 1.68cm
+[ℹ️  Window] Seq 018 win  940  win_scale=  0.90
+[ℹ️  ΔT] mean_pred_jump= 2.27cm  mean_gt_jump= 2.53cm
+[ℹ️  Window] Seq 018 win  950  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 1.99cm  mean_gt_jump= 2.04cm
+[ℹ️  Window] Seq 018 win  960  win_scale=  1.33
+[ℹ️  ΔT] mean_pred_jump= 1.46cm  mean_gt_jump= 1.10cm
+[ℹ️  Window] Seq 018 win  970  win_scale=  1.14
+[ℹ️  ΔT] mean_pred_jump= 0.20cm  mean_gt_jump= 0.17cm
+[DBG] Seq 019 win 000  Δt_pred=[-0.01007435  0.02494746 -0.05144322]  Δt_gt=[-3.6920515e-05  6.2180627e-03 -6.7035919e-03]
+[DBG]   |Δt_pred|/|Δt_gt| = 6.349
+[DBG]   angle between pred and gt = 19.5°
+[ℹ️  Window] Seq 019 win    0  win_scale=  1.26
+[ℹ️  ΔT] mean_pred_jump= 5.28cm  mean_gt_jump= 4.18cm
+[⚠️  Window]  Seq 019, start     0  T_err=  5.80 cm  R_err= 1.44°  Scale μ=187.21%
+[DBG] Seq 019 win 001  Δt_pred=[-0.01912944  0.0140913  -0.04080627]  Δt_gt=[ 0.00111287  0.00286498 -0.00519701]
+[DBG]   |Δt_pred|/|Δt_gt| = 7.821
+[DBG]   angle between pred and gt = 35.8°
+[⚠️  Window]  Seq 019, start     1  T_err=  5.92 cm  R_err= 1.78°  Scale μ=168.33%
+[DBG] Seq 019 win 002  Δt_pred=[-0.00847871 -0.05227547  0.00058819]  Δt_gt=[ 0.00844084 -0.02434536 -0.00403223]
+[DBG]   |Δt_pred|/|Δt_gt| = 2.031
+[DBG]   angle between pred and gt = 29.8°
+[⚠️  Window]  Seq 019, start     2  T_err=  6.51 cm  R_err= 1.84°  Scale μ=164.98%
+[DBG] Seq 019 win 003  Δt_pred=[-0.05615588 -0.0634232   0.01922094]  Δt_gt=[-0.01354471 -0.00811779 -0.0167011 ]
+[DBG]   |Δt_pred|/|Δt_gt| = 3.779
+[DBG]   angle between pred and gt = 61.4°
+[⚠️  Window]  Seq 019, start     3  T_err=  8.66 cm  R_err= 1.95°  Scale μ=225.85%
+[DBG] Seq 019 win 004  Δt_pred=[-0.01896809  0.009867   -0.03818323]  Δt_gt=[-0.00243604  0.00023367 -0.00134954]
+[DBG]   |Δt_pred|/|Δt_gt| = 15.659
+[DBG]   angle between pred and gt = 35.1°
+[⚠️  Window]  Seq 019, start     4  T_err=  8.96 cm  R_err= 1.95°  Scale μ=223.12%
+[DBG] Seq 019 win 005  Δt_pred=[-0.05749935 -0.04943606  0.033491  ]  Δt_gt=[-0.02178954 -0.00165103 -0.00274427]
+[DBG]   |Δt_pred|/|Δt_gt| = 3.764
+[DBG]   angle between pred and gt = 47.1°
+[⚠️  Window]  Seq 019, start     5  T_err=  9.99 cm  R_err= 2.38°  Scale μ=220.85%
+[DBG] Seq 019 win 006  Δt_pred=[-0.01377937  0.03238957 -0.06204328]  Δt_gt=[-0.00601824  0.0099569  -0.00133427]
+[DBG]   |Δt_pred|/|Δt_gt| = 6.091
+[DBG]   angle between pred and gt = 54.2°
+[⚠️  Window]  Seq 019, start     6  T_err= 10.76 cm  R_err= 2.40°  Scale μ=183.54%
+[DBG] Seq 019 win 007  Δt_pred=[ 0.00397504  0.04473608 -0.06907599]  Δt_gt=[0.00357698 0.00114704 0.00216599]
+[DBG]   |Δt_pred|/|Δt_gt| = 19.002
+[DBG]   angle between pred and gt = 103.6°
+[⚠️  Window]  Seq 019, start     7  T_err= 10.76 cm  R_err= 2.44°  Scale μ=165.19%
+[DBG] Seq 019 win 008  Δt_pred=[-0.00384272  0.0353432  -0.0701641 ]  Δt_gt=[-2.1103377e-05 -1.6894809e-03  3.4733847e-04]
+[DBG]   |Δt_pred|/|Δt_gt| = 45.600
+[DBG]   angle between pred and gt = 128.3°
+[⚠️  Window]  Seq 019, start     8  T_err= 10.76 cm  R_err= 2.48°  Scale μ=135.46%
+[DBG] Seq 019 win 009  Δt_pred=[ 0.00465855  0.03063738 -0.06976146]  Δt_gt=[ 0.0052884  -0.00467684  0.00129849]
+[DBG]   |Δt_pred|/|Δt_gt| = 10.634
+[DBG]   angle between pred and gt = 112.4°
+[⚠️  Window]  Seq 019, start     9  T_err= 10.66 cm  R_err= 2.53°  Scale μ=101.87%
+[DBG] Seq 019 win 010  Δt_pred=[ 0.05533949  0.01272875 -0.01572456]  Δt_gt=[ 0.02993862 -0.0191844   0.02081641]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.430
+[DBG]   angle between pred and gt = 63.4°
+[ℹ️  Window] Seq 019 win   10  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump=10.05cm  mean_gt_jump= 9.98cm
+[⚠️  Window]  Seq 019, start    10  T_err= 10.75 cm  R_err= 2.53°  Scale μ=72.50%
+[DBG] Seq 019 win 011  Δt_pred=[ 0.00316165  0.01825375 -0.05596634]  Δt_gt=[ 0.00318102 -0.037015    0.01538702]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.466
+[DBG]   angle between pred and gt = 130.1°
+[⚠️  Window]  Seq 019, start    11  T_err= 10.84 cm  R_err= 2.39°  Scale μ=111.79%
+[DBG] Seq 019 win 012  Δt_pred=[-0.05318396 -0.19632389  0.06644356]  Δt_gt=[-0.0331654  -0.05464973 -0.03709534]
+[DBG]   |Δt_pred|/|Δt_gt| = 2.895
+[DBG]   angle between pred and gt = 50.6°
+[⚠️  Window]  Seq 019, start    12  T_err= 10.58 cm  R_err= 3.11°  Scale μ=101.79%
+[DBG] Seq 019 win 013  Δt_pred=[-0.0319169  -0.10567105  0.10096993]  Δt_gt=[-0.00138574 -0.03209233 -0.01994256]
+[DBG]   |Δt_pred|/|Δt_gt| = 3.957
+[DBG]   angle between pred and gt = 75.4°
+[⚠️  Window]  Seq 019, start    13  T_err= 10.61 cm  R_err= 3.32°  Scale μ=101.02%
+[DBG] Seq 019 win 014  Δt_pred=[ 0.02515423 -0.0342041   0.03485567]  Δt_gt=[ 0.02228349 -0.01497489  0.02805269]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.415
+[DBG]   angle between pred and gt = 16.0°
+[⚠️  Window]  Seq 019, start    14  T_err= 10.57 cm  R_err= 3.55°  Scale μ=92.00%
+[DBG] Seq 019 win 015  Δt_pred=[ 0.07377394 -0.02199784 -0.0005078 ]  Δt_gt=[ 0.03134324 -0.0368423   0.0444251 ]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.172
+[DBG]   angle between pred and gt = 52.2°
+[⚠️  Window]  Seq 019, start    15  T_err= 10.83 cm  R_err= 3.74°  Scale μ=88.28%
+[DBG] Seq 019 win 016  Δt_pred=[-0.02355227 -0.03713287  0.0327621 ]  Δt_gt=[-0.07685975 -0.0203538   0.04473323]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.601
+[DBG]   angle between pred and gt = 36.3°
+[⚠️  Window]  Seq 019, start    16  T_err= 10.84 cm  R_err= 3.57°  Scale μ=87.72%
+[DBG] Seq 019 win 017  Δt_pred=[-0.07544082  0.01080699  0.01079172]  Δt_gt=[-0.17625397  0.01209516 -0.06717043]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.407
+[DBG]   angle between pred and gt = 29.2°
+[⚠️  Window]  Seq 019, start    17  T_err= 10.70 cm  R_err= 3.54°  Scale μ=90.19%
+[DBG] Seq 019 win 018  Δt_pred=[-0.04386036  0.05851295 -0.02436539]  Δt_gt=[-0.07231001 -0.00562399 -0.08523647]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.689
+[DBG]   angle between pred and gt = 55.2°
+[⚠️  Window]  Seq 019, start    18  T_err= 10.06 cm  R_err= 3.47°  Scale μ=97.93%
+[DBG] Seq 019 win 019  Δt_pred=[ 0.00040629  0.02586162 -0.00131728]  Δt_gt=[-0.03188375  0.0034018  -0.00474205]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.799
+Processing batches:  76%|███████▌  | 740/980 [01:15<00:23, 10.10it/s]Processing batches:  76%|███████▌  | 742/980 [01:16<00:24,  9.89it/s]Processing batches:  76%|███████▌  | 743/980 [01:16<00:24,  9.74it/s]Processing batches:  76%|███████▌  | 744/980 [01:16<00:24,  9.63it/s]Processing batches:  76%|███████▌  | 745/980 [01:16<00:24,  9.57it/s]Processing batches:  76%|███████▌  | 747/980 [01:16<00:22, 10.21it/s]Processing batches:  76%|███████▋  | 749/980 [01:16<00:23,  9.89it/s]Processing batches:  77%|███████▋  | 751/980 [01:17<00:23,  9.84it/s]Processing batches:  77%|███████▋  | 752/980 [01:17<00:23,  9.75it/s]Processing batches:  77%|███████▋  | 753/980 [01:17<00:23,  9.67it/s]Processing batches:  77%|███████▋  | 754/980 [01:17<00:23,  9.65it/s]Processing batches:  77%|███████▋  | 756/980 [01:17<00:22, 10.09it/s]Processing batches:  77%|███████▋  | 757/980 [01:17<00:22,  9.88it/s]Processing batches:  77%|███████▋  | 759/980 [01:17<00:22,  9.76it/s][DBG]   angle between pred and gt = 84.4°
+[⚠️  Window]  Seq 019, start    19  T_err=  9.97 cm  R_err= 3.62°  Scale μ=103.09%
+[DBG] Seq 019 win 020  Δt_pred=[ 0.03234182 -0.03401484  0.2636057 ]  Δt_gt=[0.02101408 0.03001044 0.07480712]
+[DBG]   |Δt_pred|/|Δt_gt| = 3.214
+[DBG]   angle between pred and gt = 29.7°
+[ℹ️  Window] Seq 019 win   20  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump=12.56cm  mean_gt_jump=12.14cm
+[⚠️  Window]  Seq 019, start    20  T_err= 10.04 cm  R_err= 4.07°  Scale μ=99.03%
+[DBG] Seq 019 win 021  Δt_pred=[-0.02468171 -0.0512212   0.11560425]  Δt_gt=[-0.00243649 -0.05535743 -0.06332619]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.531
+[DBG]   angle between pred and gt = 114.1°
+[⚠️  Window]  Seq 019, start    21  T_err= 10.02 cm  R_err= 3.78°  Scale μ=93.05%
+[DBG] Seq 019 win 022  Δt_pred=[0.02419122 0.10969883 0.01232795]  Δt_gt=[ 0.09353807  0.05531    -0.22129896]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.458
+[DBG]   angle between pred and gt = 78.4°
+[⚠️  Window]  Seq 019, start    22  T_err=  9.77 cm  R_err= 3.76°  Scale μ=100.07%
+[DBG] Seq 019 win 023  Δt_pred=[ 0.00523337  0.05687264 -0.02408926]  Δt_gt=[ 0.02836703  0.11723659 -0.06052481]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.459
+[DBG]   angle between pred and gt = 8.5°
+[⚠️  Window]  Seq 019, start    23  T_err=  9.23 cm  R_err= 3.60°  Scale μ=101.08%
+[DBG] Seq 019 win 024  Δt_pred=[ 0.03893578  0.13770567 -0.00243031]  Δt_gt=[0.0425211  0.22209172 0.07147343]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.604
+[DBG]   angle between pred and gt = 19.1°
+[⚠️  Window]  Seq 019, start    24  T_err=  8.80 cm  R_err= 3.53°  Scale μ=92.87%
+[DBG] Seq 019 win 025  Δt_pred=[ 0.02679439  0.16629261 -0.02712154]  Δt_gt=[-0.01086156  0.11412957  0.18435349]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.786
+[DBG]   angle between pred and gt = 68.3°
+[⚠️  Window]  Seq 019, start    25  T_err=  8.00 cm  R_err= 3.52°  Scale μ=84.73%
+[DBG] Seq 019 win 026  Δt_pred=[-0.00160686 -0.0011604   0.01995182]  Δt_gt=[-0.01730448  0.00298534  0.05444935]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.350
+[DBG]   angle between pred and gt = 14.5°
+[⚠️  Window]  Seq 019, start    26  T_err=  7.67 cm  R_err= 3.64°  Scale μ=100.78%
+[DBG] Seq 019 win 027  Δt_pred=[-0.0076655   0.02050434 -0.02421228]  Δt_gt=[-0.00347455 -0.02440072 -0.00223666]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.319
+[DBG]   angle between pred and gt = 121.3°
+[⚠️  Window]  Seq 019, start    27  T_err=  8.10 cm  R_err= 3.75°  Scale μ=97.44%
+[DBG] Seq 019 win 028  Δt_pred=[-0.00918051 -0.04774543  0.15225652]  Δt_gt=[-0.00769146 -0.01845054  0.11981511]
+[DBG]   |Δt_pred|/|Δt_gt| = 1.316
+[DBG]   angle between pred and gt = 8.6°
+[⚠️  Window]  Seq 019, start    28  T_err=  8.39 cm  R_err= 3.98°  Scale μ=97.88%
+[DBG] Seq 019 win 029  Δt_pred=[ 0.01104279 -0.00408161  0.02533576]  Δt_gt=[-0.00304693 -0.02406195  0.06179371]
+[DBG]   |Δt_pred|/|Δt_gt| = 0.421
+[DBG]   angle between pred and gt = 28.5°
+[⚠️  Window]  Seq 019, start    29  T_err=  9.12 cm  R_err= 4.15°  Scale μ=97.16%
+[ℹ️  Window] Seq 019 win   30  win_scale=  1.08
+[ℹ️  ΔT] mean_pred_jump=14.11cm  mean_gt_jump=13.12cm
+[⚠️  Window]  Seq 019, start    30  T_err= 10.19 cm  R_err= 4.34°  Scale μ=101.10%
+[⚠️  Window]  Seq 019, start    31  T_err= 11.17 cm  R_err= 4.34°  Scale μ=92.62%
+[⚠️  Window]  Seq 019, start    32  T_err= 11.45 cm  R_err= 3.61°  Scale μ=106.39%
+[⚠️  Window]  Seq 019, start    33  T_err= 11.99 cm  R_err= 3.26°  Scale μ=103.88%
+[⚠️  Window]  Seq 019, start    34  T_err= 12.25 cm  R_err= 3.04°  Scale μ=110.22%
+[⚠️  Window]  Seq 019, start    35  T_err= 12.98 cm  R_err= 2.86°  Scale μ=115.13%
+[⚠️  Window]  Seq 019, start    36  T_err= 13.56 cm  R_err= 2.88°  Scale μ=117.98%
+[⚠️  Window]  Seq 019, start    37  T_err= 13.51 cm  R_err= 2.97°  Scale μ=116.41%
+[⚠️  Window]  Seq 019, start    38  T_err= 13.58 cm  R_err= 3.02°  Scale μ=100.31%
+[⚠️  Window]  Seq 019, start    39  T_err= 13.18 cm  R_err= 2.91°  Scale μ=86.22%
+[ℹ️  Window] Seq 019 win   40  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump=18.08cm  mean_gt_jump=18.42cm
+[⚠️  Window]  Seq 019, start    40  T_err= 13.21 cm  R_err= 2.40°  Scale μ=84.20%
+[⚠️  Window]  Seq 019, start    41  T_err= 12.57 cm  R_err= 2.35°  Scale μ=83.75%
+[⚠️  Window]  Seq 019, start    42  T_err= 11.71 cm  R_err= 2.36°  Scale μ=71.52%
+[⚠️  Window]  Seq 019, start    43  T_err= 10.42 cm  R_err= 2.32°  Scale μ=54.11%
+[⚠️  Window]  Seq 019, start    44  T_err= 10.51 cm  R_err= 2.35°  Scale μ=39.27%
+[⚠️  Window]  Seq 019, start    45  T_err= 10.02 cm  R_err= 1.91°  Scale μ=36.83%
+[⚠️  Window]  Seq 019, start    46  T_err=  9.65 cm  R_err= 1.75°  Scale μ=39.09%
+[⚠️  Window]  Seq 019, start    47  T_err= 12.34 cm  R_err= 1.67°  Scale μ=45.87%
+[⚠️  Window]  Seq 019, start    48  T_err= 14.07 cm  R_err= 1.44°  Scale μ=56.18%
+[⚠️  Window]  Seq 019, start    49  T_err= 13.64 cm  R_err= 1.22°  Scale μ=54.58%
+[ℹ️  Window] Seq 019 win   50  win_scale=  0.92
+[ℹ️  ΔT] mean_pred_jump=16.05cm  mean_gt_jump=17.49cm
+[⚠️  Window]  Seq 019, start    50  T_err= 12.82 cm  R_err= 1.05°  Scale μ=54.88%
+[⚠️  Window]  Seq 019, start    51  T_err= 11.87 cm  R_err= 1.02°  Scale μ=53.04%
+[⚠️  Window]  Seq 019, start    52  T_err= 11.35 cm  R_err= 1.01°  Scale μ=52.21%
+[⚠️  Window]  Seq 019, start    53  T_err= 10.34 cm  R_err= 0.90°  Scale μ=52.54%
+[⚠️  Window]  Seq 019, start    54  T_err=  9.16 cm  R_err= 0.86°  Scale μ=65.27%
+[⚠️  Window]  Seq 019, start    55  T_err=  8.43 cm  R_err= 0.84°  Scale μ=79.46%
+[⚠️  Window]  Seq 019, start    56  T_err=  7.76 cm  R_err= 0.82°  Scale μ=89.38%
+[⚠️  Window]  Seq 019, start    57  T_err=  7.32 cm  R_err= 0.72°  Scale μ=104.19%
+[⚠️  Window]  Seq 019, start    58  T_err=  6.91 cm  R_err= 0.67°  Scale μ=116.64%
+[⚠️  Window]  Seq 019, start    59  T_err=  6.93 cm  R_err= 0.60°  Scale μ=127.35%
+[ℹ️  Window] Seq 019 win   60  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump= 7.62cm  mean_gt_jump= 6.95cm
+[⚠️  Window]  Seq 019, start    60  T_err=  6.62 cm  R_err= 0.57°  Scale μ=138.71%
+[⚠️  Window]  Seq 019, start    61  T_err=  6.47 cm  R_err= 0.56°  Scale μ=145.52%
+[⚠️  Window]  Seq 019, start    62  T_err=  5.91 cm  R_err= 0.51°  Scale μ=153.62%
+[⚠️  Window]  Seq 019, start    63  T_err=  5.54 cm  R_err= 0.50°  Scale μ=146.66%
+[ℹ️  Window] Seq 019 win   70  win_scale=  0.95
+[ℹ️  ΔT] mean_pred_jump= 0.84cm  mean_gt_jump= 0.88cm
+[ℹ️  Window] Seq 019 win   80  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump=10.45cm  mean_gt_jump= 9.78cm
+[⚠️  Window]  Seq 019, start    83  T_err=  5.09 cm  R_err= 1.16°  Scale μ=66.04%
+[⚠️  Window]  Seq 019, start    84  T_err=  5.30 cm  R_err= 1.22°  Scale μ=62.11%
+[⚠️  Window]  Seq 019, start    85  T_err=  5.40 cm  R_err= 1.23°  Scale μ=65.18%
+[⚠️  Window]  Seq 019, start    86  T_err=  5.45 cm  R_err= 1.24°  Scale μ=70.90%
+[⚠️  Window]  Seq 019, start    87  T_err=  5.38 cm  R_err= 1.24°  Scale μ=63.55%
+[⚠️  Window]  Seq 019, start    88  T_err=  5.56 cm  R_err= 2.09°  Scale μ=57.50%
+[⚠️  Window]  Seq 019, start    89  T_err=  6.46 cm  R_err= 2.12°  Scale μ=57.93%
+[ℹ️  Window] Seq 019 win   90  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump=17.07cm  mean_gt_jump=16.75cm
+[⚠️  Window]  Seq 019, start    90  T_err=  7.30 cm  R_err= 2.14°  Scale μ=57.42%
+[⚠️  Window]  Seq 019, start    91  T_err=  7.77 cm  R_err= 2.20°  Scale μ=57.60%
+[⚠️  Window]  Seq 019, start    92  T_err=  8.46 cm  R_err= 2.70°  Scale μ=55.75%
+[⚠️  Window]  Seq 019, start    93  T_err=  8.41 cm  R_err= 2.52°  Scale μ=48.25%
+[⚠️  Window]  Seq 019, start    94  T_err=  8.60 cm  R_err= 2.11°  Scale μ=45.67%
+[⚠️  Window]  Seq 019, start    95  T_err=  8.99 cm  R_err= 2.10°  Scale μ=47.17%
+[⚠️  Window]  Seq 019, start    96  T_err=  8.73 cm  R_err= 2.12°  Scale μ=47.43%
+[⚠️  Window]  Seq 019, start    97  T_err=  9.01 cm  R_err= 2.14°  Scale μ=49.18%
+Processing batches:  78%|███████▊  | 760/980 [01:17<00:22,  9.63it/s]Processing batches:  78%|███████▊  | 761/980 [01:18<00:22,  9.57it/s]Processing batches:  78%|███████▊  | 763/980 [01:18<00:21, 10.21it/s]Processing batches:  78%|███████▊  | 765/980 [01:18<00:21,  9.85it/s]Processing batches:  78%|███████▊  | 767/980 [01:18<00:21,  9.81it/s]Processing batches:  78%|███████▊  | 768/980 [01:18<00:21,  9.72it/s]Processing batches:  78%|███████▊  | 769/980 [01:18<00:21,  9.61it/s]Processing batches:  79%|███████▊  | 770/980 [01:18<00:21,  9.64it/s]Processing batches:  79%|███████▉  | 772/980 [01:19<00:20, 10.01it/s]Processing batches:  79%|███████▉  | 773/980 [01:19<00:21,  9.84it/s]Processing batches:  79%|███████▉  | 775/980 [01:19<00:20,  9.81it/s]Processing batches:  79%|███████▉  | 776/980 [01:19<00:21,  9.68it/s]Processing batches:  79%|███████▉  | 777/980 [01:19<00:21,  9.61it/s]Processing batches:  79%|███████▉  | 778/980 [01:19<00:20,  9.69it/s]Processing batches:  80%|███████▉  | 780/980 [01:19<00:19, 10.09it/s][⚠️  Window]  Seq 019, start    98  T_err=  9.64 cm  R_err= 2.20°  Scale μ=54.71%
+[⚠️  Window]  Seq 019, start    99  T_err=  9.86 cm  R_err= 2.42°  Scale μ=53.10%
+[ℹ️  Window] Seq 019 win  100  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump=15.73cm  mean_gt_jump=16.01cm
+[⚠️  Window]  Seq 019, start   100  T_err=  9.78 cm  R_err= 2.48°  Scale μ=51.67%
+[⚠️  Window]  Seq 019, start   101  T_err=  9.48 cm  R_err= 2.48°  Scale μ=50.72%
+[⚠️  Window]  Seq 019, start   102  T_err=  9.23 cm  R_err= 2.67°  Scale μ=48.26%
+[⚠️  Window]  Seq 019, start   103  T_err=  9.12 cm  R_err= 2.68°  Scale μ=45.45%
+[⚠️  Window]  Seq 019, start   104  T_err=  9.62 cm  R_err= 2.64°  Scale μ=47.57%
+[⚠️  Window]  Seq 019, start   105  T_err= 10.12 cm  R_err= 2.75°  Scale μ=54.28%
+[⚠️  Window]  Seq 019, start   106  T_err= 10.87 cm  R_err= 2.81°  Scale μ=55.46%
+[⚠️  Window]  Seq 019, start   107  T_err= 11.02 cm  R_err= 2.82°  Scale μ=35.55%
+[⚠️  Window]  Seq 019, start   108  T_err= 11.21 cm  R_err= 2.00°  Scale μ=41.11%
+[⚠️  Window]  Seq 019, start   109  T_err= 10.62 cm  R_err= 2.28°  Scale μ=42.87%
+[ℹ️  Window] Seq 019 win  110  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump=14.62cm  mean_gt_jump=15.06cm
+[⚠️  Window]  Seq 019, start   110  T_err=  9.69 cm  R_err= 2.38°  Scale μ=43.53%
+[⚠️  Window]  Seq 019, start   111  T_err=  9.23 cm  R_err= 2.34°  Scale μ=43.58%
+[⚠️  Window]  Seq 019, start   112  T_err=  8.92 cm  R_err= 1.83°  Scale μ=48.39%
+[⚠️  Window]  Seq 019, start   113  T_err=  8.78 cm  R_err= 1.85°  Scale μ=66.25%
+[⚠️  Window]  Seq 019, start   114  T_err=  8.89 cm  R_err= 1.91°  Scale μ=68.80%
+[⚠️  Window]  Seq 019, start   115  T_err=  9.17 cm  R_err= 1.98°  Scale μ=72.91%
+[⚠️  Window]  Seq 019, start   116  T_err=  8.94 cm  R_err= 1.96°  Scale μ=70.51%
+[⚠️  Window]  Seq 019, start   117  T_err=  9.11 cm  R_err= 1.96°  Scale μ=78.83%
+[⚠️  Window]  Seq 019, start   118  T_err=  8.87 cm  R_err= 1.85°  Scale μ=77.04%
+[⚠️  Window]  Seq 019, start   119  T_err=  8.52 cm  R_err= 1.69°  Scale μ=78.82%
+[ℹ️  Window] Seq 019 win  120  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump=10.88cm  mean_gt_jump= 9.89cm
+[⚠️  Window]  Seq 019, start   120  T_err=  8.64 cm  R_err= 1.60°  Scale μ=83.95%
+[⚠️  Window]  Seq 019, start   121  T_err=  7.89 cm  R_err= 1.59°  Scale μ=103.69%
+[⚠️  Window]  Seq 019, start   122  T_err=  7.21 cm  R_err= 1.42°  Scale μ=110.25%
+[⚠️  Window]  Seq 019, start   123  T_err=  7.17 cm  R_err= 1.44°  Scale μ=112.37%
+[⚠️  Window]  Seq 019, start   124  T_err=  6.83 cm  R_err= 1.65°  Scale μ=103.30%
+[⚠️  Window]  Seq 019, start   125  T_err=  7.23 cm  R_err= 1.66°  Scale μ=103.51%
+[⚠️  Window]  Seq 019, start   126  T_err=  7.19 cm  R_err= 1.62°  Scale μ=106.82%
+[⚠️  Window]  Seq 019, start   127  T_err=  7.69 cm  R_err= 1.61°  Scale μ=110.86%
+[⚠️  Window]  Seq 019, start   128  T_err=  9.10 cm  R_err= 1.62°  Scale μ=115.60%
+[⚠️  Window]  Seq 019, start   129  T_err= 10.51 cm  R_err= 1.35°  Scale μ=132.78%
+[ℹ️  Window] Seq 019 win  130  win_scale=  1.17
+[ℹ️  ΔT] mean_pred_jump=10.18cm  mean_gt_jump= 8.67cm
+[⚠️  Window]  Seq 019, start   130  T_err= 10.01 cm  R_err= 1.29°  Scale μ=121.26%
+[⚠️  Window]  Seq 019, start   131  T_err=  9.16 cm  R_err= 1.30°  Scale μ=112.99%
+[⚠️  Window]  Seq 019, start   132  T_err=  9.45 cm  R_err= 1.29°  Scale μ=117.89%
+[⚠️  Window]  Seq 019, start   133  T_err=  9.50 cm  R_err= 1.31°  Scale μ=109.28%
+[⚠️  Window]  Seq 019, start   134  T_err=  9.39 cm  R_err= 1.32°  Scale μ=117.95%
+[⚠️  Window]  Seq 019, start   135  T_err=  9.41 cm  R_err= 1.26°  Scale μ=125.91%
+[⚠️  Window]  Seq 019, start   136  T_err=  9.61 cm  R_err= 1.51°  Scale μ=124.86%
+[⚠️  Window]  Seq 019, start   137  T_err= 12.50 cm  R_err= 1.63°  Scale μ=156.49%
+[⚠️  Window]  Seq 019, start   138  T_err= 13.76 cm  R_err= 1.76°  Scale μ=155.54%
+[⚠️  Window]  Seq 019, start   139  T_err= 13.98 cm  R_err= 1.77°  Scale μ=147.71%
+[ℹ️  Window] Seq 019 win  140  win_scale=  1.17
+[ℹ️  ΔT] mean_pred_jump=12.81cm  mean_gt_jump=10.92cm
+[⚠️  Window]  Seq 019, start   140  T_err= 14.15 cm  R_err= 1.89°  Scale μ=136.60%
+[⚠️  Window]  Seq 019, start   141  T_err= 14.82 cm  R_err= 1.91°  Scale μ=106.12%
+[⚠️  Window]  Seq 019, start   142  T_err= 15.82 cm  R_err= 1.88°  Scale μ=108.54%
+[⚠️  Window]  Seq 019, start   143  T_err= 16.45 cm  R_err= 1.84°  Scale μ=106.77%
+[⚠️  Window]  Seq 019, start   144  T_err= 15.61 cm  R_err= 1.64°  Scale μ=100.91%
+[⚠️  Window]  Seq 019, start   145  T_err= 15.48 cm  R_err= 1.56°  Scale μ=107.90%
+[⚠️  Window]  Seq 019, start   146  T_err= 15.01 cm  R_err= 1.59°  Scale μ=110.64%
+[⚠️  Window]  Seq 019, start   147  T_err= 15.10 cm  R_err= 1.63°  Scale μ=104.51%
+[⚠️  Window]  Seq 019, start   148  T_err= 14.31 cm  R_err= 1.66°  Scale μ=103.05%
+[⚠️  Window]  Seq 019, start   149  T_err= 14.04 cm  R_err= 1.65°  Scale μ=129.09%
+[ℹ️  Window] Seq 019 win  150  win_scale=  1.09
+[ℹ️  ΔT] mean_pred_jump=15.73cm  mean_gt_jump=14.44cm
+[⚠️  Window]  Seq 019, start   150  T_err= 13.67 cm  R_err= 1.60°  Scale μ=130.94%
+[⚠️  Window]  Seq 019, start   151  T_err= 14.07 cm  R_err= 1.63°  Scale μ=141.23%
+[⚠️  Window]  Seq 019, start   152  T_err= 13.32 cm  R_err= 1.67°  Scale μ=132.54%
+[⚠️  Window]  Seq 019, start   153  T_err= 13.61 cm  R_err= 1.68°  Scale μ=145.58%
+[⚠️  Window]  Seq 019, start   154  T_err= 13.07 cm  R_err= 1.63°  Scale μ=116.90%
+[⚠️  Window]  Seq 019, start   155  T_err= 13.22 cm  R_err= 1.62°  Scale μ=125.36%
+[⚠️  Window]  Seq 019, start   156  T_err= 13.29 cm  R_err= 1.39°  Scale μ=132.65%
+[⚠️  Window]  Seq 019, start   157  T_err= 11.59 cm  R_err= 1.25°  Scale μ=139.70%
+[⚠️  Window]  Seq 019, start   158  T_err= 10.64 cm  R_err= 1.19°  Scale μ=137.78%
+[⚠️  Window]  Seq 019, start   159  T_err= 10.34 cm  R_err= 1.17°  Scale μ=136.36%
+[ℹ️  Window] Seq 019 win  160  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump=12.46cm  mean_gt_jump=10.83cm
+[⚠️  Window]  Seq 019, start   160  T_err= 10.40 cm  R_err= 1.14°  Scale μ=142.18%
+[⚠️  Window]  Seq 019, start   161  T_err= 10.03 cm  R_err= 1.50°  Scale μ=144.78%
+[⚠️  Window]  Seq 019, start   162  T_err=  9.22 cm  R_err= 1.66°  Scale μ=133.62%
+[⚠️  Window]  Seq 019, start   163  T_err=  9.00 cm  R_err= 1.66°  Scale μ=131.52%
+[⚠️  Window]  Seq 019, start   164  T_err=  9.08 cm  R_err= 1.64°  Scale μ=132.90%
+[⚠️  Window]  Seq 019, start   165  T_err=  8.03 cm  R_err= 1.63°  Scale μ=112.62%
+[⚠️  Window]  Seq 019, start   166  T_err=  7.36 cm  R_err= 1.62°  Scale μ=97.95%
+[⚠️  Window]  Seq 019, start   167  T_err=  7.36 cm  R_err= 1.58°  Scale μ=100.04%
+[⚠️  Window]  Seq 019, start   168  T_err=  6.92 cm  R_err= 1.58°  Scale μ=95.64%
+[⚠️  Window]  Seq 019, start   169  T_err=  7.22 cm  R_err= 1.61°  Scale μ=173.98%
+[ℹ️  Window] Seq 019 win  170  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump= 8.72cm  mean_gt_jump= 7.91cm
+[⚠️  Window]  Seq 019, start   170  T_err=  7.46 cm  R_err= 1.65°  Scale μ=186.75%
+[⚠️  Window]  Seq 019, start   171  T_err=  7.63 cm  R_err= 1.65°  Scale μ=200.20%
+[⚠️  Window]  Seq 019, start   172  T_err=  7.86 cm  R_err= 1.67°  Scale μ=201.01%
+[⚠️  Window]  Seq 019, start   173  T_err=  7.88 cm  R_err= 1.66°  Scale μ=206.05%
+[⚠️  Window]  Seq 019, start   174  T_err=  7.88 cm  R_err= 1.73°  Scale μ=207.17%
+[⚠️  Window]  Seq 019, start   175  T_err=  7.81 cm  R_err= 1.78°  Scale μ=212.49%
+[⚠️  Window]  Seq 019, start   176  T_err=  7.88 cm  R_err= 1.83°  Scale μ=215.26%
+[⚠️  Window]  Seq 019, start   177  T_err=  7.82 cm  R_err= 1.82°  Scale μ=219.23%
+[⚠️  Window]  Seq 019, start   178  T_err=  7.51 cm  R_err= 1.75°  Scale μ=246.70%
+[⚠️  Window]  Seq 019, start   179  T_err=  7.50 cm  R_err= 1.68°  Scale μ=267.61%
+Processing batches:  80%|███████▉  | 781/980 [01:20<00:20,  9.91it/s]Processing batches:  80%|███████▉  | 782/980 [01:20<00:19,  9.90it/s]Processing batches:  80%|███████▉  | 783/980 [01:20<00:20,  9.75it/s]Processing batches:  80%|████████  | 784/980 [01:20<00:20,  9.60it/s]Processing batches:  80%|████████  | 785/980 [01:20<00:20,  9.53it/s]Processing batches:  80%|████████  | 787/980 [01:20<00:18, 10.24it/s]Processing batches:  81%|████████  | 789/980 [01:20<00:19,  9.85it/s]Processing batches:  81%|████████  | 790/980 [01:20<00:19,  9.88it/s]Processing batches:  81%|████████  | 791/980 [01:21<00:19,  9.75it/s]Processing batches:  81%|████████  | 792/980 [01:21<00:19,  9.60it/s]Processing batches:  81%|████████  | 793/980 [01:21<00:19,  9.54it/s]Processing batches:  81%|████████  | 795/980 [01:21<00:18, 10.18it/s]Processing batches:  81%|████████  | 796/980 [01:21<00:18,  9.94it/s]Processing batches:  81%|████████▏ | 797/980 [01:21<00:18,  9.78it/s]Processing batches:  82%|████████▏ | 799/980 [01:21<00:18,  9.76it/s]Processing batches:  82%|████████▏ | 800/980 [01:22<00:18,  9.67it/s]Processing batches:  82%|████████▏ | 801/980 [01:22<00:18,  9.59it/s][ℹ️  Window] Seq 019 win  180  win_scale=  1.22
+[ℹ️  ΔT] mean_pred_jump= 8.61cm  mean_gt_jump= 7.03cm
+[⚠️  Window]  Seq 019, start   180  T_err=  7.73 cm  R_err= 1.66°  Scale μ=272.23%
+[⚠️  Window]  Seq 019, start   181  T_err=  7.80 cm  R_err= 1.33°  Scale μ=265.00%
+[⚠️  Window]  Seq 019, start   182  T_err=  7.58 cm  R_err= 1.16°  Scale μ=258.81%
+[⚠️  Window]  Seq 019, start   183  T_err=  6.58 cm  R_err= 1.15°  Scale μ=241.46%
+[⚠️  Window]  Seq 019, start   184  T_err=  5.91 cm  R_err= 1.17°  Scale μ=221.21%
+[⚠️  Window]  Seq 019, start   185  T_err=  5.00 cm  R_err= 1.18°  Scale μ=187.86%
+[ℹ️  Window] Seq 019 win  190  win_scale=  1.21
+[ℹ️  ΔT] mean_pred_jump= 4.52cm  mean_gt_jump= 3.74cm
+[⚠️  Window]  Seq 019, start   191  T_err=  5.62 cm  R_err= 1.82°  Scale μ=157.09%
+[⚠️  Window]  Seq 019, start   192  T_err=  5.43 cm  R_err= 1.99°  Scale μ=144.77%
+[⚠️  Window]  Seq 019, start   193  T_err=  5.69 cm  R_err= 1.96°  Scale μ=145.24%
+[⚠️  Window]  Seq 019, start   194  T_err=  6.46 cm  R_err= 1.86°  Scale μ=158.41%
+[⚠️  Window]  Seq 019, start   195  T_err=  8.33 cm  R_err= 1.78°  Scale μ=212.12%
+[⚠️  Window]  Seq 019, start   196  T_err= 10.27 cm  R_err= 1.73°  Scale μ=269.53%
+[⚠️  Window]  Seq 019, start   197  T_err= 13.29 cm  R_err= 1.76°  Scale μ=317.81%
+[⚠️  Window]  Seq 019, start   198  T_err= 13.47 cm  R_err= 1.77°  Scale μ=275.48%
+[⚠️  Window]  Seq 019, start   199  T_err= 13.09 cm  R_err= 1.81°  Scale μ=193.96%
+[ℹ️  Window] Seq 019 win  200  win_scale=  1.16
+[ℹ️  ΔT] mean_pred_jump=18.06cm  mean_gt_jump=15.58cm
+[⚠️  Window]  Seq 019, start   200  T_err= 12.93 cm  R_err= 1.75°  Scale μ=182.06%
+[⚠️  Window]  Seq 019, start   201  T_err= 12.78 cm  R_err= 1.68°  Scale μ=182.26%
+[⚠️  Window]  Seq 019, start   202  T_err= 13.22 cm  R_err= 1.72°  Scale μ=172.57%
+[⚠️  Window]  Seq 019, start   203  T_err= 12.83 cm  R_err= 1.69°  Scale μ=113.76%
+[⚠️  Window]  Seq 019, start   204  T_err= 12.66 cm  R_err= 1.71°  Scale μ=103.95%
+[⚠️  Window]  Seq 019, start   205  T_err= 13.47 cm  R_err= 1.83°  Scale μ=102.45%
+[⚠️  Window]  Seq 019, start   206  T_err= 13.63 cm  R_err= 1.81°  Scale μ=108.96%
+[⚠️  Window]  Seq 019, start   207  T_err= 13.52 cm  R_err= 1.77°  Scale μ=114.08%
+[⚠️  Window]  Seq 019, start   208  T_err= 14.41 cm  R_err= 1.82°  Scale μ=147.81%
+[⚠️  Window]  Seq 019, start   209  T_err= 14.67 cm  R_err= 1.73°  Scale μ=162.86%
+[ℹ️  Window] Seq 019 win  210  win_scale=  1.09
+[ℹ️  ΔT] mean_pred_jump=22.05cm  mean_gt_jump=20.22cm
+[⚠️  Window]  Seq 019, start   210  T_err= 13.84 cm  R_err= 1.78°  Scale μ=143.46%
+[⚠️  Window]  Seq 019, start   211  T_err= 13.75 cm  R_err= 1.39°  Scale μ=147.67%
+[⚠️  Window]  Seq 019, start   212  T_err= 13.20 cm  R_err= 1.18°  Scale μ=146.10%
+[⚠️  Window]  Seq 019, start   213  T_err= 13.08 cm  R_err= 1.15°  Scale μ=166.55%
+[⚠️  Window]  Seq 019, start   214  T_err= 13.12 cm  R_err= 1.22°  Scale μ=165.58%
+[⚠️  Window]  Seq 019, start   215  T_err= 12.47 cm  R_err= 1.24°  Scale μ=158.06%
+[⚠️  Window]  Seq 019, start   216  T_err= 11.63 cm  R_err= 1.21°  Scale μ=152.01%
+[⚠️  Window]  Seq 019, start   217  T_err= 10.36 cm  R_err= 1.19°  Scale μ=138.37%
+[⚠️  Window]  Seq 019, start   218  T_err= 10.03 cm  R_err= 1.23°  Scale μ=132.00%
+[⚠️  Window]  Seq 019, start   219  T_err= 10.11 cm  R_err= 1.23°  Scale μ=129.84%
+[ℹ️  Window] Seq 019 win  220  win_scale=  1.08
+[ℹ️  ΔT] mean_pred_jump=10.69cm  mean_gt_jump= 9.90cm
+[⚠️  Window]  Seq 019, start   220  T_err=  9.55 cm  R_err= 1.24°  Scale μ=123.99%
+[⚠️  Window]  Seq 019, start   221  T_err=  9.37 cm  R_err= 1.25°  Scale μ=131.48%
+[⚠️  Window]  Seq 019, start   222  T_err=  8.25 cm  R_err= 1.29°  Scale μ=119.40%
+[⚠️  Window]  Seq 019, start   223  T_err=  7.47 cm  R_err= 1.37°  Scale μ=106.17%
+[⚠️  Window]  Seq 019, start   224  T_err=  6.72 cm  R_err= 1.34°  Scale μ=96.96%
+[⚠️  Window]  Seq 019, start   225  T_err=  5.53 cm  R_err= 1.21°  Scale μ=83.28%
+[⚠️  Window]  Seq 019, start   226  T_err=  5.61 cm  R_err= 1.18°  Scale μ=86.04%
+[⚠️  Window]  Seq 019, start   227  T_err=  5.74 cm  R_err= 1.20°  Scale μ=83.48%
+[⚠️  Window]  Seq 019, start   228  T_err=  5.57 cm  R_err= 1.15°  Scale μ=86.12%
+[⚠️  Window]  Seq 019, start   229  T_err=  5.43 cm  R_err= 1.13°  Scale μ=78.67%
+[ℹ️  Window] Seq 019 win  230  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 5.22cm  mean_gt_jump= 5.02cm
+[⚠️  Window]  Seq 019, start   230  T_err=  5.92 cm  R_err= 0.90°  Scale μ=98.07%
+[⚠️  Window]  Seq 019, start   231  T_err=  5.67 cm  R_err= 0.91°  Scale μ=99.00%
+[⚠️  Window]  Seq 019, start   232  T_err=  5.68 cm  R_err= 0.89°  Scale μ=98.39%
+[⚠️  Window]  Seq 019, start   233  T_err=  5.83 cm  R_err= 0.96°  Scale μ=79.12%
+[⚠️  Window]  Seq 019, start   234  T_err=  5.97 cm  R_err= 1.28°  Scale μ=79.24%
+[⚠️  Window]  Seq 019, start   235  T_err=  6.29 cm  R_err= 1.38°  Scale μ=83.39%
+[⚠️  Window]  Seq 019, start   236  T_err=  6.27 cm  R_err= 1.49°  Scale μ=80.31%
+[⚠️  Window]  Seq 019, start   237  T_err=  6.19 cm  R_err= 1.53°  Scale μ=77.77%
+[⚠️  Window]  Seq 019, start   238  T_err=  6.62 cm  R_err= 1.59°  Scale μ=78.91%
+[⚠️  Window]  Seq 019, start   239  T_err=  6.79 cm  R_err= 1.60°  Scale μ=87.08%
+[ℹ️  Window] Seq 019 win  240  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 8.31cm  mean_gt_jump= 8.37cm
+[⚠️  Window]  Seq 019, start   240  T_err=  6.71 cm  R_err= 1.59°  Scale μ=82.54%
+[⚠️  Window]  Seq 019, start   241  T_err=  6.05 cm  R_err= 1.59°  Scale μ=65.52%
+[⚠️  Window]  Seq 019, start   242  T_err=  5.93 cm  R_err= 1.52°  Scale μ=65.69%
+[⚠️  Window]  Seq 019, start   243  T_err=  6.42 cm  R_err= 1.44°  Scale μ=67.02%
+[⚠️  Window]  Seq 019, start   244  T_err=  6.49 cm  R_err= 1.43°  Scale μ=66.83%
+[⚠️  Window]  Seq 019, start   245  T_err=  6.46 cm  R_err= 1.45°  Scale μ=66.05%
+[⚠️  Window]  Seq 019, start   246  T_err=  6.44 cm  R_err= 1.46°  Scale μ=65.19%
+[⚠️  Window]  Seq 019, start   247  T_err=  6.85 cm  R_err= 1.42°  Scale μ=66.03%
+[⚠️  Window]  Seq 019, start   248  T_err=  6.90 cm  R_err= 1.38°  Scale μ=58.58%
+[⚠️  Window]  Seq 019, start   249  T_err=  7.18 cm  R_err= 1.38°  Scale μ=63.11%
+[ℹ️  Window] Seq 019 win  250  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump=11.50cm  mean_gt_jump=11.91cm
+[⚠️  Window]  Seq 019, start   250  T_err=  7.29 cm  R_err= 1.37°  Scale μ=62.18%
+[⚠️  Window]  Seq 019, start   251  T_err=  7.52 cm  R_err= 1.32°  Scale μ=59.73%
+[⚠️  Window]  Seq 019, start   252  T_err=  7.64 cm  R_err= 1.34°  Scale μ=55.47%
+[⚠️  Window]  Seq 019, start   253  T_err=  7.68 cm  R_err= 1.31°  Scale μ=55.25%
+[⚠️  Window]  Seq 019, start   254  T_err=  7.52 cm  R_err= 0.93°  Scale μ=44.43%
+[⚠️  Window]  Seq 019, start   255  T_err=  7.60 cm  R_err= 0.83°  Scale μ=44.21%
+[⚠️  Window]  Seq 019, start   256  T_err=  7.85 cm  R_err= 0.72°  Scale μ=44.18%
+[⚠️  Window]  Seq 019, start   257  T_err=  7.76 cm  R_err= 0.66°  Scale μ=43.50%
+[⚠️  Window]  Seq 019, start   258  T_err=  7.56 cm  R_err= 0.59°  Scale μ=54.91%
+[⚠️  Window]  Seq 019, start   259  T_err=  7.31 cm  R_err= 0.58°  Scale μ=67.91%
+[ℹ️  Window] Seq 019 win  260  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump=14.09cm  mean_gt_jump=13.12cm
+[⚠️  Window]  Seq 019, start   260  T_err=  7.04 cm  R_err= 0.59°  Scale μ=76.81%
+[⚠️  Window]  Seq 019, start   261  T_err=  6.98 cm  R_err= 0.59°  Scale μ=76.96%
+[⚠️  Window]  Seq 019, start   262  T_err=  7.44 cm  R_err= 0.62°  Scale μ=77.63%
+[⚠️  Window]  Seq 019, start   263  T_err=  6.78 cm  R_err= 0.62°  Scale μ=71.08%
+[⚠️  Window]  Seq 019, start   264  T_err=  6.90 cm  R_err= 0.65°  Scale μ=73.75%
+[⚠️  Window]  Seq 019, start   265  T_err=  7.11 cm  R_err= 0.64°  Scale μ=72.00%
+Processing batches:  82%|████████▏ | 803/980 [01:22<00:17, 10.29it/s]Processing batches:  82%|████████▏ | 805/980 [01:22<00:17,  9.92it/s]Processing batches:  82%|████████▏ | 807/980 [01:22<00:17,  9.84it/s]Processing batches:  82%|████████▏ | 808/980 [01:22<00:17,  9.74it/s]Processing batches:  83%|████████▎ | 809/980 [01:22<00:17,  9.67it/s]Processing batches:  83%|████████▎ | 810/980 [01:23<00:17,  9.73it/s]Processing batches:  83%|████████▎ | 812/980 [01:23<00:16, 10.33it/s]Processing batches:  83%|████████▎ | 814/980 [01:23<00:16, 10.09it/s]Processing batches:  83%|████████▎ | 816/980 [01:23<00:16,  9.84it/s]Processing batches:  83%|████████▎ | 817/980 [01:23<00:16,  9.75it/s]Processing batches:  83%|████████▎ | 818/980 [01:23<00:16,  9.69it/s]Processing batches:  84%|████████▎ | 820/980 [01:24<00:15, 10.30it/s]Processing batches:  84%|████████▍ | 822/980 [01:24<00:15, 10.07it/s]Processing batches:  84%|████████▍ | 824/980 [01:24<00:15,  9.82it/s]Processing batches:  84%|████████▍ | 825/980 [01:24<00:15,  9.74it/s]Processing batches:  84%|████████▍ | 826/980 [01:24<00:15,  9.67it/s]Processing batches:  84%|████████▍ | 828/980 [01:24<00:14, 10.25it/s]Processing batches:  85%|████████▍ | 830/980 [01:25<00:14, 10.06it/s]Processing batches:  85%|████████▍ | 832/980 [01:25<00:15,  9.82it/s]Processing batches:  85%|████████▌ | 833/980 [01:25<00:15,  9.74it/s]Processing batches:  85%|████████▌ | 834/980 [01:25<00:15,  9.69it/s]Processing batches:  85%|████████▌ | 836/980 [01:25<00:13, 10.29it/s]Processing batches:  86%|████████▌ | 838/980 [01:25<00:14, 10.07it/s]Processing batches:  86%|████████▌ | 840/980 [01:26<00:14,  9.83it/s]Processing batches:  86%|████████▌ | 841/980 [01:26<00:14,  9.76it/s]Processing batches:  86%|████████▌ | 842/980 [01:26<00:14,  9.76it/s]Processing batches:  86%|████████▌ | 844/980 [01:26<00:13, 10.40it/s]Processing batches:  86%|████████▋ | 846/980 [01:26<00:13, 10.14it/s]Processing batches:  87%|████████▋ | 848/980 [01:26<00:13,  9.84it/s]Processing batches:  87%|████████▋ | 849/980 [01:26<00:13,  9.77it/s][⚠️  Window]  Seq 019, start   266  T_err=  7.18 cm  R_err= 0.66°  Scale μ=70.06%
+[⚠️  Window]  Seq 019, start   267  T_err=  7.11 cm  R_err= 0.69°  Scale μ=67.73%
+[⚠️  Window]  Seq 019, start   268  T_err=  7.05 cm  R_err= 0.74°  Scale μ=68.36%
+[⚠️  Window]  Seq 019, start   269  T_err=  6.73 cm  R_err= 0.75°  Scale μ=69.56%
+[ℹ️  Window] Seq 019 win  270  win_scale=  1.11
+[ℹ️  ΔT] mean_pred_jump=11.07cm  mean_gt_jump= 9.97cm
+[⚠️  Window]  Seq 019, start   270  T_err=  6.26 cm  R_err= 0.79°  Scale μ=62.85%
+[⚠️  Window]  Seq 019, start   271  T_err=  5.98 cm  R_err= 0.88°  Scale μ=59.07%
+[⚠️  Window]  Seq 019, start   272  T_err=  6.07 cm  R_err= 0.87°  Scale μ=61.29%
+[⚠️  Window]  Seq 019, start   273  T_err=  5.99 cm  R_err= 0.85°  Scale μ=58.54%
+[⚠️  Window]  Seq 019, start   274  T_err=  5.62 cm  R_err= 0.96°  Scale μ=63.64%
+[⚠️  Window]  Seq 019, start   275  T_err=  5.71 cm  R_err= 0.99°  Scale μ=74.25%
+[ℹ️  Window] Seq 019 win  280  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump= 4.80cm  mean_gt_jump= 4.38cm
+[ℹ️  Window] Seq 019 win  290  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump= 3.90cm  mean_gt_jump= 3.40cm
+[⚠️  Window]  Seq 019, start   296  T_err=  5.13 cm  R_err= 1.14°  Scale μ=110.06%
+[⚠️  Window]  Seq 019, start   297  T_err=  5.26 cm  R_err= 1.27°  Scale μ=105.89%
+[⚠️  Window]  Seq 019, start   298  T_err=  5.24 cm  R_err= 1.36°  Scale μ=83.80%
+[⚠️  Window]  Seq 019, start   299  T_err=  5.18 cm  R_err= 1.47°  Scale μ=61.04%
+[ℹ️  Window] Seq 019 win  300  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump= 6.16cm  mean_gt_jump= 6.11cm
+[⚠️  Window]  Seq 019, start   300  T_err=  5.04 cm  R_err= 1.51°  Scale μ=51.47%
+[⚠️  Window]  Seq 019, start   301  T_err=  5.55 cm  R_err= 1.77°  Scale μ=52.09%
+[⚠️  Window]  Seq 019, start   302  T_err=  5.58 cm  R_err= 2.05°  Scale μ=55.33%
+[⚠️  Window]  Seq 019, start   303  T_err=  5.58 cm  R_err= 2.24°  Scale μ=56.64%
+[⚠️  Window]  Seq 019, start   304  T_err=  6.44 cm  R_err= 2.32°  Scale μ=65.01%
+[⚠️  Window]  Seq 019, start   305  T_err=  7.10 cm  R_err= 2.42°  Scale μ=65.54%
+[⚠️  Window]  Seq 019, start   306  T_err=  6.86 cm  R_err= 2.42°  Scale μ=56.39%
+[⚠️  Window]  Seq 019, start   307  T_err=  6.95 cm  R_err= 2.40°  Scale μ=51.46%
+[⚠️  Window]  Seq 019, start   308  T_err=  7.82 cm  R_err= 2.54°  Scale μ=54.19%
+[⚠️  Window]  Seq 019, start   309  T_err=  7.94 cm  R_err= 2.58°  Scale μ=44.66%
+[ℹ️  Window] Seq 019 win  310  win_scale=  0.93
+[ℹ️  ΔT] mean_pred_jump=11.14cm  mean_gt_jump=12.03cm
+[⚠️  Window]  Seq 019, start   310  T_err=  8.10 cm  R_err= 2.68°  Scale μ=40.09%
+[⚠️  Window]  Seq 019, start   311  T_err=  7.85 cm  R_err= 2.70°  Scale μ=42.25%
+[⚠️  Window]  Seq 019, start   312  T_err=  7.95 cm  R_err= 2.47°  Scale μ=54.82%
+[⚠️  Window]  Seq 019, start   313  T_err=  7.62 cm  R_err= 2.49°  Scale μ=53.19%
+[⚠️  Window]  Seq 019, start   314  T_err=  7.29 cm  R_err= 2.49°  Scale μ=52.49%
+[⚠️  Window]  Seq 019, start   315  T_err=  7.39 cm  R_err= 2.45°  Scale μ=61.06%
+[⚠️  Window]  Seq 019, start   316  T_err=  7.42 cm  R_err= 2.26°  Scale μ=77.10%
+[⚠️  Window]  Seq 019, start   317  T_err=  6.99 cm  R_err= 2.05°  Scale μ=83.57%
+[⚠️  Window]  Seq 019, start   318  T_err=  7.02 cm  R_err= 1.96°  Scale μ=97.83%
+[⚠️  Window]  Seq 019, start   319  T_err=  7.03 cm  R_err= 1.80°  Scale μ=119.04%
+[ℹ️  Window] Seq 019 win  320  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 8.39cm  mean_gt_jump= 8.54cm
+[⚠️  Window]  Seq 019, start   320  T_err=  6.88 cm  R_err= 1.73°  Scale μ=127.63%
+[⚠️  Window]  Seq 019, start   321  T_err=  6.17 cm  R_err= 1.44°  Scale μ=137.93%
+[⚠️  Window]  Seq 019, start   322  T_err=  6.19 cm  R_err= 1.14°  Scale μ=175.56%
+[⚠️  Window]  Seq 019, start   323  T_err=  6.37 cm  R_err= 0.90°  Scale μ=178.28%
+[⚠️  Window]  Seq 019, start   324  T_err=  5.50 cm  R_err= 0.81°  Scale μ=152.41%
+[⚠️  Window]  Seq 019, start   327  T_err=  5.09 cm  R_err= 0.66°  Scale μ=214.06%
+[ℹ️  Window] Seq 019 win  330  win_scale=  1.39
+[ℹ️  ΔT] mean_pred_jump= 1.98cm  mean_gt_jump= 1.43cm
+[ℹ️  Window] Seq 019 win  340  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump= 0.74cm  mean_gt_jump= 0.75cm
+[ℹ️  Window] Seq 019 win  350  win_scale=  0.88
+[ℹ️  ΔT] mean_pred_jump= 0.70cm  mean_gt_jump= 0.79cm
+[ℹ️  Window] Seq 019 win  360  win_scale=  0.83
+[ℹ️  ΔT] mean_pred_jump= 0.87cm  mean_gt_jump= 1.05cm
+[ℹ️  Window] Seq 019 win  370  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 1.33cm  mean_gt_jump= 1.30cm
+[ℹ️  Window] Seq 019 win  380  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump= 1.02cm  mean_gt_jump= 1.04cm
+[ℹ️  Window] Seq 019 win  390  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump= 1.44cm  mean_gt_jump= 1.47cm
+[ℹ️  Window] Seq 019 win  400  win_scale=  0.84
+[ℹ️  ΔT] mean_pred_jump= 1.94cm  mean_gt_jump= 2.30cm
+[ℹ️  Window] Seq 019 win  410  win_scale=  0.91
+[ℹ️  ΔT] mean_pred_jump= 1.83cm  mean_gt_jump= 2.01cm
+[ℹ️  Window] Seq 019 win  420  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump= 3.61cm  mean_gt_jump= 3.15cm
+[⚠️  Window]  Seq 019, start   428  T_err=  5.47 cm  R_err= 0.87°  Scale μ=134.51%
+[⚠️  Window]  Seq 019, start   429  T_err=  5.59 cm  R_err= 0.92°  Scale μ=130.57%
+[ℹ️  Window] Seq 019 win  430  win_scale=  1.16
+[ℹ️  ΔT] mean_pred_jump= 6.42cm  mean_gt_jump= 5.55cm
+[⚠️  Window]  Seq 019, start   430  T_err=  5.60 cm  R_err= 1.03°  Scale μ=131.99%
+[⚠️  Window]  Seq 019, start   431  T_err=  5.88 cm  R_err= 1.13°  Scale μ=131.69%
+[⚠️  Window]  Seq 019, start   432  T_err=  6.15 cm  R_err= 1.18°  Scale μ=129.83%
+[⚠️  Window]  Seq 019, start   433  T_err=  7.00 cm  R_err= 1.14°  Scale μ=142.24%
+[⚠️  Window]  Seq 019, start   434  T_err=  6.93 cm  R_err= 1.13°  Scale μ=134.93%
+[⚠️  Window]  Seq 019, start   435  T_err=  6.93 cm  R_err= 1.16°  Scale μ=131.83%
+[⚠️  Window]  Seq 019, start   436  T_err=  7.54 cm  R_err= 1.25°  Scale μ=142.37%
+[⚠️  Window]  Seq 019, start   437  T_err=  8.40 cm  R_err= 1.32°  Scale μ=139.70%
+[⚠️  Window]  Seq 019, start   438  T_err=  9.03 cm  R_err= 1.35°  Scale μ=126.52%
+[⚠️  Window]  Seq 019, start   439  T_err=  9.20 cm  R_err= 1.48°  Scale μ=123.84%
+[ℹ️  Window] Seq 019 win  440  win_scale=  1.08
+[ℹ️  ΔT] mean_pred_jump=10.18cm  mean_gt_jump= 9.43cm
+[⚠️  Window]  Seq 019, start   440  T_err=  9.54 cm  R_err= 1.61°  Scale μ=126.78%
+[⚠️  Window]  Seq 019, start   441  T_err=  9.87 cm  R_err= 1.65°  Scale μ=126.88%
+[⚠️  Window]  Seq 019, start   442  T_err= 10.14 cm  R_err= 1.71°  Scale μ=125.09%
+[⚠️  Window]  Seq 019, start   443  T_err= 10.22 cm  R_err= 1.71°  Scale μ=104.14%
+[⚠️  Window]  Seq 019, start   444  T_err= 10.37 cm  R_err= 1.72°  Scale μ=82.25%
+[⚠️  Window]  Seq 019, start   445  T_err= 10.37 cm  R_err= 1.71°  Scale μ=67.15%
+[⚠️  Window]  Seq 019, start   446  T_err= 10.41 cm  R_err= 1.62°  Scale μ=64.28%
+[⚠️  Window]  Seq 019, start   447  T_err= 10.34 cm  R_err= 1.60°  Scale μ=64.47%
+[⚠️  Window]  Seq 019, start   448  T_err=  9.18 cm  R_err= 1.55°  Scale μ=59.03%
+[⚠️  Window]  Seq 019, start   449  T_err=  9.04 cm  R_err= 1.49°  Scale μ=61.30%
+[ℹ️  Window] Seq 019 win  450  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump=13.62cm  mean_gt_jump=13.13cm
+[⚠️  Window]  Seq 019, start   450  T_err=  8.88 cm  R_err= 1.39°  Scale μ=53.78%
+[⚠️  Window]  Seq 019, start   451  T_err=  8.36 cm  R_err= 1.31°  Scale μ=56.07%
+[⚠️  Window]  Seq 019, start   452  T_err=  7.57 cm  R_err= 1.28°  Scale μ=58.00%
+[⚠️  Window]  Seq 019, start   453  T_err=  7.29 cm  R_err= 1.29°  Scale μ=55.84%
+[⚠️  Window]  Seq 019, start   454  T_err=  8.19 cm  R_err= 1.31°  Scale μ=56.79%
+[⚠️  Window]  Seq 019, start   455  T_err=  8.37 cm  R_err= 1.46°  Scale μ=48.00%
+Processing batches:  87%|████████▋ | 850/980 [01:27<00:13,  9.67it/s]Processing batches:  87%|████████▋ | 852/980 [01:27<00:12, 10.16it/s]Processing batches:  87%|████████▋ | 854/980 [01:27<00:12,  9.98it/s]Processing batches:  87%|████████▋ | 855/980 [01:27<00:12,  9.81it/s]Processing batches:  87%|████████▋ | 856/980 [01:27<00:12,  9.72it/s]Processing batches:  87%|████████▋ | 857/980 [01:27<00:12,  9.65it/s]Processing batches:  88%|████████▊ | 858/980 [01:27<00:12,  9.64it/s]Processing batches:  88%|████████▊ | 860/980 [01:28<00:11, 10.05it/s]Processing batches:  88%|████████▊ | 861/980 [01:28<00:12,  9.89it/s]Processing batches:  88%|████████▊ | 863/980 [01:28<00:11,  9.84it/s]Processing batches:  88%|████████▊ | 864/980 [01:28<00:11,  9.73it/s]Processing batches:  88%|████████▊ | 865/980 [01:28<00:11,  9.60it/s]Processing batches:  88%|████████▊ | 866/980 [01:28<00:11,  9.66it/s]Processing batches:  89%|████████▊ | 868/980 [01:28<00:11, 10.00it/s]Processing batches:  89%|████████▊ | 869/980 [01:28<00:11,  9.82it/s]Processing batches:  89%|████████▉ | 870/980 [01:29<00:11,  9.85it/s]Processing batches:  89%|████████▉ | 871/980 [01:29<00:11,  9.68it/s]Processing batches:  89%|████████▉ | 872/980 [01:29<00:11,  9.60it/s]Processing batches:  89%|████████▉ | 873/980 [01:29<00:11,  9.49it/s]Processing batches:  89%|████████▉ | 875/980 [01:29<00:10, 10.19it/s]Processing batches:  89%|████████▉ | 876/980 [01:29<00:10,  9.96it/s]Processing batches:  89%|████████▉ | 877/980 [01:29<00:10,  9.78it/s]Processing batches:  90%|████████▉ | 878/980 [01:29<00:10,  9.81it/s][⚠️  Window]  Seq 019, start   456  T_err=  8.28 cm  R_err= 1.75°  Scale μ=48.22%
+[⚠️  Window]  Seq 019, start   457  T_err=  8.14 cm  R_err= 1.91°  Scale μ=49.38%
+[⚠️  Window]  Seq 019, start   458  T_err=  8.38 cm  R_err= 1.95°  Scale μ=50.61%
+[⚠️  Window]  Seq 019, start   459  T_err=  8.22 cm  R_err= 1.80°  Scale μ=48.47%
+[ℹ️  Window] Seq 019 win  460  win_scale=  1.01
+[ℹ️  ΔT] mean_pred_jump=15.22cm  mean_gt_jump=15.09cm
+[⚠️  Window]  Seq 019, start   460  T_err=  8.21 cm  R_err= 1.70°  Scale μ=50.62%
+[⚠️  Window]  Seq 019, start   461  T_err=  8.36 cm  R_err= 1.63°  Scale μ=52.72%
+[⚠️  Window]  Seq 019, start   462  T_err=  8.25 cm  R_err= 1.54°  Scale μ=52.58%
+[⚠️  Window]  Seq 019, start   463  T_err=  8.42 cm  R_err= 1.54°  Scale μ=51.42%
+[⚠️  Window]  Seq 019, start   464  T_err=  9.04 cm  R_err= 1.57°  Scale μ=53.26%
+[⚠️  Window]  Seq 019, start   465  T_err=  8.80 cm  R_err= 1.56°  Scale μ=52.28%
+[⚠️  Window]  Seq 019, start   466  T_err=  8.27 cm  R_err= 1.49°  Scale μ=48.53%
+[⚠️  Window]  Seq 019, start   467  T_err=  7.85 cm  R_err= 1.50°  Scale μ=50.18%
+[⚠️  Window]  Seq 019, start   468  T_err=  7.89 cm  R_err= 1.50°  Scale μ=69.99%
+[⚠️  Window]  Seq 019, start   469  T_err=  7.53 cm  R_err= 1.51°  Scale μ=76.09%
+[ℹ️  Window] Seq 019 win  470  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump=13.29cm  mean_gt_jump=13.60cm
+[⚠️  Window]  Seq 019, start   470  T_err=  7.38 cm  R_err= 1.75°  Scale μ=70.53%
+[⚠️  Window]  Seq 019, start   471  T_err=  7.40 cm  R_err= 1.75°  Scale μ=80.48%
+[⚠️  Window]  Seq 019, start   472  T_err=  7.39 cm  R_err= 1.72°  Scale μ=78.88%
+[⚠️  Window]  Seq 019, start   473  T_err=  7.43 cm  R_err= 1.76°  Scale μ=80.39%
+[⚠️  Window]  Seq 019, start   474  T_err=  6.57 cm  R_err= 1.74°  Scale μ=75.45%
+[⚠️  Window]  Seq 019, start   475  T_err=  5.97 cm  R_err= 1.54°  Scale μ=79.87%
+[⚠️  Window]  Seq 019, start   476  T_err=  5.53 cm  R_err= 1.15°  Scale μ=81.11%
+[⚠️  Window]  Seq 019, start   477  T_err=  5.56 cm  R_err= 0.96°  Scale μ=98.52%
+[ℹ️  Window] Seq 019 win  480  win_scale=  1.13
+[ℹ️  ΔT] mean_pred_jump= 7.18cm  mean_gt_jump= 6.35cm
+[ℹ️  Window] Seq 019 win  490  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 1.13cm  mean_gt_jump= 1.11cm
+[ℹ️  Window] Seq 019 win  500  win_scale=  1.23
+[ℹ️  ΔT] mean_pred_jump= 1.05cm  mean_gt_jump= 0.85cm
+[ℹ️  Window] Seq 019 win  510  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump= 5.05cm  mean_gt_jump= 4.39cm
+[⚠️  Window]  Seq 019, start   513  T_err=  5.01 cm  R_err= 1.94°  Scale μ=99.99%
+[⚠️  Window]  Seq 019, start   514  T_err=  5.81 cm  R_err= 2.12°  Scale μ=101.32%
+[⚠️  Window]  Seq 019, start   515  T_err=  5.93 cm  R_err= 2.42°  Scale μ=87.01%
+[⚠️  Window]  Seq 019, start   516  T_err=  6.25 cm  R_err= 2.72°  Scale μ=68.40%
+[⚠️  Window]  Seq 019, start   517  T_err=  6.32 cm  R_err= 2.84°  Scale μ=57.90%
+[⚠️  Window]  Seq 019, start   518  T_err=  6.50 cm  R_err= 2.89°  Scale μ=46.80%
+[⚠️  Window]  Seq 019, start   519  T_err=  7.07 cm  R_err= 2.89°  Scale μ=47.00%
+[ℹ️  Window] Seq 019 win  520  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump=10.16cm  mean_gt_jump= 9.76cm
+[⚠️  Window]  Seq 019, start   520  T_err=  7.61 cm  R_err= 2.81°  Scale μ=51.16%
+[⚠️  Window]  Seq 019, start   521  T_err=  7.62 cm  R_err= 2.80°  Scale μ=51.93%
+[⚠️  Window]  Seq 019, start   522  T_err=  8.14 cm  R_err= 2.77°  Scale μ=53.19%
+[⚠️  Window]  Seq 019, start   523  T_err=  7.65 cm  R_err= 2.64°  Scale μ=49.71%
+[⚠️  Window]  Seq 019, start   524  T_err=  7.44 cm  R_err= 2.64°  Scale μ=54.11%
+[⚠️  Window]  Seq 019, start   525  T_err=  7.37 cm  R_err= 2.64°  Scale μ=55.18%
+[⚠️  Window]  Seq 019, start   526  T_err=  8.02 cm  R_err= 2.76°  Scale μ=53.80%
+[⚠️  Window]  Seq 019, start   527  T_err=  8.00 cm  R_err= 2.77°  Scale μ=53.01%
+[⚠️  Window]  Seq 019, start   528  T_err=  8.52 cm  R_err= 2.59°  Scale μ=54.26%
+[⚠️  Window]  Seq 019, start   529  T_err=  8.82 cm  R_err= 2.35°  Scale μ=57.54%
+[ℹ️  Window] Seq 019 win  530  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump=10.74cm  mean_gt_jump=10.41cm
+[⚠️  Window]  Seq 019, start   530  T_err=  8.60 cm  R_err= 2.40°  Scale μ=58.36%
+[⚠️  Window]  Seq 019, start   531  T_err=  8.76 cm  R_err= 2.10°  Scale μ=59.68%
+[⚠️  Window]  Seq 019, start   532  T_err=  9.08 cm  R_err= 1.93°  Scale μ=109.52%
+[⚠️  Window]  Seq 019, start   533  T_err=  8.95 cm  R_err= 1.85°  Scale μ=112.05%
+[⚠️  Window]  Seq 019, start   534  T_err=  8.50 cm  R_err= 1.71°  Scale μ=95.31%
+[⚠️  Window]  Seq 019, start   535  T_err=  8.38 cm  R_err= 1.46°  Scale μ=96.29%
+[⚠️  Window]  Seq 019, start   536  T_err=  7.90 cm  R_err= 1.22°  Scale μ=95.90%
+[⚠️  Window]  Seq 019, start   537  T_err=  7.73 cm  R_err= 1.60°  Scale μ=91.76%
+[⚠️  Window]  Seq 019, start   538  T_err=  7.93 cm  R_err= 1.67°  Scale μ=93.25%
+[⚠️  Window]  Seq 019, start   539  T_err=  7.58 cm  R_err= 1.79°  Scale μ=81.25%
+[ℹ️  Window] Seq 019 win  540  win_scale=  1.07
+[ℹ️  ΔT] mean_pred_jump= 7.35cm  mean_gt_jump= 6.84cm
+[⚠️  Window]  Seq 019, start   540  T_err=  6.63 cm  R_err= 1.79°  Scale μ=64.45%
+[⚠️  Window]  Seq 019, start   541  T_err=  6.42 cm  R_err= 1.78°  Scale μ=63.95%
+[⚠️  Window]  Seq 019, start   542  T_err=  6.03 cm  R_err= 1.82°  Scale μ=62.33%
+[⚠️  Window]  Seq 019, start   543  T_err=  5.66 cm  R_err= 1.83°  Scale μ=67.44%
+[⚠️  Window]  Seq 019, start   544  T_err=  5.70 cm  R_err= 1.79°  Scale μ=86.90%
+[⚠️  Window]  Seq 019, start   545  T_err=  5.46 cm  R_err= 1.76°  Scale μ=110.32%
+[⚠️  Window]  Seq 019, start   547  T_err=  5.28 cm  R_err= 1.62°  Scale μ=135.48%
+[⚠️  Window]  Seq 019, start   548  T_err=  5.33 cm  R_err= 1.64°  Scale μ=137.54%
+[⚠️  Window]  Seq 019, start   549  T_err=  5.28 cm  R_err= 1.73°  Scale μ=133.23%
+[ℹ️  Window] Seq 019 win  550  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 4.12cm  mean_gt_jump= 3.99cm
+[⚠️  Window]  Seq 019, start   554  T_err=  5.47 cm  R_err= 1.91°  Scale μ=122.65%
+[⚠️  Window]  Seq 019, start   555  T_err=  6.45 cm  R_err= 2.02°  Scale μ=144.25%
+[⚠️  Window]  Seq 019, start   556  T_err=  7.23 cm  R_err= 1.98°  Scale μ=145.61%
+[⚠️  Window]  Seq 019, start   557  T_err=  7.67 cm  R_err= 1.49°  Scale μ=156.28%
+[⚠️  Window]  Seq 019, start   558  T_err=  8.33 cm  R_err= 1.47°  Scale μ=169.83%
+[⚠️  Window]  Seq 019, start   559  T_err=  7.80 cm  R_err= 1.33°  Scale μ=166.33%
+[ℹ️  Window] Seq 019 win  560  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump= 7.10cm  mean_gt_jump= 6.16cm
+[⚠️  Window]  Seq 019, start   560  T_err=  7.80 cm  R_err= 1.35°  Scale μ=170.26%
+[⚠️  Window]  Seq 019, start   561  T_err=  7.82 cm  R_err= 1.33°  Scale μ=190.78%
+[⚠️  Window]  Seq 019, start   562  T_err=  7.74 cm  R_err= 1.30°  Scale μ=204.51%
+[⚠️  Window]  Seq 019, start   563  T_err=  7.69 cm  R_err= 1.29°  Scale μ=198.01%
+[⚠️  Window]  Seq 019, start   564  T_err=  7.65 cm  R_err= 1.35°  Scale μ=177.76%
+[⚠️  Window]  Seq 019, start   565  T_err=  8.18 cm  R_err= 1.44°  Scale μ=166.66%
+[⚠️  Window]  Seq 019, start   566  T_err=  8.91 cm  R_err= 1.37°  Scale μ=157.11%
+[⚠️  Window]  Seq 019, start   567  T_err=  8.48 cm  R_err= 1.40°  Scale μ=152.72%
+[⚠️  Window]  Seq 019, start   568  T_err=  7.90 cm  R_err= 1.31°  Scale μ=139.86%
+[⚠️  Window]  Seq 019, start   569  T_err=  7.76 cm  R_err= 1.30°  Scale μ=137.72%
+[ℹ️  Window] Seq 019 win  570  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 8.67cm  mean_gt_jump= 8.49cm
+[⚠️  Window]  Seq 019, start   570  T_err=  7.97 cm  R_err= 1.29°  Scale μ=140.43%
+[⚠️  Window]  Seq 019, start   571  T_err=  8.28 cm  R_err= 1.26°  Scale μ=143.95%
+[⚠️  Window]  Seq 019, start   572  T_err=  8.26 cm  R_err= 1.21°  Scale μ=130.29%
+Processing batches:  90%|████████▉ | 879/980 [01:30<00:10,  9.68it/s]Processing batches:  90%|████████▉ | 880/980 [01:30<00:10,  9.56it/s]Processing batches:  90%|████████▉ | 881/980 [01:30<00:10,  9.51it/s]Processing batches:  90%|█████████ | 883/980 [01:30<00:09, 10.17it/s]Processing batches:  90%|█████████ | 884/980 [01:30<00:09,  9.91it/s]Processing batches:  90%|█████████ | 885/980 [01:30<00:09,  9.74it/s]Processing batches:  90%|█████████ | 886/980 [01:30<00:09,  9.63it/s]Processing batches:  91%|█████████ | 887/980 [01:30<00:09,  9.54it/s]Processing batches:  91%|█████████ | 888/980 [01:30<00:09,  9.49it/s]Processing batches:  91%|█████████ | 889/980 [01:31<00:09,  9.45it/s]Processing batches:  91%|█████████ | 891/980 [01:31<00:08, 10.20it/s]Processing batches:  91%|█████████ | 892/980 [01:31<00:08, 10.00it/s]Processing batches:  91%|█████████ | 893/980 [01:31<00:08,  9.84it/s]Processing batches:  91%|█████████ | 894/980 [01:31<00:08,  9.72it/s]Processing batches:  91%|█████████▏| 895/980 [01:31<00:08,  9.62it/s]Processing batches:  91%|█████████▏| 896/980 [01:31<00:08,  9.56it/s]Processing batches:  92%|█████████▏| 897/980 [01:31<00:08,  9.48it/s][⚠️  Window]  Seq 019, start   573  T_err=  8.19 cm  R_err= 1.09°  Scale μ=122.88%
+[⚠️  Window]  Seq 019, start   574  T_err=  7.37 cm  R_err= 1.04°  Scale μ=126.59%
+[⚠️  Window]  Seq 019, start   575  T_err=  7.13 cm  R_err= 0.91°  Scale μ=132.92%
+[⚠️  Window]  Seq 019, start   576  T_err=  7.00 cm  R_err= 0.94°  Scale μ=154.09%
+[⚠️  Window]  Seq 019, start   577  T_err=  8.14 cm  R_err= 1.05°  Scale μ=202.78%
+[⚠️  Window]  Seq 019, start   578  T_err=  7.87 cm  R_err= 0.96°  Scale μ=203.99%
+[⚠️  Window]  Seq 019, start   579  T_err=  8.19 cm  R_err= 1.00°  Scale μ=217.14%
+[ℹ️  Window] Seq 019 win  580  win_scale=  1.12
+[ℹ️  ΔT] mean_pred_jump= 9.50cm  mean_gt_jump= 8.49cm
+[⚠️  Window]  Seq 019, start   580  T_err=  8.32 cm  R_err= 1.01°  Scale μ=216.90%
+[⚠️  Window]  Seq 019, start   581  T_err=  8.30 cm  R_err= 1.03°  Scale μ=172.28%
+[⚠️  Window]  Seq 019, start   582  T_err=  8.33 cm  R_err= 1.05°  Scale μ=143.21%
+[⚠️  Window]  Seq 019, start   583  T_err=  8.80 cm  R_err= 1.11°  Scale μ=121.94%
+[⚠️  Window]  Seq 019, start   584  T_err=  9.14 cm  R_err= 1.08°  Scale μ=124.25%
+[⚠️  Window]  Seq 019, start   585  T_err=  9.20 cm  R_err= 1.18°  Scale μ=131.12%
+[⚠️  Window]  Seq 019, start   586  T_err=  8.49 cm  R_err= 1.27°  Scale μ=113.70%
+[⚠️  Window]  Seq 019, start   587  T_err=  8.55 cm  R_err= 1.21°  Scale μ=136.43%
+[⚠️  Window]  Seq 019, start   588  T_err=  8.77 cm  R_err= 1.20°  Scale μ=166.25%
+[⚠️  Window]  Seq 019, start   589  T_err=  9.05 cm  R_err= 1.08°  Scale μ=200.72%
+[ℹ️  Window] Seq 019 win  590  win_scale=  1.13
+[ℹ️  ΔT] mean_pred_jump= 8.54cm  mean_gt_jump= 7.55cm
+[⚠️  Window]  Seq 019, start   590  T_err=  8.91 cm  R_err= 1.06°  Scale μ=224.40%
+[⚠️  Window]  Seq 019, start   591  T_err=  8.83 cm  R_err= 1.13°  Scale μ=231.47%
+[⚠️  Window]  Seq 019, start   592  T_err=  8.91 cm  R_err= 1.31°  Scale μ=230.50%
+[⚠️  Window]  Seq 019, start   593  T_err=  9.14 cm  R_err= 1.25°  Scale μ=225.83%
+[⚠️  Window]  Seq 019, start   594  T_err=  9.23 cm  R_err= 1.24°  Scale μ=209.53%
+[⚠️  Window]  Seq 019, start   595  T_err=  9.61 cm  R_err= 1.36°  Scale μ=211.61%
+[⚠️  Window]  Seq 019, start   596  T_err=  9.84 cm  R_err= 1.42°  Scale μ=196.05%
+[⚠️  Window]  Seq 019, start   597  T_err=  9.39 cm  R_err= 1.34°  Scale μ=169.40%
+[⚠️  Window]  Seq 019, start   598  T_err=  8.99 cm  R_err= 1.38°  Scale μ=152.35%
+[⚠️  Window]  Seq 019, start   599  T_err=  9.04 cm  R_err= 1.39°  Scale μ=127.07%
+[ℹ️  Window] Seq 019 win  600  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump= 9.33cm  mean_gt_jump= 9.01cm
+[⚠️  Window]  Seq 019, start   600  T_err=  8.70 cm  R_err= 1.38°  Scale μ=108.47%
+[⚠️  Window]  Seq 019, start   601  T_err=  8.72 cm  R_err= 1.39°  Scale μ=113.61%
+[⚠️  Window]  Seq 019, start   602  T_err=  9.35 cm  R_err= 1.43°  Scale μ=126.38%
+[⚠️  Window]  Seq 019, start   603  T_err=  9.65 cm  R_err= 1.44°  Scale μ=128.25%
+[⚠️  Window]  Seq 019, start   604  T_err=  9.47 cm  R_err= 1.48°  Scale μ=122.25%
+[⚠️  Window]  Seq 019, start   605  T_err=  9.22 cm  R_err= 1.30°  Scale μ=115.77%
+[⚠️  Window]  Seq 019, start   606  T_err=  9.75 cm  R_err= 1.37°  Scale μ=140.86%
+[⚠️  Window]  Seq 019, start   607  T_err= 10.46 cm  R_err= 1.39°  Scale μ=140.99%
+[⚠️  Window]  Seq 019, start   608  T_err= 11.09 cm  R_err= 1.39°  Scale μ=133.14%
+[⚠️  Window]  Seq 019, start   609  T_err= 11.44 cm  R_err= 1.40°  Scale μ=112.31%
+[ℹ️  Window] Seq 019 win  610  win_scale=  0.97
+[ℹ️  ΔT] mean_pred_jump=12.88cm  mean_gt_jump=13.24cm
+[⚠️  Window]  Seq 019, start   610  T_err= 11.51 cm  R_err= 1.41°  Scale μ=84.51%
+[⚠️  Window]  Seq 019, start   611  T_err= 10.70 cm  R_err= 1.35°  Scale μ=70.15%
+[⚠️  Window]  Seq 019, start   612  T_err=  9.96 cm  R_err= 1.16°  Scale μ=70.74%
+[⚠️  Window]  Seq 019, start   613  T_err=  9.88 cm  R_err= 1.15°  Scale μ=76.19%
+[⚠️  Window]  Seq 019, start   614  T_err=  9.86 cm  R_err= 1.14°  Scale μ=103.42%
+[⚠️  Window]  Seq 019, start   615  T_err=  9.15 cm  R_err= 1.06°  Scale μ=123.39%
+[⚠️  Window]  Seq 019, start   616  T_err=  9.02 cm  R_err= 0.99°  Scale μ=140.89%
+[⚠️  Window]  Seq 019, start   617  T_err=  8.75 cm  R_err= 0.98°  Scale μ=138.96%
+[⚠️  Window]  Seq 019, start   618  T_err=  8.70 cm  R_err= 0.98°  Scale μ=136.38%
+[⚠️  Window]  Seq 019, start   619  T_err=  8.57 cm  R_err= 0.98°  Scale μ=135.20%
+[ℹ️  Window] Seq 019 win  620  win_scale=  1.04
+[ℹ️  ΔT] mean_pred_jump=10.59cm  mean_gt_jump=10.18cm
+[⚠️  Window]  Seq 019, start   620  T_err=  8.58 cm  R_err= 0.97°  Scale μ=135.00%
+[⚠️  Window]  Seq 019, start   621  T_err=  8.71 cm  R_err= 0.95°  Scale μ=131.92%
+[⚠️  Window]  Seq 019, start   622  T_err=  8.79 cm  R_err= 0.93°  Scale μ=131.54%
+[⚠️  Window]  Seq 019, start   623  T_err=  9.08 cm  R_err= 0.94°  Scale μ=144.99%
+[⚠️  Window]  Seq 019, start   624  T_err=  9.13 cm  R_err= 0.90°  Scale μ=150.26%
+[⚠️  Window]  Seq 019, start   625  T_err=  8.71 cm  R_err= 0.95°  Scale μ=153.19%
+[⚠️  Window]  Seq 019, start   626  T_err=  8.59 cm  R_err= 0.80°  Scale μ=146.41%
+[⚠️  Window]  Seq 019, start   627  T_err=  8.36 cm  R_err= 0.87°  Scale μ=147.88%
+[⚠️  Window]  Seq 019, start   628  T_err=  8.22 cm  R_err= 0.88°  Scale μ=141.48%
+[⚠️  Window]  Seq 019, start   629  T_err=  7.96 cm  R_err= 0.89°  Scale μ=151.12%
+[ℹ️  Window] Seq 019 win  630  win_scale=  1.16
+[ℹ️  ΔT] mean_pred_jump=10.25cm  mean_gt_jump= 8.80cm
+[⚠️  Window]  Seq 019, start   630  T_err=  7.68 cm  R_err= 0.96°  Scale μ=152.64%
+[⚠️  Window]  Seq 019, start   631  T_err=  7.55 cm  R_err= 1.09°  Scale μ=152.89%
+[⚠️  Window]  Seq 019, start   632  T_err=  8.28 cm  R_err= 1.39°  Scale μ=149.20%
+[⚠️  Window]  Seq 019, start   633  T_err=  9.07 cm  R_err= 1.60°  Scale μ=159.06%
+[⚠️  Window]  Seq 019, start   634  T_err=  9.49 cm  R_err= 1.89°  Scale μ=120.27%
+[⚠️  Window]  Seq 019, start   635  T_err=  9.45 cm  R_err= 2.21°  Scale μ=97.18%
+[⚠️  Window]  Seq 019, start   636  T_err= 10.06 cm  R_err= 2.57°  Scale μ=68.16%
+[⚠️  Window]  Seq 019, start   637  T_err= 10.65 cm  R_err= 2.61°  Scale μ=70.55%
+[⚠️  Window]  Seq 019, start   638  T_err= 11.14 cm  R_err= 2.64°  Scale μ=75.45%
+[⚠️  Window]  Seq 019, start   639  T_err= 11.04 cm  R_err= 2.60°  Scale μ=74.80%
+[ℹ️  Window] Seq 019 win  640  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump=12.70cm  mean_gt_jump=12.44cm
+[⚠️  Window]  Seq 019, start   640  T_err= 10.84 cm  R_err= 2.62°  Scale μ=71.75%
+[⚠️  Window]  Seq 019, start   641  T_err= 10.77 cm  R_err= 2.61°  Scale μ=75.11%
+[⚠️  Window]  Seq 019, start   642  T_err= 10.25 cm  R_err= 2.57°  Scale μ=77.05%
+[⚠️  Window]  Seq 019, start   643  T_err=  9.20 cm  R_err= 2.48°  Scale μ=66.40%
+[⚠️  Window]  Seq 019, start   644  T_err=  8.67 cm  R_err= 2.54°  Scale μ=59.52%
+[⚠️  Window]  Seq 019, start   645  T_err=  8.27 cm  R_err= 2.48°  Scale μ=58.68%
+[⚠️  Window]  Seq 019, start   646  T_err=  7.84 cm  R_err= 2.47°  Scale μ=57.16%
+[⚠️  Window]  Seq 019, start   647  T_err=  7.82 cm  R_err= 2.41°  Scale μ=56.41%
+[⚠️  Window]  Seq 019, start   648  T_err=  7.97 cm  R_err= 2.41°  Scale μ=57.84%
+[⚠️  Window]  Seq 019, start   649  T_err=  7.98 cm  R_err= 2.44°  Scale μ=58.11%
+[ℹ️  Window] Seq 019 win  650  win_scale=  1.00
+[ℹ️  ΔT] mean_pred_jump=10.45cm  mean_gt_jump=10.47cm
+[⚠️  Window]  Seq 019, start   650  T_err=  8.19 cm  R_err= 2.38°  Scale μ=57.68%
+[⚠️  Window]  Seq 019, start   651  T_err=  8.00 cm  R_err= 2.24°  Scale μ=60.70%
+[⚠️  Window]  Seq 019, start   652  T_err=  7.21 cm  R_err= 1.97°  Scale μ=62.58%
+[⚠️  Window]  Seq 019, start   653  T_err=  6.81 cm  R_err= 1.78°  Scale μ=62.16%
+[⚠️  Window]  Seq 019, start   654  T_err=  6.22 cm  R_err= 1.94°  Scale μ=58.89%
+Processing batches:  92%|█████████▏| 899/980 [01:32<00:07, 10.18it/s]Processing batches:  92%|█████████▏| 900/980 [01:32<00:08,  9.94it/s]Processing batches:  92%|█████████▏| 901/980 [01:32<00:08,  9.80it/s]Processing batches:  92%|█████████▏| 902/980 [01:32<00:08,  9.66it/s]Processing batches:  92%|█████████▏| 903/980 [01:32<00:08,  9.57it/s]Processing batches:  92%|█████████▏| 904/980 [01:32<00:08,  9.48it/s]Processing batches:  92%|█████████▏| 905/980 [01:32<00:07,  9.43it/s]Processing batches:  93%|█████████▎| 907/980 [01:32<00:07, 10.14it/s]Processing batches:  93%|█████████▎| 908/980 [01:32<00:07,  9.92it/s]Processing batches:  93%|█████████▎| 910/980 [01:33<00:07,  9.83it/s]Processing batches:  93%|█████████▎| 911/980 [01:33<00:07,  9.72it/s]Processing batches:  93%|█████████▎| 912/980 [01:33<00:07,  9.64it/s]Processing batches:  93%|█████████▎| 913/980 [01:33<00:07,  9.56it/s]Processing batches:  93%|█████████▎| 915/980 [01:33<00:06, 10.26it/s]Processing batches:  94%|█████████▎| 917/980 [01:33<00:06, 10.02it/s]Processing batches:  94%|█████████▎| 918/980 [01:33<00:06,  9.88it/s]Processing batches:  94%|█████████▍| 919/980 [01:34<00:06,  9.76it/s]Processing batches:  94%|█████████▍| 920/980 [01:34<00:06,  9.67it/s]Processing batches:  94%|█████████▍| 921/980 [01:34<00:06,  9.58it/s]Processing batches:  94%|█████████▍| 923/980 [01:34<00:05, 10.29it/s][⚠️  Window]  Seq 019, start   655  T_err=  6.19 cm  R_err= 1.58°  Scale μ=62.09%
+[⚠️  Window]  Seq 019, start   656  T_err=  5.42 cm  R_err= 1.20°  Scale μ=63.68%
+[ℹ️  Window] Seq 019 win  660  win_scale=  1.09
+[ℹ️  ΔT] mean_pred_jump= 6.53cm  mean_gt_jump= 6.00cm
+[⚠️  Window]  Seq 019, start   663  T_err=  5.45 cm  R_err= 1.78°  Scale μ=129.76%
+[⚠️  Window]  Seq 019, start   664  T_err=  6.72 cm  R_err= 1.89°  Scale μ=159.39%
+[⚠️  Window]  Seq 019, start   665  T_err=  7.00 cm  R_err= 1.90°  Scale μ=153.38%
+[⚠️  Window]  Seq 019, start   666  T_err=  7.40 cm  R_err= 1.97°  Scale μ=160.31%
+[⚠️  Window]  Seq 019, start   667  T_err=  7.84 cm  R_err= 2.01°  Scale μ=159.67%
+[⚠️  Window]  Seq 019, start   668  T_err=  8.04 cm  R_err= 2.04°  Scale μ=158.76%
+[⚠️  Window]  Seq 019, start   669  T_err=  8.46 cm  R_err= 2.16°  Scale μ=164.36%
+[ℹ️  Window] Seq 019 win  670  win_scale=  1.20
+[ℹ️  ΔT] mean_pred_jump=11.69cm  mean_gt_jump= 9.75cm
+[⚠️  Window]  Seq 019, start   670  T_err=  9.00 cm  R_err= 2.15°  Scale μ=192.91%
+[⚠️  Window]  Seq 019, start   671  T_err=  8.90 cm  R_err= 2.14°  Scale μ=188.56%
+[⚠️  Window]  Seq 019, start   672  T_err=  8.63 cm  R_err= 2.13°  Scale μ=196.91%
+[⚠️  Window]  Seq 019, start   673  T_err=  8.16 cm  R_err= 2.11°  Scale μ=190.45%
+[⚠️  Window]  Seq 019, start   674  T_err=  8.53 cm  R_err= 1.73°  Scale μ=201.97%
+[⚠️  Window]  Seq 019, start   675  T_err=  8.30 cm  R_err= 1.75°  Scale μ=188.06%
+[⚠️  Window]  Seq 019, start   676  T_err=  8.52 cm  R_err= 1.80°  Scale μ=197.77%
+[⚠️  Window]  Seq 019, start   677  T_err=  9.31 cm  R_err= 1.85°  Scale μ=215.51%
+[⚠️  Window]  Seq 019, start   678  T_err=  9.24 cm  R_err= 1.93°  Scale μ=187.86%
+[⚠️  Window]  Seq 019, start   679  T_err=  9.05 cm  R_err= 2.00°  Scale μ=157.93%
+[ℹ️  Window] Seq 019 win  680  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump=10.92cm  mean_gt_jump= 9.48cm
+[⚠️  Window]  Seq 019, start   680  T_err=  8.90 cm  R_err= 2.00°  Scale μ=129.02%
+[⚠️  Window]  Seq 019, start   681  T_err=  9.41 cm  R_err= 2.07°  Scale μ=97.06%
+[⚠️  Window]  Seq 019, start   682  T_err=  9.26 cm  R_err= 1.81°  Scale μ=150.61%
+[⚠️  Window]  Seq 019, start   683  T_err=  9.13 cm  R_err= 1.41°  Scale μ=146.89%
+[⚠️  Window]  Seq 019, start   684  T_err=  8.48 cm  R_err= 1.25°  Scale μ=137.95%
+[⚠️  Window]  Seq 019, start   685  T_err=  8.09 cm  R_err= 1.26°  Scale μ=134.87%
+[⚠️  Window]  Seq 019, start   686  T_err=  9.22 cm  R_err= 1.20°  Scale μ=129.50%
+[⚠️  Window]  Seq 019, start   687  T_err=  9.76 cm  R_err= 1.16°  Scale μ=118.87%
+[⚠️  Window]  Seq 019, start   688  T_err=  9.54 cm  R_err= 1.16°  Scale μ=118.16%
+[⚠️  Window]  Seq 019, start   689  T_err=  9.03 cm  R_err= 1.03°  Scale μ=131.00%
+[ℹ️  Window] Seq 019 win  690  win_scale=  1.23
+[ℹ️  ΔT] mean_pred_jump= 7.29cm  mean_gt_jump= 5.93cm
+[⚠️  Window]  Seq 019, start   690  T_err=  8.83 cm  R_err= 1.07°  Scale μ=123.75%
+[⚠️  Window]  Seq 019, start   691  T_err=  8.64 cm  R_err= 1.22°  Scale μ=119.68%
+[⚠️  Window]  Seq 019, start   692  T_err=  8.78 cm  R_err= 1.23°  Scale μ=115.98%
+[⚠️  Window]  Seq 019, start   693  T_err=  9.20 cm  R_err= 1.27°  Scale μ=111.61%
+[⚠️  Window]  Seq 019, start   694  T_err=  9.50 cm  R_err= 1.29°  Scale μ=114.70%
+[⚠️  Window]  Seq 019, start   695  T_err= 11.03 cm  R_err= 1.33°  Scale μ=127.45%
+[⚠️  Window]  Seq 019, start   696  T_err= 11.21 cm  R_err= 1.30°  Scale μ=120.87%
+[⚠️  Window]  Seq 019, start   697  T_err= 10.77 cm  R_err= 1.36°  Scale μ=134.90%
+[⚠️  Window]  Seq 019, start   698  T_err= 10.80 cm  R_err= 1.37°  Scale μ=142.77%
+[⚠️  Window]  Seq 019, start   699  T_err= 10.83 cm  R_err= 1.30°  Scale μ=142.54%
+[ℹ️  Window] Seq 019 win  700  win_scale=  1.21
+[ℹ️  ΔT] mean_pred_jump= 9.17cm  mean_gt_jump= 7.56cm
+[⚠️  Window]  Seq 019, start   700  T_err= 10.92 cm  R_err= 1.31°  Scale μ=163.40%
+[⚠️  Window]  Seq 019, start   701  T_err= 10.48 cm  R_err= 1.28°  Scale μ=163.67%
+[⚠️  Window]  Seq 019, start   702  T_err= 10.61 cm  R_err= 1.29°  Scale μ=164.89%
+[⚠️  Window]  Seq 019, start   703  T_err= 10.59 cm  R_err= 1.20°  Scale μ=181.03%
+[⚠️  Window]  Seq 019, start   704  T_err= 10.44 cm  R_err= 1.19°  Scale μ=186.16%
+[⚠️  Window]  Seq 019, start   705  T_err= 10.54 cm  R_err= 1.48°  Scale μ=184.53%
+[⚠️  Window]  Seq 019, start   706  T_err=  8.67 cm  R_err= 1.49°  Scale μ=159.24%
+[⚠️  Window]  Seq 019, start   707  T_err=  6.54 cm  R_err= 1.52°  Scale μ=122.75%
+[⚠️  Window]  Seq 019, start   708  T_err=  5.83 cm  R_err= 1.48°  Scale μ=124.53%
+[⚠️  Window]  Seq 019, start   709  T_err=  5.60 cm  R_err= 1.45°  Scale μ=117.69%
+[ℹ️  Window] Seq 019 win  710  win_scale=  1.15
+[ℹ️  ΔT] mean_pred_jump= 5.06cm  mean_gt_jump= 4.41cm
+[⚠️  Window]  Seq 019, start   710  T_err=  5.52 cm  R_err= 1.42°  Scale μ=113.93%
+[⚠️  Window]  Seq 019, start   711  T_err=  5.35 cm  R_err= 1.27°  Scale μ=112.48%
+[⚠️  Window]  Seq 019, start   712  T_err=  5.42 cm  R_err= 1.25°  Scale μ=116.41%
+[⚠️  Window]  Seq 019, start   713  T_err=  5.60 cm  R_err= 1.29°  Scale μ=119.22%
+[⚠️  Window]  Seq 019, start   714  T_err=  5.34 cm  R_err= 1.21°  Scale μ=115.91%
+[ℹ️  Window] Seq 019 win  720  win_scale=  1.05
+[ℹ️  ΔT] mean_pred_jump= 2.83cm  mean_gt_jump= 2.69cm
+[⚠️  Window]  Seq 019, start   727  T_err=  7.72 cm  R_err= 1.22°  Scale μ=153.49%
+[⚠️  Window]  Seq 019, start   728  T_err=  8.82 cm  R_err= 1.56°  Scale μ=149.10%
+[⚠️  Window]  Seq 019, start   729  T_err= 10.05 cm  R_err= 2.02°  Scale μ=163.71%
+[ℹ️  Window] Seq 019 win  730  win_scale=  1.28
+[ℹ️  ΔT] mean_pred_jump=12.84cm  mean_gt_jump=10.05cm
+[⚠️  Window]  Seq 019, start   730  T_err= 10.93 cm  R_err= 2.09°  Scale μ=178.79%
+[⚠️  Window]  Seq 019, start   731  T_err= 10.80 cm  R_err= 2.28°  Scale μ=163.94%
+[⚠️  Window]  Seq 019, start   732  T_err= 11.18 cm  R_err= 2.27°  Scale μ=158.02%
+[⚠️  Window]  Seq 019, start   733  T_err= 11.37 cm  R_err= 2.24°  Scale μ=150.39%
+[⚠️  Window]  Seq 019, start   734  T_err= 11.84 cm  R_err= 2.33°  Scale μ=143.92%
+[⚠️  Window]  Seq 019, start   735  T_err= 12.09 cm  R_err= 2.35°  Scale μ=141.32%
+[⚠️  Window]  Seq 019, start   736  T_err= 12.11 cm  R_err= 2.41°  Scale μ=146.97%
+[⚠️  Window]  Seq 019, start   737  T_err= 11.99 cm  R_err= 2.38°  Scale μ=177.83%
+[⚠️  Window]  Seq 019, start   738  T_err= 11.50 cm  R_err= 2.25°  Scale μ=191.21%
+[⚠️  Window]  Seq 019, start   739  T_err= 11.39 cm  R_err= 2.27°  Scale μ=184.52%
+[ℹ️  Window] Seq 019 win  740  win_scale=  1.11
+[ℹ️  ΔT] mean_pred_jump=14.72cm  mean_gt_jump=13.23cm
+[⚠️  Window]  Seq 019, start   740  T_err= 11.60 cm  R_err= 2.22°  Scale μ=236.23%
+[⚠️  Window]  Seq 019, start   741  T_err= 11.31 cm  R_err= 2.20°  Scale μ=230.38%
+[⚠️  Window]  Seq 019, start   742  T_err= 11.52 cm  R_err= 2.19°  Scale μ=243.59%
+[⚠️  Window]  Seq 019, start   743  T_err= 11.98 cm  R_err= 2.16°  Scale μ=266.09%
+[⚠️  Window]  Seq 019, start   744  T_err= 12.17 cm  R_err= 2.15°  Scale μ=265.52%
+[⚠️  Window]  Seq 019, start   745  T_err= 12.60 cm  R_err= 2.18°  Scale μ=256.04%
+[⚠️  Window]  Seq 019, start   746  T_err= 11.97 cm  R_err= 2.14°  Scale μ=231.77%
+[⚠️  Window]  Seq 019, start   747  T_err= 10.13 cm  R_err= 1.91°  Scale μ=202.26%
+[⚠️  Window]  Seq 019, start   748  T_err=  8.89 cm  R_err= 1.57°  Scale μ=212.35%
+[⚠️  Window]  Seq 019, start   749  T_err=  7.75 cm  R_err= 1.17°  Scale μ=181.79%
+[ℹ️  Window] Seq 019 win  750  win_scale=  1.13
+[ℹ️  ΔT] mean_pred_jump= 8.13cm  mean_gt_jump= 7.22cm
+[⚠️  Window]  Seq 019, start   750  T_err=  6.69 cm  R_err= 1.10°  Scale μ=147.58%
+[⚠️  Window]  Seq 019, start   751  T_err=  6.74 cm  R_err= 0.98°  Scale μ=166.40%
+Processing batches:  94%|█████████▍| 925/980 [01:34<00:05,  9.91it/s]Processing batches:  94%|█████████▍| 926/980 [01:34<00:05,  9.80it/s]Processing batches:  95%|█████████▍| 927/980 [01:34<00:05,  9.71it/s]Processing batches:  95%|█████████▍| 928/980 [01:35<00:05,  9.58it/s]Processing batches:  95%|█████████▍| 929/980 [01:35<00:05,  9.50it/s]Processing batches:  95%|█████████▌| 931/980 [01:35<00:04, 10.05it/s]Processing batches:  95%|█████████▌| 932/980 [01:35<00:04,  9.84it/s]Processing batches:  95%|█████████▌| 933/980 [01:35<00:04,  9.86it/s]Processing batches:  95%|█████████▌| 934/980 [01:35<00:04,  9.68it/s]Processing batches:  95%|█████████▌| 935/980 [01:35<00:04,  9.59it/s]Processing batches:  96%|█████████▌| 936/980 [01:35<00:04,  9.52it/s]Processing batches:  96%|█████████▌| 937/980 [01:35<00:04,  9.46it/s]Processing batches:  96%|█████████▌| 939/980 [01:36<00:03, 10.37it/s]Processing batches:  96%|█████████▌| 941/980 [01:36<00:03, 10.14it/s]Processing batches:  96%|█████████▌| 943/980 [01:36<00:03,  9.81it/s]Processing batches:  96%|█████████▋| 944/980 [01:36<00:03,  9.72it/s]Processing batches:  96%|█████████▋| 945/980 [01:36<00:03,  9.67it/s][⚠️  Window]  Seq 019, start   752  T_err=  6.56 cm  R_err= 1.05°  Scale μ=157.56%
+[⚠️  Window]  Seq 019, start   753  T_err=  6.13 cm  R_err= 1.08°  Scale μ=154.21%
+[⚠️  Window]  Seq 019, start   754  T_err=  5.43 cm  R_err= 0.99°  Scale μ=142.61%
+[⚠️  Window]  Seq 019, start   756  T_err=  5.77 cm  R_err= 0.95°  Scale μ=167.19%
+[⚠️  Window]  Seq 019, start   757  T_err=  6.38 cm  R_err= 1.06°  Scale μ=164.37%
+[⚠️  Window]  Seq 019, start   758  T_err=  6.93 cm  R_err= 1.15°  Scale μ=117.60%
+[⚠️  Window]  Seq 019, start   759  T_err=  8.58 cm  R_err= 1.32°  Scale μ=121.35%
+[ℹ️  Window] Seq 019 win  760  win_scale=  1.19
+[ℹ️  ΔT] mean_pred_jump=12.02cm  mean_gt_jump=10.06cm
+[⚠️  Window]  Seq 019, start   760  T_err= 10.51 cm  R_err= 1.34°  Scale μ=122.77%
+[⚠️  Window]  Seq 019, start   761  T_err= 10.81 cm  R_err= 1.28°  Scale μ=123.86%
+[⚠️  Window]  Seq 019, start   762  T_err= 10.89 cm  R_err= 1.28°  Scale μ=108.30%
+[⚠️  Window]  Seq 019, start   763  T_err= 10.71 cm  R_err= 1.29°  Scale μ=87.82%
+[⚠️  Window]  Seq 019, start   764  T_err= 10.54 cm  R_err= 1.27°  Scale μ=74.76%
+[⚠️  Window]  Seq 019, start   765  T_err= 10.52 cm  R_err= 1.24°  Scale μ=74.31%
+[⚠️  Window]  Seq 019, start   766  T_err= 10.49 cm  R_err= 1.23°  Scale μ=73.28%
+[⚠️  Window]  Seq 019, start   767  T_err= 10.82 cm  R_err= 1.16°  Scale μ=70.29%
+[⚠️  Window]  Seq 019, start   768  T_err= 10.92 cm  R_err= 1.23°  Scale μ=62.55%
+[⚠️  Window]  Seq 019, start   769  T_err= 10.32 cm  R_err= 1.18°  Scale μ=50.88%
+[ℹ️  Window] Seq 019 win  770  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump=19.89cm  mean_gt_jump=19.51cm
+[⚠️  Window]  Seq 019, start   770  T_err= 10.24 cm  R_err= 1.20°  Scale μ=52.01%
+[⚠️  Window]  Seq 019, start   771  T_err=  9.89 cm  R_err= 1.13°  Scale μ=50.82%
+[⚠️  Window]  Seq 019, start   772  T_err=  9.47 cm  R_err= 1.04°  Scale μ=52.20%
+[⚠️  Window]  Seq 019, start   773  T_err= 10.77 cm  R_err= 1.05°  Scale μ=63.84%
+[⚠️  Window]  Seq 019, start   774  T_err= 11.30 cm  R_err= 1.62°  Scale μ=47.95%
+[⚠️  Window]  Seq 019, start   775  T_err= 11.81 cm  R_err= 2.09°  Scale μ=49.49%
+[⚠️  Window]  Seq 019, start   776  T_err= 11.39 cm  R_err= 2.17°  Scale μ=46.93%
+[⚠️  Window]  Seq 019, start   777  T_err= 11.68 cm  R_err= 2.06°  Scale μ=52.08%
+[⚠️  Window]  Seq 019, start   778  T_err= 11.27 cm  R_err= 1.96°  Scale μ=48.39%
+[⚠️  Window]  Seq 019, start   779  T_err= 10.80 cm  R_err= 1.77°  Scale μ=45.35%
+[ℹ️  Window] Seq 019 win  780  win_scale=  0.96
+[ℹ️  ΔT] mean_pred_jump=24.65cm  mean_gt_jump=25.58cm
+[⚠️  Window]  Seq 019, start   780  T_err= 10.61 cm  R_err= 1.81°  Scale μ=39.11%
+[⚠️  Window]  Seq 019, start   781  T_err= 10.21 cm  R_err= 1.82°  Scale μ=37.39%
+[⚠️  Window]  Seq 019, start   782  T_err= 10.25 cm  R_err= 1.90°  Scale μ=33.75%
+[⚠️  Window]  Seq 019, start   783  T_err= 10.53 cm  R_err= 2.03°  Scale μ=32.78%
+[⚠️  Window]  Seq 019, start   784  T_err= 10.60 cm  R_err= 2.21°  Scale μ=33.48%
+[⚠️  Window]  Seq 019, start   785  T_err= 10.49 cm  R_err= 2.23°  Scale μ=45.07%
+[⚠️  Window]  Seq 019, start   786  T_err= 10.47 cm  R_err= 2.23°  Scale μ=56.88%
+[⚠️  Window]  Seq 019, start   787  T_err= 10.22 cm  R_err= 2.25°  Scale μ=59.00%
+[⚠️  Window]  Seq 019, start   788  T_err= 10.13 cm  R_err= 2.19°  Scale μ=63.64%
+[⚠️  Window]  Seq 019, start   789  T_err= 10.12 cm  R_err= 2.19°  Scale μ=70.01%
+[ℹ️  Window] Seq 019 win  790  win_scale=  0.99
+[ℹ️  ΔT] mean_pred_jump=19.26cm  mean_gt_jump=19.51cm
+[⚠️  Window]  Seq 019, start   790  T_err= 10.28 cm  R_err= 2.23°  Scale μ=77.71%
+[⚠️  Window]  Seq 019, start   791  T_err= 10.59 cm  R_err= 2.28°  Scale μ=81.13%
+[⚠️  Window]  Seq 019, start   792  T_err= 11.07 cm  R_err= 2.34°  Scale μ=75.02%
+[⚠️  Window]  Seq 019, start   793  T_err= 10.66 cm  R_err= 2.29°  Scale μ=75.34%
+[⚠️  Window]  Seq 019, start   794  T_err= 10.08 cm  R_err= 1.73°  Scale μ=84.16%
+[⚠️  Window]  Seq 019, start   795  T_err=  9.29 cm  R_err= 1.29°  Scale μ=74.19%
+[⚠️  Window]  Seq 019, start   796  T_err=  9.06 cm  R_err= 1.18°  Scale μ=72.54%
+[⚠️  Window]  Seq 019, start   797  T_err=  7.96 cm  R_err= 1.17°  Scale μ=70.70%
+[⚠️  Window]  Seq 019, start   798  T_err=  7.68 cm  R_err= 1.17°  Scale μ=70.63%
+[⚠️  Window]  Seq 019, start   799  T_err=  7.30 cm  R_err= 1.18°  Scale μ=74.92%
+[ℹ️  Window] Seq 019 win  800  win_scale=  1.17
+[ℹ️  ΔT] mean_pred_jump=10.90cm  mean_gt_jump= 9.31cm
+[⚠️  Window]  Seq 019, start   800  T_err=  7.29 cm  R_err= 1.13°  Scale μ=102.90%
+[⚠️  Window]  Seq 019, start   801  T_err=  6.83 cm  R_err= 1.22°  Scale μ=94.11%
+[⚠️  Window]  Seq 019, start   802  T_err=  6.30 cm  R_err= 1.17°  Scale μ=89.86%
+[⚠️  Window]  Seq 019, start   803  T_err=  5.89 cm  R_err= 1.05°  Scale μ=86.79%
+[⚠️  Window]  Seq 019, start   804  T_err=  5.76 cm  R_err= 0.90°  Scale μ=96.54%
+[⚠️  Window]  Seq 019, start   805  T_err=  5.63 cm  R_err= 0.92°  Scale μ=88.68%
+[⚠️  Window]  Seq 019, start   806  T_err=  5.61 cm  R_err= 0.92°  Scale μ=98.36%
+[⚠️  Window]  Seq 019, start   807  T_err=  5.54 cm  R_err= 0.91°  Scale μ=93.39%
+[⚠️  Window]  Seq 019, start   808  T_err=  5.60 cm  R_err= 0.92°  Scale μ=91.19%
+[⚠️  Window]  Seq 019, start   809  T_err=  5.61 cm  R_err= 1.09°  Scale μ=91.15%
+[ℹ️  Window] Seq 019 win  810  win_scale=  1.16
+[ℹ️  ΔT] mean_pred_jump= 7.53cm  mean_gt_jump= 6.51cm
+[⚠️  Window]  Seq 019, start   810  T_err=  5.54 cm  R_err= 1.04°  Scale μ=92.60%
+[⚠️  Window]  Seq 019, start   811  T_err=  5.13 cm  R_err= 0.97°  Scale μ=90.76%
+[⚠️  Window]  Seq 019, start   818  T_err=  5.70 cm  R_err= 0.96°  Scale μ=70.33%
+[⚠️  Window]  Seq 019, start   819  T_err=  6.42 cm  R_err= 1.07°  Scale μ=68.56%
+[ℹ️  Window] Seq 019 win  820  win_scale=  1.05
+[ℹ️  ΔT] mean_pred_jump= 7.69cm  mean_gt_jump= 7.36cm
+[⚠️  Window]  Seq 019, start   820  T_err=  6.39 cm  R_err= 1.10°  Scale μ=69.60%
+[⚠️  Window]  Seq 019, start   821  T_err=  6.25 cm  R_err= 1.04°  Scale μ=75.36%
+[⚠️  Window]  Seq 019, start   822  T_err=  6.45 cm  R_err= 1.07°  Scale μ=77.73%
+[⚠️  Window]  Seq 019, start   823  T_err=  6.03 cm  R_err= 1.05°  Scale μ=80.05%
+[⚠️  Window]  Seq 019, start   824  T_err=  5.22 cm  R_err= 1.02°  Scale μ=92.29%
+[⚠️  Window]  Seq 019, start   825  T_err=  5.11 cm  R_err= 0.96°  Scale μ=109.87%
+[⚠️  Window]  Seq 019, start   826  T_err=  5.09 cm  R_err= 0.94°  Scale μ=111.70%
+[⚠️  Window]  Seq 019, start   827  T_err=  5.06 cm  R_err= 0.94°  Scale μ=124.24%
+[⚠️  Window]  Seq 019, start   828  T_err=  5.08 cm  R_err= 0.92°  Scale μ=133.74%
+[⚠️  Window]  Seq 019, start   829  T_err=  5.08 cm  R_err= 0.74°  Scale μ=149.36%
+[ℹ️  Window] Seq 019 win  830  win_scale=  1.26
+[ℹ️  ΔT] mean_pred_jump= 6.42cm  mean_gt_jump= 5.10cm
+[⚠️  Window]  Seq 019, start   837  T_err=  6.00 cm  R_err= 1.08°  Scale μ=230.80%
+[⚠️  Window]  Seq 019, start   838  T_err=  6.37 cm  R_err= 1.15°  Scale μ=211.74%
+[⚠️  Window]  Seq 019, start   839  T_err=  6.20 cm  R_err= 1.09°  Scale μ=198.86%
+[ℹ️  Window] Seq 019 win  840  win_scale=  1.28
+[ℹ️  ΔT] mean_pred_jump= 9.42cm  mean_gt_jump= 7.36cm
+[⚠️  Window]  Seq 019, start   840  T_err=  6.46 cm  R_err= 1.09°  Scale μ=194.96%
+[⚠️  Window]  Seq 019, start   841  T_err=  6.01 cm  R_err= 1.09°  Scale μ=157.04%
+[⚠️  Window]  Seq 019, start   842  T_err=  6.41 cm  R_err= 1.26°  Scale μ=165.62%
+[⚠️  Window]  Seq 019, start   843  T_err=  7.15 cm  R_err= 1.39°  Scale μ=152.54%
+[⚠️  Window]  Seq 019, start   844  T_err=  8.92 cm  R_err= 1.44°  Scale μ=146.00%
+[⚠️  Window]  Seq 019, start   845  T_err= 10.29 cm  R_err= 1.51°  Scale μ=166.97%
+[⚠️  Window]  Seq 019, start   846  T_err= 11.24 cm  R_err= 1.53°  Scale μ=202.26%
+Processing batches:  97%|█████████▋| 947/980 [01:36<00:03, 10.43it/s]Processing batches:  97%|█████████▋| 949/980 [01:37<00:03, 10.08it/s]Processing batches:  97%|█████████▋| 951/980 [01:37<00:02,  9.82it/s]Processing batches:  97%|█████████▋| 952/980 [01:37<00:02,  9.74it/s]Processing batches:  97%|█████████▋| 953/980 [01:37<00:02,  9.69it/s]Processing batches:  97%|█████████▋| 955/980 [01:37<00:02, 10.48it/s]Processing batches:  98%|█████████▊| 957/980 [01:37<00:02, 10.19it/s]Processing batches:  98%|█████████▊| 959/980 [01:38<00:02,  9.86it/s]Processing batches:  98%|█████████▊| 960/980 [01:38<00:02,  9.74it/s]Processing batches:  98%|█████████▊| 961/980 [01:38<00:01,  9.74it/s]Processing batches:  98%|█████████▊| 963/980 [01:38<00:01, 10.54it/s]Processing batches:  98%|█████████▊| 965/980 [01:38<00:01, 10.13it/s]Processing batches:  99%|█████████▊| 967/980 [01:38<00:01,  9.83it/s]Processing batches:  99%|█████████▉| 968/980 [01:39<00:01,  9.75it/s]Processing batches:  99%|█████████▉| 969/980 [01:39<00:01,  9.72it/s]Processing batches:  99%|█████████▉| 971/980 [01:39<00:00, 10.55it/s]Processing batches:  99%|█████████▉| 973/980 [01:39<00:00, 10.21it/s]Processing batches:  99%|█████████▉| 975/980 [01:39<00:00,  9.90it/s]Processing batches: 100%|█████████▉| 976/980 [01:39<00:00,  9.82it/s][⚠️  Window]  Seq 019, start   847  T_err= 11.35 cm  R_err= 1.53°  Scale μ=209.34%
+[⚠️  Window]  Seq 019, start   848  T_err= 11.34 cm  R_err= 1.53°  Scale μ=201.63%
+[⚠️  Window]  Seq 019, start   849  T_err= 11.87 cm  R_err= 1.56°  Scale μ=246.71%
+[ℹ️  Window] Seq 019 win  850  win_scale=  1.14
+[ℹ️  ΔT] mean_pred_jump=12.71cm  mean_gt_jump=11.16cm
+[⚠️  Window]  Seq 019, start   850  T_err= 11.75 cm  R_err= 1.59°  Scale μ=225.69%
+[⚠️  Window]  Seq 019, start   851  T_err= 11.76 cm  R_err= 1.59°  Scale μ=204.20%
+[⚠️  Window]  Seq 019, start   852  T_err= 12.01 cm  R_err= 1.65°  Scale μ=178.98%
+[⚠️  Window]  Seq 019, start   853  T_err= 12.78 cm  R_err= 1.70°  Scale μ=197.07%
+[⚠️  Window]  Seq 019, start   854  T_err= 13.27 cm  R_err= 1.74°  Scale μ=203.97%
+[⚠️  Window]  Seq 019, start   855  T_err= 13.70 cm  R_err= 1.71°  Scale μ=283.42%
+[⚠️  Window]  Seq 019, start   856  T_err= 13.89 cm  R_err= 1.42°  Scale μ=295.84%
+[⚠️  Window]  Seq 019, start   857  T_err= 12.60 cm  R_err= 1.24°  Scale μ=298.99%
+[⚠️  Window]  Seq 019, start   858  T_err= 11.69 cm  R_err= 1.14°  Scale μ=307.71%
+[⚠️  Window]  Seq 019, start   859  T_err= 10.41 cm  R_err= 1.08°  Scale μ=293.40%
+[ℹ️  Window] Seq 019 win  860  win_scale=  1.42
+[ℹ️  ΔT] mean_pred_jump= 7.56cm  mean_gt_jump= 5.33cm
+[⚠️  Window]  Seq 019, start   860  T_err=  9.43 cm  R_err= 1.07°  Scale μ=274.67%
+[⚠️  Window]  Seq 019, start   861  T_err=  8.25 cm  R_err= 1.03°  Scale μ=249.15%
+[⚠️  Window]  Seq 019, start   862  T_err=  8.31 cm  R_err= 0.85°  Scale μ=259.81%
+[⚠️  Window]  Seq 019, start   863  T_err=  6.63 cm  R_err= 0.77°  Scale μ=201.60%
+[ℹ️  Window] Seq 019 win  870  win_scale=  0.95
+[ℹ️  ΔT] mean_pred_jump= 2.14cm  mean_gt_jump= 2.26cm
+[ℹ️  Window] Seq 019 win  880  win_scale=  1.03
+[ℹ️  ΔT] mean_pred_jump= 2.85cm  mean_gt_jump= 2.75cm
+[ℹ️  Window] Seq 019 win  890  win_scale=  1.32
+[ℹ️  ΔT] mean_pred_jump= 6.52cm  mean_gt_jump= 4.95cm
+[⚠️  Window]  Seq 019, start   890  T_err=  6.27 cm  R_err= 1.38°  Scale μ=131.41%
+[⚠️  Window]  Seq 019, start   891  T_err=  8.35 cm  R_err= 1.57°  Scale μ=174.51%
+[⚠️  Window]  Seq 019, start   892  T_err=  7.97 cm  R_err= 2.20°  Scale μ=133.48%
+[⚠️  Window]  Seq 019, start   893  T_err=  8.68 cm  R_err= 2.21°  Scale μ=128.51%
+[⚠️  Window]  Seq 019, start   894  T_err=  8.96 cm  R_err= 1.98°  Scale μ=129.45%
+[⚠️  Window]  Seq 019, start   895  T_err=  9.58 cm  R_err= 2.08°  Scale μ=102.71%
+[⚠️  Window]  Seq 019, start   896  T_err=  9.76 cm  R_err= 2.11°  Scale μ=104.33%
+[⚠️  Window]  Seq 019, start   897  T_err=  9.99 cm  R_err= 2.20°  Scale μ=106.11%
+[⚠️  Window]  Seq 019, start   898  T_err= 10.11 cm  R_err= 2.30°  Scale μ=106.88%
+[⚠️  Window]  Seq 019, start   899  T_err= 10.10 cm  R_err= 2.31°  Scale μ=112.75%
+[ℹ️  Window] Seq 019 win  900  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump=11.84cm  mean_gt_jump=11.16cm
+[⚠️  Window]  Seq 019, start   900  T_err= 10.15 cm  R_err= 2.25°  Scale μ=121.30%
+[⚠️  Window]  Seq 019, start   901  T_err= 10.20 cm  R_err= 2.24°  Scale μ=133.78%
+[⚠️  Window]  Seq 019, start   902  T_err=  9.90 cm  R_err= 2.26°  Scale μ=113.14%
+[⚠️  Window]  Seq 019, start   903  T_err=  9.87 cm  R_err= 2.27°  Scale μ=112.50%
+[⚠️  Window]  Seq 019, start   904  T_err= 10.38 cm  R_err= 2.34°  Scale μ=118.56%
+[⚠️  Window]  Seq 019, start   905  T_err= 10.33 cm  R_err= 2.68°  Scale μ=115.64%
+[⚠️  Window]  Seq 019, start   906  T_err= 10.47 cm  R_err= 2.65°  Scale μ=108.97%
+[⚠️  Window]  Seq 019, start   907  T_err= 10.52 cm  R_err= 2.60°  Scale μ=117.59%
+[⚠️  Window]  Seq 019, start   908  T_err= 11.04 cm  R_err= 2.46°  Scale μ=127.31%
+[⚠️  Window]  Seq 019, start   909  T_err= 10.98 cm  R_err= 2.31°  Scale μ=127.69%
+[ℹ️  Window] Seq 019 win  910  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump=11.42cm  mean_gt_jump=10.38cm
+[⚠️  Window]  Seq 019, start   910  T_err=  9.22 cm  R_err= 2.30°  Scale μ=123.59%
+[⚠️  Window]  Seq 019, start   911  T_err=  7.52 cm  R_err= 2.14°  Scale μ=107.41%
+[⚠️  Window]  Seq 019, start   912  T_err=  7.70 cm  R_err= 1.61°  Scale μ=119.27%
+[⚠️  Window]  Seq 019, start   913  T_err=  7.53 cm  R_err= 1.59°  Scale μ=115.13%
+[⚠️  Window]  Seq 019, start   914  T_err=  7.34 cm  R_err= 1.58°  Scale μ=113.01%
+[⚠️  Window]  Seq 019, start   915  T_err=  6.38 cm  R_err= 1.52°  Scale μ=97.41%
+[⚠️  Window]  Seq 019, start   916  T_err=  5.47 cm  R_err= 1.50°  Scale μ=76.71%
+[ℹ️  Window] Seq 019 win  920  win_scale=  1.06
+[ℹ️  ΔT] mean_pred_jump= 6.10cm  mean_gt_jump= 5.76cm
+[⚠️  Window]  Seq 019, start   925  T_err=  5.05 cm  R_err= 1.01°  Scale μ=47.47%
+[ℹ️  Window] Seq 019 win  930  win_scale=  1.02
+[ℹ️  ΔT] mean_pred_jump= 4.62cm  mean_gt_jump= 4.54cm
+[⚠️  Window]  Seq 019, start   932  T_err=  5.94 cm  R_err= 0.73°  Scale μ=153.59%
+[⚠️  Window]  Seq 019, start   933  T_err=  6.34 cm  R_err= 0.77°  Scale μ=171.13%
+[⚠️  Window]  Seq 019, start   934  T_err=  6.14 cm  R_err= 0.79°  Scale μ=170.18%
+[⚠️  Window]  Seq 019, start   935  T_err=  5.96 cm  R_err= 0.76°  Scale μ=163.73%
+[⚠️  Window]  Seq 019, start   936  T_err=  6.19 cm  R_err= 0.82°  Scale μ=175.56%
+[⚠️  Window]  Seq 019, start   937  T_err=  6.41 cm  R_err= 0.84°  Scale μ=185.59%
+[⚠️  Window]  Seq 019, start   938  T_err=  6.44 cm  R_err= 0.82°  Scale μ=183.43%
+[⚠️  Window]  Seq 019, start   939  T_err=  6.56 cm  R_err= 0.87°  Scale μ=192.10%
+[ℹ️  Window] Seq 019 win  940  win_scale=  1.24
+[ℹ️  ΔT] mean_pred_jump= 5.52cm  mean_gt_jump= 4.45cm
+[⚠️  Window]  Seq 019, start   940  T_err=  6.63 cm  R_err= 0.86°  Scale μ=205.21%
+[⚠️  Window]  Seq 019, start   941  T_err=  6.73 cm  R_err= 0.87°  Scale μ=210.73%
+[⚠️  Window]  Seq 019, start   942  T_err=  6.72 cm  R_err= 0.83°  Scale μ=215.71%
+[⚠️  Window]  Seq 019, start   943  T_err=  6.54 cm  R_err= 0.77°  Scale μ=215.55%
+[⚠️  Window]  Seq 019, start   944  T_err=  6.56 cm  R_err= 0.83°  Scale μ=225.79%
+[⚠️  Window]  Seq 019, start   945  T_err=  7.00 cm  R_err= 1.13°  Scale μ=217.84%
+[⚠️  Window]  Seq 019, start   946  T_err=  6.76 cm  R_err= 1.18°  Scale μ=189.14%
+[⚠️  Window]  Seq 019, start   947  T_err=  6.86 cm  R_err= 1.21°  Scale μ=168.96%
+[⚠️  Window]  Seq 019, start   948  T_err=  6.57 cm  R_err= 1.25°  Scale μ=131.58%
+[⚠️  Window]  Seq 019, start   949  T_err=  7.47 cm  R_err= 1.28°  Scale μ=116.85%
+[ℹ️  Window] Seq 019 win  950  win_scale=  1.00
+[ℹ️  ΔT] mean_pred_jump= 9.85cm  mean_gt_jump= 9.84cm
+[⚠️  Window]  Seq 019, start   950  T_err=  8.36 cm  R_err= 1.31°  Scale μ=86.71%
+[⚠️  Window]  Seq 019, start   951  T_err=  9.16 cm  R_err= 1.43°  Scale μ=90.10%
+[⚠️  Window]  Seq 019, start   952  T_err=  8.24 cm  R_err= 1.49°  Scale μ=80.81%
+[⚠️  Window]  Seq 019, start   953  T_err=  7.70 cm  R_err= 1.50°  Scale μ=76.15%
+[⚠️  Window]  Seq 019, start   954  T_err=  8.55 cm  R_err= 1.47°  Scale μ=84.95%
+[⚠️  Window]  Seq 019, start   955  T_err=  9.58 cm  R_err= 1.51°  Scale μ=99.22%
+[⚠️  Window]  Seq 019, start   956  T_err=  9.17 cm  R_err= 1.43°  Scale μ=93.20%
+[⚠️  Window]  Seq 019, start   957  T_err=  9.35 cm  R_err= 1.40°  Scale μ=96.93%
+[⚠️  Window]  Seq 019, start   958  T_err=  9.34 cm  R_err= 1.43°  Scale μ=84.42%
+[⚠️  Window]  Seq 019, start   959  T_err=  9.05 cm  R_err= 1.37°  Scale μ=76.12%
+[ℹ️  Window] Seq 019 win  960  win_scale=  0.98
+[ℹ️  ΔT] mean_pred_jump=15.63cm  mean_gt_jump=15.93cm
+[⚠️  Window]  Seq 019, start   960  T_err=  8.55 cm  R_err= 1.39°  Scale μ=57.92%
+[⚠️  Window]  Seq 019, start   961  T_err=  9.08 cm  R_err= 1.48°  Scale μ=57.87%
+[⚠️  Window]  Seq 019, start   962  T_err= 10.18 cm  R_err= 1.47°  Scale μ=53.85%
+[⚠️  Window]  Seq 019, start   963  T_err= 11.17 cm  R_err= 1.48°  Scale μ=47.73%
+Processing batches: 100%|█████████▉| 977/980 [01:39<00:00,  9.75it/s]Processing batches: 100%|█████████▉| 979/980 [01:40<00:00, 10.57it/s]Processing batches: 100%|██████████| 980/980 [01:40<00:00,  9.77it/s]
+[⚠️  Window]  Seq 019, start   964  T_err= 11.10 cm  R_err= 1.41°  Scale μ=43.76%
+[⚠️  Window]  Seq 019, start   965  T_err= 10.99 cm  R_err= 1.10°  Scale μ=70.03%
+[⚠️  Window]  Seq 019, start   966  T_err= 10.94 cm  R_err= 1.05°  Scale μ=106.64%
+[⚠️  Window]  Seq 019, start   967  T_err= 10.57 cm  R_err= 1.02°  Scale μ=144.84%
+[⚠️  Window]  Seq 019, start   968  T_err= 10.52 cm  R_err= 0.97°  Scale μ=189.39%
+[⚠️  Window]  Seq 019, start   969  T_err= 10.51 cm  R_err= 0.94°  Scale μ=216.72%
+[ℹ️  Window] Seq 019 win  970  win_scale=  1.10
+[ℹ️  ΔT] mean_pred_jump=11.63cm  mean_gt_jump=10.53cm
+[⚠️  Window]  Seq 019, start   970  T_err= 10.24 cm  R_err= 0.91°  Scale μ=223.18%
+[⚠️  Window]  Seq 019, start   971  T_err=  9.35 cm  R_err= 0.85°  Scale μ=203.90%
+[⚠️  Window]  Seq 019, start   972  T_err=  9.34 cm  R_err= 0.79°  Scale μ=205.78%
+[⚠️  Window]  Seq 019, start   973  T_err=  9.30 cm  R_err= 0.76°  Scale μ=219.90%
+[⚠️  Window]  Seq 019, start   974  T_err=  8.19 cm  R_err= 0.75°  Scale μ=205.76%
+[⚠️  Window]  Seq 019, start   975  T_err=  6.74 cm  R_err= 0.68°  Scale μ=176.96%
+[⚠️  Window]  Seq 019, start   976  T_err=  6.30 cm  R_err= 0.67°  Scale μ=171.99%
+[⚠️  Window]  Seq 019, start   977  T_err=  5.07 cm  R_err= 0.70°  Scale μ=138.16%
+
+🛣️  Path-length ratio (pred / GT): 1.042
+🔍 Global scale-drift  mean=47.88%  max=2094.63%
 
 ==================================================
 📊 EVALUATION RESULTS
 ==================================================
 
 📏 Translation Error:
-   Mean:   3.99 cm
-   Std:    8.21 cm
-   Median: 1.23 cm
-   95%:    13.80 cm
-   Max:    77.48 cm
+   Mean:   2.59 cm
+   Std:    4.06 cm
+   Median: 0.93 cm
+   95%:    10.95 cm
+   Max:    41.15 cm
 
 🔄 Rotation Error (degrees):
-   Mean:   5.35
-   Std:    6.81
-   Median: 3.65
-   95%:    13.41
-   Max:    125.91
+   Mean:   0.67
+   Std:    1.18
+   Median: 0.30
+   95%:    2.41
+   Max:    17.08
+
+📐 Scale Drift (%):
+   Mean:   47.88
+   Std:    92.55
+   Median: 23.77
+   95%:    172.22
+   Max:    2094.63
 ==================================================
 
-📊 Plots saved to: evaluation_from_scratch/plots/
+📊 Plots saved to: evaluation_fixed/plots/
 
 📊 Generating 3D trajectory plots and CSV files...
 
 Sequence 016:
-  Total windows: 99
-  Non-overlapping windows: 99
-Saved ground truth to evaluation_from_scratch/trajectory_016_gt.csv
-Saved predictions to evaluation_from_scratch/trajectory_016_pred.csv
+  Total windows: 980
+  Non-overlapping windows: 49
+  APE - Mean: 131.47cm, RMSE: 193.55cm
+  RPE - Trans: 3.33cm, Rot: 6.63°
+  🛤️  Path-length ratio: 0.922
+  📏 Seq scale-drift  mean=38.96%  max=532.81%
+Saved ground truth to evaluation_fixed/trajectory_016_gt.csv
+Saved predictions to evaluation_fixed/trajectory_016_pred.csv
 
 Sequence 017:
-  Total windows: 99
-  Non-overlapping windows: 99
-Saved ground truth to evaluation_from_scratch/trajectory_017_gt.csv
-Saved predictions to evaluation_from_scratch/trajectory_017_pred.csv
+  Total windows: 980
+  Non-overlapping windows: 49
+  APE - Mean: 23.35cm, RMSE: 24.10cm
+  RPE - Trans: 0.75cm, Rot: 2.36°
+  🛤️  Path-length ratio: 1.028
+  📏 Seq scale-drift  mean=17.75%  max=219.43%
+Saved ground truth to evaluation_fixed/trajectory_017_gt.csv
+Saved predictions to evaluation_fixed/trajectory_017_pred.csv
 
 Sequence 018:
-  Total windows: 99
-  Non-overlapping windows: 99
-Saved ground truth to evaluation_from_scratch/trajectory_018_gt.csv
-Saved predictions to evaluation_from_scratch/trajectory_018_pred.csv
+  Total windows: 980
+  Non-overlapping windows: 49
+  APE - Mean: 25.89cm, RMSE: 27.53cm
+  RPE - Trans: 1.93cm, Rot: 4.45°
+  🛤️  Path-length ratio: 0.938
+  📏 Seq scale-drift  mean=31.82%  max=291.79%
+Saved ground truth to evaluation_fixed/trajectory_018_gt.csv
+Saved predictions to evaluation_fixed/trajectory_018_pred.csv
 
 Sequence 019:
-  Total windows: 99
-  Non-overlapping windows: 99
-Saved ground truth to evaluation_from_scratch/trajectory_019_gt.csv
-Saved predictions to evaluation_from_scratch/trajectory_019_pred.csv
+  Total windows: 980
+  Non-overlapping windows: 49
+  APE - Mean: 361.72cm, RMSE: 379.38cm
+  RPE - Trans: 12.88cm, Rot: 13.95°
+  🛤️  Path-length ratio: 1.024
+  📏 Seq scale-drift  mean=108.01%  max=2001.84%
+Saved ground truth to evaluation_fixed/trajectory_019_gt.csv
+Saved predictions to evaluation_fixed/trajectory_019_pred.csv
 
-💾 Results saved to: evaluation_from_scratch/evaluation_metrics.txt
+💾 Results saved to: evaluation_fixed/evaluation_metrics.txt
 
 📊 Generated outputs:
    Sequence 016:
@@ -91,4 +2001,4 @@ Saved predictions to evaluation_from_scratch/trajectory_019_pred.csv
    - rotation_3d_019.png, rotation_3d_019_1s.png, rotation_3d_019_5s.png
 
 ✅ Evaluation complete!
-📂 Results saved to: evaluation_from_scratch
+📂 Results saved to: evaluation_fixed

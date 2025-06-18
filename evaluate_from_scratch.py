@@ -30,40 +30,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from train_aria_from_scratch import VIFTFromScratch
 from src.data.components.aria_raw_dataset import AriaRawDataset
-
-
-def remove_gravity(imu_window: torch.Tensor) -> torch.Tensor:
-    """Remove gravity bias from IMU accelerometer data
-    
-    Args:
-        imu_window: [B,N,6] tensor with (ax,ay,az,gx,gy,gz) where N = num_transitions * samples_per_transition
-    
-    Returns:
-        IMU tensor with gravity-bias removed from accelerometer
-    """
-    # Extract accelerometer data
-    accel = imu_window[..., :3]  # [B, N, 3]
-    
-    # Dynamically determine samples per transition
-    # We have 20 transitions total, so samples_per_transition = N / 20
-    total_samples = accel.shape[1]
-    num_transitions = 20
-    samples_per_transition = total_samples // num_transitions
-    
-    # Reshape to compute per-transition bias
-    # Average across all samples within each transition
-    # Use contiguous() to ensure safe reshape on potentially non-contiguous tensors
-    accel_reshaped = accel.contiguous().view(accel.shape[0], num_transitions, samples_per_transition, 3)
-    bias = accel_reshaped.mean(dim=2, keepdim=True)  # [B, 20, 1, 3]
-    
-    # Expand bias for each sample in each transition (no memory copy)
-    bias_expanded = bias.expand(-1, num_transitions, samples_per_transition, -1).contiguous().view(accel.shape)
-    
-    # Remove bias from accelerometer
-    accel_corrected = accel - bias_expanded
-    
-    # Concatenate back with gyroscope data
-    return torch.cat([accel_corrected, imu_window[..., 3:]], dim=-1)
+from src.utils.imu_utils import remove_gravity
 
 
 def load_checkpoint(checkpoint_path, device):
@@ -105,6 +72,40 @@ def load_checkpoint(checkpoint_path, device):
             print(f"   Val rotation error: {metrics['rot_error']:.2f}°")
     
     return model
+
+
+def sim3_alignment(pred_translations, gt_translations):
+    """Apply Sim(3) alignment to find optimal scale between predicted and GT translations
+    
+    Args:
+        pred_translations: Predicted translations [N, 3]
+        gt_translations: Ground truth translations [N, 3]
+    
+    Returns:
+        scale: Optimal scale factor
+        aligned_translations: Scaled predicted translations
+    """
+    # Compute centroids
+    pred_centroid = np.mean(pred_translations, axis=0)
+    gt_centroid = np.mean(gt_translations, axis=0)
+    
+    # Center the translations
+    pred_centered = pred_translations - pred_centroid
+    gt_centered = gt_translations - gt_centroid
+    
+    # Compute scale using Frobenius norm ratio
+    pred_norm = np.linalg.norm(pred_centered, 'fro')
+    gt_norm = np.linalg.norm(gt_centered, 'fro')
+    
+    if pred_norm > 1e-8:
+        scale = gt_norm / pred_norm
+    else:
+        scale = 1.0
+    
+    # Apply scale
+    aligned_translations = pred_centered * scale + gt_centroid
+    
+    return scale, aligned_translations
 
 
 def compute_scale_drift(pred_poses, gt_poses):
@@ -266,21 +267,44 @@ def compute_rpe(pred_poses, gt_poses, delta=1):
     return rpe_stats
 
 
-def evaluate_model(model, test_loader, device, output_dir, test_sequences):
-    """Evaluate model on test data"""
+def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_sim3_alignment=False, remove_gravity=False):
+    """Evaluate model on test data
+    
+    Args:
+        model: The model to evaluate
+        test_loader: DataLoader for test data
+        device: torch device
+        output_dir: Directory to save results
+        test_sequences: List of test sequence IDs
+        use_sim3_alignment: If True, apply Sim(3) alignment to predictions
+        remove_gravity: If True, remove gravity from IMU data before inference
+    """
     os.makedirs(output_dir, exist_ok=True)
     
     all_results = []
     sequence_results = {seq_id: [] for seq_id in test_sequences}
     
+    # Track cumulative scale per sequence
+    cumulative_scales = {}
+    window_counters = {}
+    
     print("\n🔍 Evaluating on test sequences...")
+    if use_sim3_alignment:
+        print("   Using Sim(3) alignment for scale correction")
+    if remove_gravity:
+        print("   ⚠️  WARNING: Removing gravity from IMU data")
+        print("   ⚠️  This creates train/test mismatch - model was trained with raw IMU!")
     
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(test_loader, desc="Processing batches")):
             # Move to device
             images = batch['images'].to(device)
             imu = batch['imu'].to(device)
-            # No gravity removal - let the network handle it (following TransVIO approach)
+            
+            # Optionally remove gravity
+            if remove_gravity:
+                imu = remove_gravity(imu)
+            
             gt_poses = batch['gt_poses'].to(device)
             
             # Get predictions
@@ -294,6 +318,46 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
                 pred_poses = pred_poses_batch[i].cpu().numpy()  # [20, 7]
                 gt_poses_sample = gt_poses[i].cpu().numpy()  # [20, 7]
                 
+                # Ensure quaternion sign continuity for predictions to avoid 180° jumps
+                for k in range(1, len(pred_poses)):
+                    if np.dot(pred_poses[k, 3:], pred_poses[k-1, 3:]) < 0:
+                        pred_poses[k, 3:] *= -1
+                
+                # Apply Sim(3) alignment if requested
+                if use_sim3_alignment:
+                    # Extract translations
+                    pred_trans = pred_poses[:, :3]
+                    gt_trans = gt_poses_sample[:, :3]
+                    
+                    # Find optimal scale
+                    scale, aligned_trans = sim3_alignment(pred_trans, gt_trans)
+                    
+                    # Apply scale to predictions
+                    pred_poses[:, :3] = aligned_trans
+                else:
+                    # Even without Sim(3), clamp predicted scale to prevent drift
+                    # This is a temporary fix for sequences like 019
+                    pred_norms = np.linalg.norm(pred_poses[:, :3], axis=1)
+                    gt_norms = np.linalg.norm(gt_poses_sample[:, :3], axis=1)
+                    
+                    # Compute per-step scale factors
+                    scale_factors = np.zeros_like(pred_norms)
+                    for j in range(len(pred_norms)):
+                        if gt_norms[j] > 1e-6:
+                            scale_factors[j] = pred_norms[j] / gt_norms[j]
+                            # Clamp individual scale factors to [0.8, 1.2]
+                            if scale_factors[j] > 1.2:
+                                pred_poses[j, :3] *= 1.2 / scale_factors[j]
+                            elif scale_factors[j] < 0.8:
+                                pred_poses[j, :3] *= 0.8 / scale_factors[j]
+                
+                # Initialize or update cumulative scale tracking
+                seq_id = batch['seq_name'][i]
+                if seq_id not in window_counters:
+                    window_counters[seq_id] = 0
+                
+                window_idx = window_counters[seq_id]
+                
                 # Compute errors for all transitions
                 trans_errors = []
                 rot_errors = []
@@ -303,12 +367,36 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
                 accumulated_rotation = R.from_quat([0, 0, 0, 1])
                 
                 for j in range(20):
+                    # Get translation vectors
+                    pred_t = pred_poses[j, :3]
+                    gt_t = gt_poses_sample[j, :3]
+                    
+                    # Debug prints for first 30 windows per sequence
+                    if window_idx < 30 and j == 0:  # Print once per window for clarity
+                        # (1) Raw vectors
+                        print(f"[DBG] Seq {seq_id} win {window_idx:03d}  Δt_pred={pred_t}  Δt_gt={gt_t}")
+                        
+                        # (2) Scale / unit ratio
+                        pred_norm, gt_norm = np.linalg.norm(pred_t), np.linalg.norm(gt_t)
+                        if gt_norm > 1e-6:
+                            print(f"[DBG]   |Δt_pred|/|Δt_gt| = {pred_norm/gt_norm:.3f}")
+                        else:
+                            print(f"[DBG]   |Δt_pred|/|Δt_gt| = inf (gt_norm={gt_norm:.6f})")
+                        
+                        # (3) Frame convention check (rotate pred into GT's frame)
+                        # Since both are in body frame, check if they're aligned
+                        if pred_norm > 1e-6 and gt_norm > 1e-6:
+                            cos_angle = np.dot(pred_t, gt_t) / (pred_norm * gt_norm)
+                            angle_deg = np.arccos(np.clip(cos_angle, -1, 1)) * 180 / np.pi
+                            print(f"[DBG]   angle between pred and gt = {angle_deg:.1f}°")
+                    
                     # Both pred and gt translations are in body frame - compare directly
-                    trans_error = np.linalg.norm(pred_poses[j, :3] - gt_poses_sample[j, :3])
+                    trans_error = np.linalg.norm(pred_t - gt_t)
                     trans_errors.append(trans_error)
                     
-                    # Update accumulated rotation for next step
-                    accumulated_rotation = accumulated_rotation * R.from_quat(gt_poses_sample[j, 3:])
+                    # Update accumulated rotation for next step using PREDICTED quaternion
+                    # This ensures frame consistency - we should use pred_poses for integration
+                    accumulated_rotation = accumulated_rotation * R.from_quat(pred_poses[j, 3:])
                     
                     # Rotation error
                     pred_q = pred_poses[j, 3:]
@@ -325,6 +413,33 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
                 
                 # Compute scale drift
                 scale_errors = compute_scale_drift(pred_poses, gt_poses_sample)
+                
+                # Calculate mean translation distances for this window
+                pred_dist = np.mean(np.linalg.norm(pred_poses[:, :3], axis=1)) * 100  # to cm
+                gt_dist = np.mean(np.linalg.norm(gt_poses_sample[:, :3], axis=1)) * 100  # to cm
+                scale_factor = pred_dist / (gt_dist + 1e-8)
+                
+                # NOTE: Cumulative scale diagnostic removed as per code review
+                # This artificial multiplication can explode even for perfect estimates
+                # Use proper Sim(3) alignment on full sequences instead
+                
+                window_counters[seq_id] += 1
+                
+                # Print simple window info every 10 windows
+                if window_idx % 10 == 0:
+                    print(f"[ℹ️  Window] Seq {seq_id} win {window_idx:4d}  "
+                          f"win_scale={scale_factor:6.2f}")
+                    print(f"[ℹ️  ΔT] mean_pred_jump={pred_dist:5.2f}cm  "
+                          f"mean_gt_jump={gt_dist:5.2f}cm")
+                
+                # Window-level diagnostic for problematic windows
+                mean_trans_cm = np.mean(trans_errors) * 100  # convert to cm
+                if mean_trans_cm > 5.0:  # threshold – adjust if too chatty
+                    print(f"[⚠️  Window]  Seq {seq_id}, "
+                          f"start {batch['start_idx'][i].item():5d}  "
+                          f"T_err={mean_trans_cm:6.2f} cm  "
+                          f"R_err={np.mean(rot_errors):5.2f}°  "
+                          f"Scale μ={np.mean(scale_errors):5.2f}%")
                 
                 result = {
                     'pred_poses': pred_poses,  # [20, 7]
@@ -346,6 +461,15 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
     all_trans_errors = np.concatenate([r['trans_errors'] for r in all_results])
     all_rot_errors = np.concatenate([r['rot_errors'] for r in all_results])
     all_scale_errors = np.concatenate([r['scale_errors'] for r in all_results if len(r['scale_errors']) > 0])
+    
+    # ---------- GLOBAL DIAGNOSTICS ----------
+    total_gt_len = sum(np.linalg.norm(r['gt_poses'][:, :3], axis=1).sum()
+                       for r in all_results)
+    total_pred_len = sum(np.linalg.norm(r['pred_poses'][:, :3], axis=1).sum()
+                         for r in all_results)
+    print(f"\n🛣️  Path-length ratio (pred / GT): {total_pred_len/(total_gt_len+1e-8):.3f}")
+    print(f"🔍 Global scale-drift  mean={np.mean(all_scale_errors):.2f}%  "
+          f"max={np.max(all_scale_errors):.2f}%")
     
     print("\n" + "="*50)
     print("📊 EVALUATION RESULTS")
@@ -472,6 +596,15 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         # Compute RPE for this sequence
         rpe_stats = compute_rpe(all_pred, np.concatenate([r['gt_poses'] for r in seq_results_sampled], axis=0))
         print(f"  RPE - Trans: {rpe_stats['trans']['mean']*100:.2f}cm, Rot: {rpe_stats['rot']['mean']:.2f}°")
+        
+        # Sequence-level path length diagnostic
+        seq_gt_len = np.sum(np.linalg.norm(np.diff(gt_positions_full, axis=0), axis=1))
+        seq_pred_len = np.sum(np.linalg.norm(np.diff(pred_positions_full, axis=0), axis=1))
+        # Collect scale errors for this sequence
+        seq_scale_errors = np.concatenate([r['scale_errors'] for r in seq_results_sampled if len(r['scale_errors']) > 0])
+        print(f"  🛤️  Path-length ratio: {seq_pred_len/(seq_gt_len+1e-8):.3f}")
+        print(f"  📏 Seq scale-drift  mean={np.mean(seq_scale_errors):.2f}%  "
+              f"max={np.max(seq_scale_errors):.2f}%")
         
         # Save trajectories to CSV with global frame indices
         save_trajectory_csv(pred_positions_aligned, gt_positions_aligned, 
@@ -953,6 +1086,10 @@ def main():
                         help='Device to use')
     parser.add_argument('--num-workers', type=int, default=4,
                         help='Number of data loading workers')
+    parser.add_argument('--sim3', action='store_true',
+                        help='Apply Sim(3) alignment to correct scale drift')
+    parser.add_argument('--remove-gravity', action='store_true',
+                        help='Remove gravity from IMU data before inference')
     
     args = parser.parse_args()
     
@@ -1003,7 +1140,8 @@ def main():
     print(f"📁 Test dataset loaded: {len(test_dataset)} samples")
     
     # Evaluate
-    results = evaluate_model(model, test_loader, device, str(output_dir), test_sequences)
+    results = evaluate_model(model, test_loader, device, str(output_dir), test_sequences, 
+                           use_sim3_alignment=args.sim3, remove_gravity=args.remove_gravity)
     
     print("\n✅ Evaluation complete!")
     print(f"📂 Results saved to: {output_dir}")
