@@ -124,10 +124,11 @@ def compute_scale_drift(pred_poses, gt_poses):
         pred_trans_norm = np.linalg.norm(pred_poses[i, :3])
         gt_trans_norm = np.linalg.norm(gt_poses[i, :3])
         
-        # Avoid division by zero
-        if gt_trans_norm > 1e-6:
-            scale_error = 100.0 * abs(pred_trans_norm - gt_trans_norm) / gt_trans_norm
-            scale_errors.append(scale_error)
+        # Clamp denominator to avoid explosion on tiny steps (<1cm)
+        # Matches TUM/KITTI evaluation scripts
+        denominator = max(gt_trans_norm, 0.01)  # 1cm minimum
+        scale_error = 100.0 * abs(pred_trans_norm - gt_trans_norm) / denominator
+        scale_errors.append(scale_error)
     
     return np.array(scale_errors)
 
@@ -167,20 +168,11 @@ def integrate_trajectory(relative_poses, initial_pose=None):
         if np.any(np.isnan(rel_quat)) or np.linalg.norm(rel_quat) < 0.5:
             rel_quat = np.array([0, 0, 0, 1])
         
-        # Fix quaternion double-cover ambiguity
-        # Ensure we take the shortest path by checking dot product
-        current_quat = current_rotation.as_quat()
-        dot = np.dot(rel_quat, current_quat)
-        # Handle both negative dot product and near-zero (≈180°) cases
-        if dot < 0.0 or np.isclose(dot, 0.0, atol=1e-6):
-            rel_quat = -rel_quat  # Flip sign to maintain shortest-arc convention
-        # Note: rel_quat is already normalized above, no need to normalize again
-        
         rel_rotation = R.from_quat(rel_quat)
         
         # Apply transformation
-        world_trans = current_rotation.apply(rel_trans)
-        current_position += world_trans
+        # rel_trans is already in world frame, so no rotation needed
+        current_position += rel_trans
         current_rotation = current_rotation * rel_rotation
         
         # Re-normalize quaternion to prevent numerical drift
@@ -379,7 +371,12 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
     fps = 20  # Aria dataset is 20 FPS
     
     for seq_id in test_sequences:
-        if seq_id not in sequence_results or not sequence_results[seq_id]:
+        if seq_id not in sequence_results:
+            print(f"\nSequence {seq_id}: Not found in results")
+            continue
+            
+        if not sequence_results[seq_id]:
+            print(f"\nSequence {seq_id}: No results available")
             continue
         
         # Sort by start index to maintain chronological order
@@ -388,9 +385,19 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         print(f"\nSequence {seq_id}:")
         print(f"  Total windows: {len(seq_results)}")
         
-        # No need to sample since we already use stride=2 in the dataset
-        seq_results_sampled = seq_results
+        # Keep only non-overlapping windows to avoid double-counting
+        # Use sequence_length - 1 to stay in sync with model configuration
+        overlap_stride = 20  # Default for 21-frame sequences (20 transitions)
+        if hasattr(model, 'config') and hasattr(model.config, 'seq_len'):
+            overlap_stride = model.config.seq_len - 1
+        seq_results_sampled = [r for r in seq_results if r['start_idx'] % overlap_stride == 0]
         print(f"  Non-overlapping windows: {len(seq_results_sampled)}")
+        
+        # If no non-overlapping windows found, show all start indices for debugging
+        if len(seq_results_sampled) == 0:
+            print(f"  WARNING: No non-overlapping windows found!")
+            print(f"  Start indices: {[r['start_idx'] for r in seq_results[:10]]}...")
+            continue
         
         # Load raw ground truth poses from file
         seq_dir = test_loader.dataset.data_dir / seq_id
@@ -415,6 +422,11 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         
         # Concatenate predictions
         all_pred = np.concatenate([r['pred_poses'] for r in seq_results_sampled], axis=0)
+        
+        # Make quaternion stream sign-continuous to avoid 180° jumps
+        for k in range(1, len(all_pred)):
+            if np.dot(all_pred[k, 3:], all_pred[k-1, 3:]) < 0:
+                all_pred[k, 3:] *= -1
         
         # Integrate predictions starting from first ground truth pose
         initial_pose = np.concatenate([gt_positions_full[0], gt_quaternions[0]])
@@ -934,8 +946,16 @@ def main():
     # Load model
     model = load_checkpoint(args.checkpoint, device)
     
-    # Test sequences
-    test_sequences = ['016', '017', '018', '019']
+    # Derive test sequences automatically from dataset
+    temp_dataset = AriaRawDataset(test_dir, sequence_length=21, stride=1)
+    test_sequences = sorted({sample['seq_name'] for sample in temp_dataset.samples})
+    print(f"\nFound {len(test_sequences)} test sequences: {test_sequences[:5]}..." if len(test_sequences) > 5 else f"\nFound test sequences: {test_sequences}")
+    
+    # If user wants specific sequences, filter here
+    # For now, use first 11 sequences as requested
+    if len(test_sequences) > 11:
+        test_sequences = test_sequences[:11]
+        print(f"Using first 11 sequences for evaluation: {test_sequences}")
     print(f"\n📁 Test sequences: {test_sequences}")
     
     # Create test dataset
@@ -945,7 +965,8 @@ def main():
         print("Please ensure test sequences are in the test directory")
         return
     
-    test_dataset = AriaRawDataset(test_dir, sequence_length=21, stride=2)  # Use 21 frames and stride=2 to match training
+    # Use stride=1 to match training configuration
+    test_dataset = AriaRawDataset(test_dir, sequence_length=21, stride=1)
     test_loader = DataLoader(
         test_dataset,
         batch_size=args.batch_size,
