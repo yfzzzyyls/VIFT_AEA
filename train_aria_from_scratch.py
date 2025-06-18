@@ -206,7 +206,7 @@ class VIFTFromScratch(nn.Module):
         
         return angle.mean()
     
-    def forward(self, batch, epoch=0):
+    def forward(self, batch, epoch=0, batch_idx=0):
         """Forward pass with epoch for curriculum learning."""
         seq_len = self.config.seq_len
         num_transitions = seq_len - 1
@@ -236,11 +236,13 @@ class VIFTFromScratch(nn.Module):
         
         # Validate IMU data format: (ax, ay, az, gx, gy, gz)
         # Check that gyroscope values are reasonable (typically < 10 rad/s, but can spike to ~30 rad/s during abrupt head turns)
-        gyro_magnitude = torch.norm(imu[:, :, 3:], dim=-1)
-        max_gyro = gyro_magnitude.max().item()
-        if max_gyro > 40.0:
-            import warnings
-            warnings.warn(f"Large gyroscope values detected (max: {max_gyro:.2f} rad/s). Normal range is < 30 rad/s. Check if IMU format is (ax,ay,az,gx,gy,gz)")
+        # Only check on first batch to avoid repeated warnings
+        if batch_idx == 0:
+            gyro_magnitude = torch.norm(imu[:, :, 3:], dim=-1)
+            max_gyro = gyro_magnitude.max().item()
+            if max_gyro > 40.0:
+                import warnings
+                warnings.warn(f"Large gyroscope values detected (max: {max_gyro:.2f} rad/s). Normal range is < 30 rad/s. Check if IMU format is (ax,ay,az,gx,gy,gz)")
         
         # Get features from backbone's Feature_net (which creates RGB-RGB pairs internally)
         num_transitions = seq_len - 1
@@ -300,13 +302,25 @@ class VIFTFromScratch(nn.Module):
             trans_loss_raw = F.smooth_l1_loss(pred_trans / scale_norm, gt_trans / scale_norm, reduction='mean')
             rot_loss_raw = self._robust_geodesic_loss_stable(pred_rot, gt_rot)
             
+            # --- FIX 1: scale rotation loss so its numeric range matches translation ---
+            ROT_SCALE = 10.0
+            rot_loss_raw = rot_loss_raw * ROT_SCALE
+            
+            # --- FIX 2: clamp and regularise log-variances to stop weight explosion ---
+            s_t_c = torch.clamp(self.s_t, -4., 4.)
+            s_r_c = torch.clamp(self.s_r, -4., 4.)
+            
             # Homoscedastic uncertainty loss formulation (Kendall & Gal)
             # loss = exp(-s_t) * trans_loss + exp(-s_r) * rot_loss + (s_t + s_r)
-            total_loss = torch.exp(-self.s_t) * trans_loss_raw + torch.exp(-self.s_r) * rot_loss_raw + (self.s_t + self.s_r)
+            total_loss = (torch.exp(-s_t_c) * trans_loss_raw 
+                          + torch.exp(-s_r_c) * rot_loss_raw 
+                          + s_t_c + s_r_c 
+                          + 1e-4 * (s_t_c**2 + s_r_c**2))
             
             # Add L2 path-length prior to anchor cumulative scale
-            pred_path_length = torch.sum(torch.norm(pred_trans, dim=-1), dim=1)  # [B]
-            gt_path_length = torch.sum(torch.norm(gt_trans, dim=-1), dim=1)      # [B]
+            # Normalize by number of transitions to make it comparable across sequence lengths
+            pred_path_length = torch.sum(torch.norm(pred_trans, dim=-1), dim=1) / num_transitions  # [B]
+            gt_path_length = torch.sum(torch.norm(gt_trans, dim=-1), dim=1) / num_transitions      # [B]
             path_loss = F.mse_loss(pred_path_length, gt_path_length)
             
             # Curriculum learning: gradually increase path weight from 0.02 to 0.1 over 5 epochs
@@ -320,7 +334,9 @@ class VIFTFromScratch(nn.Module):
                 'rot_loss_raw': rot_loss_raw,
                 'path_loss': path_loss,
                 's_t': self.s_t.detach(),
-                's_r': self.s_r.detach()
+                's_r': self.s_r.detach(),
+                's_t_c': s_t_c.detach(),  # Return clamped values for logging
+                's_r_c': s_r_c.detach()   # Return clamped values for logging
             }
         else:
             return {
@@ -358,8 +374,10 @@ def compute_loss(model, predictions, batch, is_training=True):
         'trans_loss': trans_loss_raw,  # Report raw loss for monitoring
         'rot_loss': rot_loss_raw,      # Report raw loss for monitoring
         'path_loss': predictions.get('path_loss', 0.0),  # Path length loss
-        's_t': predictions.get('s_t', 0.0),  # Translation uncertainty
-        's_r': predictions.get('s_r', 0.0)   # Rotation uncertainty
+        's_t': predictions.get('s_t', 0.0),  # Translation uncertainty (raw)
+        's_r': predictions.get('s_r', 0.0),  # Rotation uncertainty (raw)
+        's_t_c': predictions.get('s_t_c', 0.0),  # Translation uncertainty (clamped)
+        's_r_c': predictions.get('s_r_c', 0.0)   # Rotation uncertainty (clamped)
     }
 
 
@@ -385,9 +403,9 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
         # Forward pass with automatic mixed precision
         if use_amp:
             with torch.cuda.amp.autocast():
-                predictions = model(batch, epoch=epoch)
+                predictions = model(batch, epoch=epoch, batch_idx=batch_idx)
         else:
-            predictions = model(batch, epoch=epoch)
+            predictions = model(batch, epoch=epoch, batch_idx=batch_idx)
         
         # Compute loss
         loss_dict = compute_loss(model, predictions, batch)
@@ -444,9 +462,9 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
         total_loss += loss.item()
         num_batches += 1
         
-        # Calculate uncertainty weights
-        exp_neg_s_t = torch.exp(-loss_dict['s_t']).item()
-        exp_neg_s_r = torch.exp(-loss_dict['s_r']).item()
+        # Calculate uncertainty weights using clamped values
+        exp_neg_s_t = torch.exp(-loss_dict['s_t_c']).item()
+        exp_neg_s_r = torch.exp(-loss_dict['s_r_c']).item()
         
         # Warn if weights are diverging
         if exp_neg_s_t > 1000 or exp_neg_s_r > 1000:
@@ -722,13 +740,16 @@ def main():
     base_model = model.module if hasattr(model, 'module') else model
     cnn_params = []
     trf_params = []
+    uncert_params = []  # Separate group for s_t and s_r
     
     # Visual encoder parameters (CNN)
     # Also include IMU encoder in CNN params since it's also convolutional
     for name, param in base_model.named_parameters():
         if 'backbone.visual_encoder' in name or 'backbone.inertial_encoder' in name:
             cnn_params.append(param)
-        elif 'backbone' in name or 'shared_layer' in name or 'trans_head' in name or 'rot_head' in name or name in ['s_t', 's_r']:
+        elif name in ['s_t', 's_r']:
+            uncert_params.append(param)  # Uncertainty parameters get their own group
+        elif 'backbone' in name or 'shared_layer' in name or 'trans_head' in name or 'rot_head' in name:
             trf_params.append(param)
         else:
             # Fail fast if we encounter unexpected parameters
@@ -740,15 +761,17 @@ def main():
     # Count parameters in each group
     cnn_count = sum(p.numel() for p in cnn_params)
     trf_count = sum(p.numel() for p in trf_params)
+    uncert_count = sum(p.numel() for p in uncert_params)
     
     if is_main_process:
         print(f"\nParameter Split:")
         print(f"  CNN parameters: {cnn_count:,}")
         print(f"  Transformer parameters: {trf_count:,}")
+        print(f"  Uncertainty parameters: {uncert_count:,}")
         
         # Verify all parameters are accounted for
-        assert cnn_count + trf_count == trainable_params, \
-            f"Parameter count mismatch: {cnn_count} + {trf_count} != {trainable_params}"
+        assert cnn_count + trf_count + uncert_count == trainable_params, \
+            f"Parameter count mismatch: {cnn_count} + {trf_count} + {uncert_count} != {trainable_params}"
     
     # Set learning rates
     lr_cnn = args.lr_cnn if args.lr_cnn is not None else args.lr
@@ -761,9 +784,10 @@ def main():
             {'params': cnn_params, 'lr': lr_cnn, 'momentum': 0.9}
         ], lr=lr_cnn)
         
-        # Create second optimizer for transformer
+        # Create second optimizer for transformer with uncertainty params
         optimizer_trf = torch.optim.AdamW([
-            {'params': trf_params, 'lr': lr_trf}
+            {'params': trf_params, 'lr': lr_trf},
+            {'params': uncert_params, 'lr': lr_trf * 0.1, 'weight_decay': 0.0}  # 10x lower LR, no weight decay
         ], lr=lr_trf, weight_decay=1e-4)
         
         # Use canonical PyTorch pattern: separate optimizers and schedulers
@@ -778,12 +802,14 @@ def main():
         if args.opt_cnn == 'sgd':
             optimizer = torch.optim.SGD([
                 {'params': cnn_params, 'lr': lr_cnn},
-                {'params': trf_params, 'lr': lr_trf}
+                {'params': trf_params, 'lr': lr_trf},
+                {'params': uncert_params, 'lr': lr_trf * 0.1, 'weight_decay': 0.0}  # 10x lower LR, no weight decay
             ], lr=args.lr, momentum=0.9)
         else:
             optimizer = torch.optim.AdamW([
                 {'params': cnn_params, 'lr': lr_cnn},
-                {'params': trf_params, 'lr': lr_trf}
+                {'params': trf_params, 'lr': lr_trf},
+                {'params': uncert_params, 'lr': lr_trf * 0.1, 'weight_decay': 0.0}  # 10x lower LR, no weight decay
             ], lr=args.lr, weight_decay=1e-4)
         
         optimizers = [optimizer]
