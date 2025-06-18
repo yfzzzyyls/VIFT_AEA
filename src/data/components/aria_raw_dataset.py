@@ -202,14 +202,18 @@ class AriaRawDataset(Dataset):
                            f"Expected IMU format: (ax, ay, az, gx, gy, gz)")
         
         # Check accelerometer range (typical range is ±40 m/s² for Aria)
+        # Some sequences have outliers that spike up to 100+ m/s², log warning instead of failing
         accel_data = imu_flat[:, :3]
         accel_magnitude = torch.norm(accel_data, dim=-1)
         if accel_magnitude.max() > 100.0:
-            raise ValueError(f"Accelerometer values too large (max: {accel_magnitude.max():.2f} m/s²). "
-                           f"Expected IMU format: (ax, ay, az, gx, gy, gz)")
+            import warnings
+            warnings.warn(f"Large accelerometer values detected in {self.sequence_names[index]}: "
+                         f"max={accel_magnitude.max():.2f} m/s². These will be handled by runtime checks.")
         
         # Remove gravity bias from accelerometer for consistent preprocessing
-        imu_processed = self._remove_gravity(imu_flat, num_transitions, samples_per_interval)
+        # DISABLED: Gravity removal can amplify outliers. Let the model learn to handle gravity.
+        # imu_processed = self._remove_gravity(imu_flat, num_transitions, samples_per_interval)
+        imu_processed = imu_flat  # Use raw IMU data
         
         # Get ground truth poses
         poses = sample['poses']

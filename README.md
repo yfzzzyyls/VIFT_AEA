@@ -112,16 +112,20 @@ python evaluate_stable_model.py \
 # 1. Setup environment
 source venv/bin/activate
 
-# 2. Process Aria data with proper IMU alignment
+# 2. Process Aria data with proper IMU alignment and automatic splits
 python process_aria.py
 
-# 3. Create train/val splits
-python prepare_aria_splits.py --source-dir aria_processed
+# 3. Train all components from scratch (with quaternion output and improved loss)
+# For 4x A6000 GPUs with batch size 20 per GPU (recommended):
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+      --epochs 200 \
+      --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
+      --opt-cnn sgd --opt-trf adamw --batch-size 20 --distributed --amp
 
-# 4. Train all components from scratch (with quaternion output and improved loss)
-torchrun --nproc_per_node=4 train_aria_from_scratch.py --opt-cnn sgd --opt-trf adamw --lr-cnn 1e-4 --lr-trf 5e-4 --epochs 37 --distributed --batch-size 4
+# For smaller GPUs with batch size 4 per GPU:
+# torchrun --nproc_per_node=4 train_aria_from_scratch.py --opt-cnn sgd --opt-trf adamw --lr-cnn 1e-4 --lr-trf 5e-4 --epochs 37 --distributed --batch-size 4
 
-# 5. Evaluate the trained model
+# 4. Evaluate the trained model
 python evaluate_from_scratch.py \
       --checkpoint checkpoints_from_scratch/best_model.pt \
       --data-dir aria_processed \
@@ -129,7 +133,7 @@ python evaluate_from_scratch.py \
       --batch-size 4 \
       --num-workers 4
 
-# 5. Monitor training
+# Monitor training
 tensorboard --logdir checkpoints_from_scratch
 ```
 
@@ -159,13 +163,10 @@ python src/eval.py \
 # 1. Setup environment
 source venv/bin/activate
 
-# 2. Process Aria data with proper IMU alignment
+# 2. Process Aria data with proper IMU alignment and automatic splits
 python process_aria.py
 
-# 3. Create train/val/test splits
-python prepare_aria_splits.py --source-dir aria_processed
-
-# 4. Train all components from scratch (improved loss weighting)
+# 3. Train all components from scratch (improved loss weighting)
 
 # Single GPU training
 python train_aria_from_scratch.py \
@@ -184,10 +185,10 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py \
     --checkpoint-dir checkpoints_distributed \
     --distributed
 
-# 5. Monitor training progress
+# 4. Monitor training progress
 tail -f train.log
 
-# 6. Evaluate trained model
+# 5. Evaluate trained model
 python evaluate_from_scratch.py \
     --checkpoint checkpoints_from_scratch/best_model.pt \
     --data-dir aria_processed \
@@ -244,6 +245,62 @@ The model predicts relative poses (3D translation + 3D rotation) between consecu
 - Scale drift percentage tracking
 - Interactive 3D HTML trajectory visualizations using Plotly
 - CSV export of trajectories for further analysis
+
+## Large Batch Training (4x A6000 GPUs)
+
+For optimal training with 4x RTX A6000 GPUs (48GB each), we recommend:
+
+### Quick Start
+```bash
+# Launch training with batch size 20 per GPU (80 total)
+# Learning rates are automatically scaled 5x when using batch size 20
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --opt-cnn sgd --opt-trf adamw \
+    --epochs 40 --distributed \
+    --batch-size 20 --amp
+
+# Or manually specify scaled learning rates:
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --opt-cnn sgd --opt-trf adamw \
+    --lr-cnn 5e-4 --lr-trf 2.5e-3 \
+    --epochs 40 --distributed \
+    --batch-size 20 --amp
+```
+
+### Key Settings for Batch Size 20
+- **Batch size**: 20 per GPU (80 total)
+- **Learning rates**: Automatically scaled based on optimizer type
+  - SGD: Linear scaling (5x for batch 20)
+    - CNN: `5e-4` (from baseline `1e-4`)
+  - AdamW: Sqrt scaling (2.24x for batch 20) with ceiling
+    - Transformer: `1e-3` (capped at ceiling, would be `1.1e-3`)
+    - Uncertainty params: `1e-4` (always 10% of transformer LR)
+- **LR Ceilings**: 
+  - AdamW: `1e-3` (prevents destabilization)
+  - SGD: `5e-3` (higher ceiling for momentum-based optimization)
+- **Uncertainty weights**: Clamped to ±2 (exp range: [0.135, 7.39])
+- **Warmup**: Automatically scaled to process same number of images
+- **Epochs**: 40 epochs ≈ 200 gradient updates (similar to 200 epochs with batch 4)
+- **Memory usage**: ~3.3GB per GPU with PyTorch overhead (well within 48GB limit)
+- **Training time**: ~2 hours for 35-40 epochs
+
+### Why These Settings Work
+- **SGD**: Linear scaling works well (LR × batch_ratio)
+- **AdamW**: Sqrt scaling is safer (LR × √batch_ratio) due to adaptive normalization
+- **LR ceiling**: Prevents destabilization from excessive learning rates
+- **Tighter uncertainty clamping**: ±2 keeps gradients well-behaved while allowing adaptation
+- **Warmup scaling**: Preserves stability during early training
+- **Gradient clipping**: Remains at 5.0 (large batches are stable)
+- **AMP**: Provides additional memory headroom and faster training
+
+### If You Hit OOM
+Use gradient accumulation to simulate larger batches:
+```bash
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --batch-size 10 --grad-accum 2 \  # Simulates batch 20
+    --lr-cnn 5e-4 --lr-trf 2.5e-3 \
+    --distributed --amp
+```
 
 ## Performance Results
 

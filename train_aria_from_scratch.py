@@ -33,6 +33,14 @@ import argparse
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
+import warnings
+
+# Silence NetworkX warning
+try:
+    import networkx as nx
+    nx.config.use_numpy = True
+except:
+    pass
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -307,8 +315,9 @@ class VIFTFromScratch(nn.Module):
             rot_loss_raw = rot_loss_raw * ROT_SCALE
             
             # --- FIX 2: clamp and regularise log-variances to stop weight explosion ---
-            s_t_c = torch.clamp(self.s_t, -4., 4.)
-            s_r_c = torch.clamp(self.s_r, -4., 4.)
+            # Tighter clamp (±2) keeps gradients well-behaved: exp(-2) = 0.135, exp(2) = 7.39
+            s_t_c = torch.clamp(self.s_t, -2., 2.)
+            s_r_c = torch.clamp(self.s_r, -2., 2.)
             
             # Homoscedastic uncertainty loss formulation (Kendall & Gal)
             # loss = exp(-s_t) * trans_loss + exp(-s_r) * rot_loss + (s_t + s_r)
@@ -388,8 +397,16 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
     num_batches = 0
     step = global_step  # Use global step counter for gradient clipping
     
-    # Create gradient scaler for mixed precision training
-    scaler = torch.cuda.amp.GradScaler() if use_amp else None
+    # Create gradient scaler for mixed precision training (use new API)
+    if use_amp:
+        if hasattr(torch.amp, 'GradScaler'):
+            # PyTorch >= 2.2
+            scaler = torch.amp.GradScaler(enabled=True)  # device_type defaults to 'cuda'
+        else:
+            # Fallback for older versions
+            scaler = torch.cuda.amp.GradScaler()
+    else:
+        scaler = None
     
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}")
     for batch_idx, batch in enumerate(progress_bar):
@@ -400,10 +417,24 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
             'gt_poses': batch['gt_poses'].to(device)
         }
         
+        # Add runtime check for IMU data
+        imu_mag = torch.norm(batch['imu'][:, :, :3], dim=-1).max()
+        if imu_mag > 150.0:  # ~15g threshold
+            print(f"\n⚠️ WARNING: Large IMU acceleration detected in batch {batch_idx}: {imu_mag:.1f} m/s²")
+            print(f"  Sequences in batch: {batch.get('seq_name', 'unknown')}")
+            # Skip this batch to prevent training instability
+            continue
+        
         # Forward pass with automatic mixed precision
         if use_amp:
-            with torch.cuda.amp.autocast():
-                predictions = model(batch, epoch=epoch, batch_idx=batch_idx)
+            if hasattr(torch.amp, 'autocast'):
+                # PyTorch >= 2.2
+                with torch.amp.autocast('cuda', enabled=True):
+                    predictions = model(batch, epoch=epoch, batch_idx=batch_idx)
+            else:
+                # Fallback for older versions
+                with torch.cuda.amp.autocast():
+                    predictions = model(batch, epoch=epoch, batch_idx=batch_idx)
         else:
             predictions = model(batch, epoch=epoch, batch_idx=batch_idx)
         
@@ -441,6 +472,13 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
             for opt in optimizers:
                 scaler.step(opt)
             scaler.update()
+            
+            # Step warmup schedulers AFTER optimizer step
+            if warmup_schedulers is not None:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", message="Detected call of `lr_scheduler.step()`")
+                    for scheduler in warmup_schedulers:
+                        scheduler.step()
         else:
             loss.backward()
             
@@ -450,11 +488,13 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
             
             for opt in optimizers:
                 opt.step()
-        
-        # Step warmup schedulers if provided (per batch)
-        if warmup_schedulers is not None:
-            for scheduler in warmup_schedulers:
-                scheduler.step()
+            
+            # Step warmup schedulers AFTER optimizer step
+            if warmup_schedulers is not None:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", message="Detected call of `lr_scheduler.step()`")
+                    for scheduler in warmup_schedulers:
+                        scheduler.step()
         
         step += 1  # Increment step counter
         
@@ -648,7 +688,7 @@ def main():
         print(f"- Batch size per GPU: {args.batch_size}")
         print(f"- Total batch size: {args.batch_size * world_size}")
         print(f"- Learning rate: {args.lr}")
-        print(f"- Window stride: 2 (overlapping sequences for better temporal consistency)")
+        print(f"- Window stride: 1 (maximal overlap, causal prediction)")
         print(f"- Mixed precision (AMP): {'Enabled' if args.amp else 'Disabled'}")
         print("="*60 + "\n")
     
@@ -658,8 +698,8 @@ def main():
         data_dir=args.data_dir,
         batch_size=args.batch_size,  # Per GPU batch size
         num_workers=args.num_workers,
-        sequence_length=21,   # keep stride=2
-        stride=2  # Better temporal overlap (was 10)
+        sequence_length=21,
+        stride=1  # Maximum overlap, causal prediction (matching original VIFT)
     )
     data_module.setup()
     
@@ -773,22 +813,90 @@ def main():
         assert cnn_count + trf_count + uncert_count == trainable_params, \
             f"Parameter count mismatch: {cnn_count} + {trf_count} + {uncert_count} != {trainable_params}"
     
-    # Set learning rates
-    lr_cnn = args.lr_cnn if args.lr_cnn is not None else args.lr
-    lr_trf = args.lr_trf if args.lr_trf is not None else args.lr
+    # Set learning rates with automatic scaling based on GLOBAL batch size
+    # For SGD: linear scaling works well
+    # For AdamW: sub-linear scaling (sqrt) is safer due to adaptive normalization
+    baseline_batch_size = 4  # The batch size the original LRs were tuned for
+    baseline_world_size = 1  # Original training assumed single GPU
+    
+    # Calculate global batch sizes
+    global_batch_size = args.batch_size * world_size
+    baseline_global_batch_size = baseline_batch_size * baseline_world_size
+    global_batch_ratio = global_batch_size / baseline_global_batch_size
+    
+    # Different scaling strategies for different optimizers
+    if args.opt_cnn == 'sgd':
+        lr_scale_cnn = global_batch_ratio  # Linear scaling for SGD
+    else:
+        lr_scale_cnn = math.sqrt(global_batch_ratio)  # Sqrt scaling for AdamW
+    
+    if args.opt_trf == 'sgd':
+        lr_scale_trf = global_batch_ratio  # Linear scaling for SGD
+    else:
+        lr_scale_trf = math.sqrt(global_batch_ratio)  # Sqrt scaling for AdamW
+    
+    # Max LR ceiling to prevent destabilization
+    max_lr_adamw = 1e-3  # Hard ceiling for AdamW
+    max_lr_sgd = 5e-3    # Higher ceiling for SGD
+    
+    # Apply scaling if LRs are not explicitly provided
+    if args.lr_cnn is not None:
+        lr_cnn = args.lr_cnn
+    else:
+        base_lr_cnn = 1e-4  # baseline LR for batch size 4
+        lr_cnn = base_lr_cnn * lr_scale_cnn
+        # Apply ceiling based on optimizer
+        if args.opt_cnn == 'adamw':
+            lr_cnn = min(lr_cnn, max_lr_adamw)
+        else:
+            lr_cnn = min(lr_cnn, max_lr_sgd)
+    
+    if args.lr_trf is not None:
+        lr_trf = args.lr_trf
+    else:
+        base_lr_trf = 5e-4  # baseline LR for batch size 4
+        lr_trf = base_lr_trf * lr_scale_trf
+        # Apply ceiling based on optimizer
+        if args.opt_trf == 'adamw':
+            lr_trf = min(lr_trf, max_lr_adamw)
+        else:
+            lr_trf = min(lr_trf, max_lr_sgd)
+    
+    if is_main_process:
+        print(f"\nLearning Rate Configuration:")
+        print(f"  Batch size per GPU: {args.batch_size} (baseline: {baseline_batch_size})")
+        print(f"  Global batch size: {global_batch_size} (baseline: {baseline_global_batch_size})")
+        print(f"  Global batch ratio: {global_batch_ratio:.1f}x")
+        
+        if args.lr_cnn is None:
+            scaling_type_cnn = "linear" if args.opt_cnn == 'sgd' else "sqrt"
+            print(f"  ⚡ Auto-scaling CNN LR: {lr_scale_cnn:.2f}x ({scaling_type_cnn} scaling for {args.opt_cnn})")
+        if args.lr_trf is None:
+            scaling_type_trf = "linear" if args.opt_trf == 'sgd' else "sqrt"
+            print(f"  ⚡ Auto-scaling Transformer LR: {lr_scale_trf:.2f}x ({scaling_type_trf} scaling for {args.opt_trf})")
+        
+        print(f"  CNN LR: {lr_cnn:.2e}{' (auto-scaled)' if args.lr_cnn is None else ' (user-specified)'}")
+        print(f"  Transformer LR: {lr_trf:.2e}{' (auto-scaled)' if args.lr_trf is None else ' (user-specified)'}")
+        print(f"  Uncertainty params LR: {lr_trf * 0.1:.2e} (10% of transformer LR)")
+        
+        # Show if LR ceiling was applied
+        if args.lr_cnn is None and args.opt_cnn == 'adamw' and base_lr_cnn * lr_scale_cnn > max_lr_adamw:
+            print(f"  ⚠️  CNN LR capped at {max_lr_adamw:.2e} (ceiling for AdamW)")
+        if args.lr_trf is None and args.opt_trf == 'adamw' and base_lr_trf * lr_scale_trf > max_lr_adamw:
+            print(f"  ⚠️  Transformer LR capped at {max_lr_adamw:.2e} (ceiling for AdamW)")
     
     # Create optimizers based on command line arguments
     if args.opt_cnn == 'sgd' and args.opt_trf == 'adamw' and len(cnn_params) > 0 and len(trf_params) > 0:
         # Different optimizers for CNN and Transformer
         optimizer_cnn = torch.optim.SGD([
             {'params': cnn_params, 'lr': lr_cnn, 'momentum': 0.9}
-        ], lr=lr_cnn)
+        ], momentum=0.9)  # Removed redundant lr parameter
         
         # Create second optimizer for transformer with uncertainty params
         optimizer_trf = torch.optim.AdamW([
             {'params': trf_params, 'lr': lr_trf},
             {'params': uncert_params, 'lr': lr_trf * 0.1, 'weight_decay': 0.0}  # 10x lower LR, no weight decay
-        ], lr=lr_trf, weight_decay=1e-4)
+        ], weight_decay=1e-4)  # Removed redundant lr parameter
         
         # Use canonical PyTorch pattern: separate optimizers and schedulers
         optimizers = [optimizer_cnn, optimizer_trf]
@@ -804,13 +912,13 @@ def main():
                 {'params': cnn_params, 'lr': lr_cnn},
                 {'params': trf_params, 'lr': lr_trf},
                 {'params': uncert_params, 'lr': lr_trf * 0.1, 'weight_decay': 0.0}  # 10x lower LR, no weight decay
-            ], lr=args.lr, momentum=0.9)
+            ], momentum=0.9)  # Removed redundant lr parameter
         else:
             optimizer = torch.optim.AdamW([
                 {'params': cnn_params, 'lr': lr_cnn},
                 {'params': trf_params, 'lr': lr_trf},
                 {'params': uncert_params, 'lr': lr_trf * 0.1, 'weight_decay': 0.0}  # 10x lower LR, no weight decay
-            ], lr=args.lr, weight_decay=1e-4)
+            ], weight_decay=1e-4)  # Removed redundant lr parameter
         
         optimizers = [optimizer]
         use_dual_optimizers = False
@@ -820,18 +928,21 @@ def main():
             print(f"  Transformer LR: {lr_trf:.2e}, Optimizer: {args.opt_trf}")
     
     # Create schedulers - one per optimizer (canonical PyTorch pattern)
-    warmup_steps = int(len(train_loader) * 1.5)  # ~1.5 epochs for longer windows
+    # Scale warmup steps with batch size to keep same number of images processed
+    batch_scale = args.batch_size / 4.0  # Scale relative to baseline batch size of 4
+    warmup_steps = int(len(train_loader) * 1.5 * batch_scale)  # ~1.5 epochs worth of images
     warmup_epochs = math.ceil(warmup_steps / len(train_loader))
     
     warmup_schedulers = []
     cosine_schedulers = []
     
     for opt in optimizers:
-        warmup_schedulers.append(torch.optim.lr_scheduler.LinearLR(
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
             opt, 
             start_factor=0.1, 
             total_iters=warmup_steps
-        ))
+        )
+        warmup_schedulers.append(warmup_scheduler)
         
         cosine_schedulers.append(torch.optim.lr_scheduler.CosineAnnealingLR(
             opt, T_max=args.epochs - warmup_epochs, eta_min=1e-6
