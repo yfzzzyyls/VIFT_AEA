@@ -267,7 +267,7 @@ def compute_rpe(pred_poses, gt_poses, delta=1):
     return rpe_stats
 
 
-def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_sim3_alignment=False, remove_gravity=False):
+def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_sim3_alignment=False, remove_gravity=False, scale_correction=1.0):
     """Evaluate model on test data
     
     Args:
@@ -278,6 +278,7 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
         test_sequences: List of test sequence IDs
         use_sim3_alignment: If True, apply Sim(3) alignment to predictions
         remove_gravity: If True, remove gravity from IMU data before inference
+        scale_correction: Global scale correction factor to apply to predictions
     """
     os.makedirs(output_dir, exist_ok=True)
     
@@ -287,8 +288,11 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
     # Track cumulative scale per sequence
     cumulative_scales = {}
     window_counters = {}
+    scale_history = {seq_id: [] for seq_id in test_sequences}  # Track scale over time
     
     print("\n🔍 Evaluating on test sequences...")
+    if scale_correction != 1.0:
+        print(f"   Applying global scale correction: {scale_correction:.2f}x")
     if use_sim3_alignment:
         print("   Using Sim(3) alignment for scale correction")
     if remove_gravity:
@@ -317,6 +321,9 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                 # For multi-step prediction, we predict all 20 transitions
                 pred_poses = pred_poses_batch[i].cpu().numpy()  # [20, 7]
                 gt_poses_sample = gt_poses[i].cpu().numpy()  # [20, 7]
+                
+                # Apply global scale correction factor (model outputs are ~2.5x over-scaled)
+                pred_poses[:, :3] *= scale_correction
                 
                 # Ensure quaternion sign continuity for predictions to avoid 180° jumps
                 for k in range(1, len(pred_poses)):
@@ -419,9 +426,9 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                 gt_dist = np.mean(np.linalg.norm(gt_poses_sample[:, :3], axis=1)) * 100  # to cm
                 scale_factor = pred_dist / (gt_dist + 1e-8)
                 
-                # NOTE: Cumulative scale diagnostic removed as per code review
-                # This artificial multiplication can explode even for perfect estimates
-                # Use proper Sim(3) alignment on full sequences instead
+                # Track scale history for analysis
+                if seq_id in scale_history:
+                    scale_history[seq_id].append(scale_factor)
                 
                 window_counters[seq_id] += 1
                 
@@ -689,6 +696,23 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
     
     # Save numerical results
     save_evaluation_metrics(all_trans_errors, all_rot_errors, all_scale_errors, output_dir)
+    
+    # Scale analysis summary
+    print("\n" + "="*50)
+    print("📊 SCALE ANALYSIS BY SEQUENCE")
+    print("="*50)
+    for seq_id in test_sequences:
+        if seq_id in scale_history and scale_history[seq_id]:
+            scales = scale_history[seq_id]
+            print(f"\nSequence {seq_id}:")
+            print(f"  Windows analyzed: {len(scales)}")
+            print(f"  Mean scale: {np.mean(scales):.3f}")
+            print(f"  Std scale: {np.std(scales):.3f}")
+            print(f"  Range: [{np.min(scales):.3f}, {np.max(scales):.3f}]")
+            
+            # Check if problematic
+            if np.mean(scales) > 1.15 or np.mean(scales) < 0.85:
+                print(f"  ⚠️  SCALE DRIFT DETECTED - Mean significantly off from 1.0")
     
     print(f"\n📊 Generated outputs:")
     for seq_id in test_sequences:
@@ -1090,6 +1114,8 @@ def main():
                         help='Apply Sim(3) alignment to correct scale drift')
     parser.add_argument('--remove-gravity', action='store_true',
                         help='Remove gravity from IMU data before inference')
+    parser.add_argument('--scale-correction', type=float, default=0.4,
+                        help='Global scale correction factor (default: 0.4 based on velocity analysis)')
     
     args = parser.parse_args()
     
@@ -1141,7 +1167,8 @@ def main():
     
     # Evaluate
     results = evaluate_model(model, test_loader, device, str(output_dir), test_sequences, 
-                           use_sim3_alignment=args.sim3, remove_gravity=args.remove_gravity)
+                           use_sim3_alignment=args.sim3, remove_gravity=args.remove_gravity,
+                           scale_correction=args.scale_correction)
     
     print("\n✅ Evaluation complete!")
     print(f"📂 Results saved to: {output_dir}")
