@@ -91,8 +91,8 @@ def load_checkpoint(checkpoint_path, device):
     model.load_state_dict(new_state_dict)
     model.eval()
     
-    # Enable assertions in eval mode
-    torch.autograd.set_detect_anomaly(True)
+    # Disable anomaly detection for performance
+    # torch.autograd.set_detect_anomaly(True)
     
     print(f"\n📊 Model Information:")
     print(f"   Loaded checkpoint from epoch {checkpoint['epoch']}")
@@ -171,8 +171,10 @@ def integrate_trajectory(relative_poses, initial_pose=None):
         rel_rotation = R.from_quat(rel_quat)
         
         # Apply transformation
-        # rel_trans is already in world frame, so no rotation needed
-        current_position += rel_trans
+        # rel_trans is already in body frame from the dataset
+        # Convert to world frame before accumulating
+        world_trans = current_rotation.apply(rel_trans)
+        current_position += world_trans
         current_rotation = current_rotation * rel_rotation
         
         # Re-normalize quaternion to prevent numerical drift
@@ -296,10 +298,17 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
                 trans_errors = []
                 rot_errors = []
                 
+                # Track accumulated rotation for world frame conversion
+                # Start with identity since predictions are relative to first frame
+                accumulated_rotation = R.from_quat([0, 0, 0, 1])
+                
                 for j in range(20):
-                    # Translation error
+                    # Both pred and gt translations are in body frame - compare directly
                     trans_error = np.linalg.norm(pred_poses[j, :3] - gt_poses_sample[j, :3])
                     trans_errors.append(trans_error)
+                    
+                    # Update accumulated rotation for next step
+                    accumulated_rotation = accumulated_rotation * R.from_quat(gt_poses_sample[j, 3:])
                     
                     # Rotation error
                     pred_q = pred_poses[j, 3:]
@@ -410,6 +419,7 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         for r in seq_results_sampled:
             start_idx = r['start_idx']
             # Each window covers 21 frames (20 transitions)
+            # Include all frames starting from start_idx
             frame_indices = list(range(start_idx, start_idx + 21))
             all_frame_indices.extend(frame_indices)
         
@@ -420,16 +430,31 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         gt_positions_full = np.array([raw_poses[i]['translation'] for i in all_frame_indices])
         gt_quaternions = np.array([raw_poses[i]['quaternion'] for i in all_frame_indices])
         
-        # Concatenate predictions
-        all_pred = np.concatenate([r['pred_poses'] for r in seq_results_sampled], axis=0)
+        # Make ground truth quaternion stream sign-continuous
+        for k in range(1, len(gt_quaternions)):
+            if np.dot(gt_quaternions[k], gt_quaternions[k-1]) < 0:
+                gt_quaternions[k] *= -1
+        
+        # Build all_pred without double steps
+        all_pred = []
+        for n, r in enumerate(seq_results_sampled):
+            steps = r['pred_poses']
+            if n:                       # every window except the first
+                steps = steps[1:]       # drop duplicate step 0
+            all_pred.append(steps)
+        all_pred = np.concatenate(all_pred, axis=0)
         
         # Make quaternion stream sign-continuous to avoid 180° jumps
         for k in range(1, len(all_pred)):
             if np.dot(all_pred[k, 3:], all_pred[k-1, 3:]) < 0:
                 all_pred[k, 3:] *= -1
         
-        # Integrate predictions starting from first ground truth pose
-        initial_pose = np.concatenate([gt_positions_full[0], gt_quaternions[0]])
+        # Integrate predictions starting from the first frame
+        initial_frame_idx = all_frame_indices[0]
+        initial_pose = np.concatenate([
+            raw_poses[initial_frame_idx]['translation'],
+            raw_poses[initial_frame_idx]['quaternion']
+        ])
         pred_positions_full, pred_rotations_full = integrate_trajectory(all_pred, initial_pose)
         
         # For ground truth rotations, use the raw quaternions
