@@ -946,6 +946,13 @@ def main():
     # Load model
     model = load_checkpoint(args.checkpoint, device)
     
+    # Define test directory first
+    test_dir = Path(args.data_dir) / 'test'
+    if not test_dir.exists():
+        print(f"\n❌ Test directory not found: {test_dir}")
+        print("Please ensure test sequences are in the test directory")
+        return
+    
     # Derive test sequences automatically from dataset
     temp_dataset = AriaRawDataset(test_dir, sequence_length=21, stride=1)
     test_sequences = sorted({sample['seq_name'] for sample in temp_dataset.samples})
@@ -957,13 +964,6 @@ def main():
         test_sequences = test_sequences[:11]
         print(f"Using first 11 sequences for evaluation: {test_sequences}")
     print(f"\n📁 Test sequences: {test_sequences}")
-    
-    # Create test dataset
-    test_dir = Path(args.data_dir) / 'test'
-    if not test_dir.exists():
-        print(f"\n❌ Test directory not found: {test_dir}")
-        print("Please ensure test sequences are in the test directory")
-        return
     
     # Use stride=1 to match training configuration
     test_dataset = AriaRawDataset(test_dir, sequence_length=21, stride=1)
