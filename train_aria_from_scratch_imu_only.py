@@ -310,7 +310,7 @@ def compute_loss(model, predictions, batch, is_training=True):
     }
 
 
-def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=None, global_step=0, use_amp=False):
+def train_epoch(model, dataloader, optimizers, device, epoch, warmup_steps=0, global_step=0, use_amp=False, initial_lrs=None):
     """Train one epoch."""
     model.train()
     total_loss = 0
@@ -391,10 +391,12 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
             for opt in optimizers:
                 opt.step()
         
-        # Step warmup schedulers AFTER optimizer.step()
-        if warmup_schedulers is not None:
-            for scheduler in warmup_schedulers:
-                scheduler.step()
+        # Manual warmup learning rate adjustment
+        if global_step < warmup_steps and initial_lrs is not None:
+            warmup_factor = min(1.0, (global_step + 1) / warmup_steps)
+            for opt_idx, opt in enumerate(optimizers):
+                for param_group_idx, param_group in enumerate(opt.param_groups):
+                    param_group['lr'] = initial_lrs[opt_idx][param_group_idx] * warmup_factor
         
         step += 1
         
@@ -793,17 +795,16 @@ def main():
     warmup_steps = int(len(train_loader) * 1.5 * batch_scale)
     warmup_epochs = math.ceil(warmup_steps / len(train_loader))
     
-    warmup_schedulers = []
-    cosine_schedulers = []
-    
+    # Store initial learning rates for manual warmup
+    initial_lrs = []
     for opt in optimizers:
-        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
-            opt, 
-            start_factor=0.1, 
-            total_iters=warmup_steps
-        )
-        warmup_schedulers.append(warmup_scheduler)
-        
+        initial_lrs.append([group['lr'] for group in opt.param_groups])
+        # Start with low learning rate for warmup
+        for group in opt.param_groups:
+            group['lr'] = group['lr'] * 0.1
+    
+    cosine_schedulers = []
+    for opt in optimizers:
         cosine_schedulers.append(torch.optim.lr_scheduler.CosineAnnealingLR(
             opt, T_max=args.epochs - warmup_epochs, eta_min=1e-6
         ))
@@ -822,20 +823,24 @@ def main():
             print(f"Learning rates: " + ", ".join([f"{opt.param_groups[0]['lr']:.2e}" for opt in optimizers]))
             print(f"{'='*60}")
         
-        warmup_schedulers_to_use = warmup_schedulers if global_step < warmup_steps else None
-        
         # Train
         train_loss, global_step = train_epoch(
             model, train_loader, optimizers, device, epoch, 
-            warmup_schedulers=warmup_schedulers_to_use, global_step=global_step,
-            use_amp=args.amp
+            warmup_steps=warmup_steps, global_step=global_step,
+            use_amp=args.amp, initial_lrs=initial_lrs
         )
         
         # Validate
         val_metrics = validate(model, val_loader, device)
         
-        # Step cosine schedulers
+        # Step cosine schedulers after warmup
         if global_step >= warmup_steps:
+            # First time transitioning from warmup to cosine, restore full LR
+            if global_step - len(train_loader) < warmup_steps:
+                for opt_idx, opt in enumerate(optimizers):
+                    for param_group_idx, param_group in enumerate(opt.param_groups):
+                        param_group['lr'] = initial_lrs[opt_idx][param_group_idx]
+            
             for scheduler in cosine_schedulers:
                 scheduler.step()
         
