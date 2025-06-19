@@ -45,7 +45,8 @@ from src.data.components.aria_raw_dataset import AriaRawDataModule
 # Aria hardware specifications
 VIDEO_FPS = 20           # Aria RGB stream at 20 FPS
 IMU_RATE_HZ = 1000       # Aria high-rate IMU at 1kHz
-IMU_PER_FRAME = IMU_RATE_HZ // VIDEO_FPS   # 50 samples per video frame
+IMU_PER_FRAME = 11       # 11 samples per video frame (as processed by process_aria.py)
+# Note: process_aria.py downsamples to 11 samples per interval
 # -----------------------------------------------
 
 
@@ -190,9 +191,18 @@ class IMUOnlyVIO(nn.Module):
             if max_gyro > 40.0:
                 warnings.warn(f"Large gyroscope values detected (max: {max_gyro:.2f} rad/s). Normal range is < 30 rad/s.")
         
-        # Get IMU features using backbone's inertial encoder
-        # inertial_encoder expects [B, num_samples, 6] and returns [B, num_transitions, 256]
-        fi = self.backbone.inertial_encoder(imu)  # [B, 20, 256]
+        # Get IMU features using backbone's Feature_net.inertial_encoder
+        # We need to format the IMU data as windows for the encoder
+        imu_windows = []
+        for i in range(num_transitions):
+            # Each transition has exactly samples_per_interval IMU samples
+            start_idx = i * samples_per_interval
+            end_idx = start_idx + samples_per_interval
+            imu_window = imu[:, start_idx:end_idx, :]
+            imu_windows.append(imu_window.unsqueeze(1))
+        
+        imu_formatted = torch.cat(imu_windows, dim=1)  # [B, num_transitions, samples_per_interval, 6]
+        fi = self.backbone.Feature_net.inertial_encoder(imu_formatted)  # [B, 20, 256]
         
         # Validate feature shape
         assert fi.shape == (B, num_transitions, 256), f"Expected IMU features shape (B, {num_transitions}, 256), got {fi.shape}"
@@ -372,12 +382,6 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
             for opt in optimizers:
                 scaler.step(opt)
             scaler.update()
-            
-            if warmup_schedulers is not None:
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", message="Detected call of `lr_scheduler.step()`")
-                    for scheduler in warmup_schedulers:
-                        scheduler.step()
         else:
             loss.backward()
             
@@ -386,12 +390,11 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
             
             for opt in optimizers:
                 opt.step()
-            
-            if warmup_schedulers is not None:
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", message="Detected call of `lr_scheduler.step()`")
-                    for scheduler in warmup_schedulers:
-                        scheduler.step()
+        
+        # Step warmup schedulers AFTER optimizer.step()
+        if warmup_schedulers is not None:
+            for scheduler in warmup_schedulers:
+                scheduler.step()
         
         step += 1
         
@@ -560,11 +563,12 @@ def main():
         print("Training IMU-only VIFT on Aria Data")
         print("="*60)
         print("Model components:")
-        print("- IMU Encoder (3-layer 1D CNN)")
+        print("- IMU Encoder (3-layer 1D CNN from TransformerVIO)")
         print("- Pose Transformer (4 layers, 8 heads)")
         print("- 256-dim IMU features only (no visual features)")
         print("- Quaternion output (3 trans + 4 quat)")
         print("- Multi-step prediction (all 20 transitions)")
+        print(f"- IMU sampling: 11 samples per interval (220 Hz effective rate)")
         print(f"\nTraining Configuration:")
         print(f"- Distributed: {'Yes (DDP)' if args.distributed else 'No'}")
         print(f"- World size: {world_size}")
@@ -665,16 +669,26 @@ def main():
     uncert_params = []
     
     for name, param in base_model.named_parameters():
-        if 'backbone.inertial_encoder' in name:
+        if 'backbone.Feature_net.inertial_encoder' in name:
             imu_params.append(param)
         elif name in ['s_t', 's_r']:
             uncert_params.append(param)
         elif 'pose_transformer' in name or 'shared_layer' in name or 'trans_head' in name or 'rot_head' in name:
             trf_params.append(param)
+        elif 'backbone.Feature_net.conv' in name or 'backbone.Feature_net.visual_head' in name:
+            # Skip visual encoder params - they exist but won't be used
+            continue
+        elif 'backbone.Pose_net' in name:
+            # Skip the backbone's pose network - we use our own
+            continue
+        elif 'backbone' in name:
+            # Other backbone params - skip them
+            continue
         else:
-            # For IMU-only model, we should not have visual encoder params
-            if 'visual_encoder' not in name:
-                raise RuntimeError(f"Unclassified parameter: {name}")
+            # Warn about truly unclassified parameters
+            print(f"WARNING: Unclassified parameter: {name}")
+            # Add to transformer params as fallback
+            trf_params.append(param)
     
     # Count parameters in each group
     imu_count = sum(p.numel() for p in imu_params)
