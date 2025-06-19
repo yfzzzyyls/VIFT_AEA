@@ -435,24 +435,12 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                     pred_t = pred_poses[j, :3]
                     gt_t = gt_poses_sample[j, :3]
                     
-                    # Debug prints for first 30 windows per sequence
-                    if window_idx < 30 and j == 0:  # Print once per window for clarity
-                        # (1) Raw vectors
-                        print(f"[DBG] Seq {seq_id} win {window_idx:03d}  Δt_pred={pred_t}  Δt_gt={gt_t}")
-                        
-                        # (2) Scale / unit ratio
-                        pred_norm, gt_norm = np.linalg.norm(pred_t), np.linalg.norm(gt_t)
-                        if gt_norm > 1e-6:
-                            print(f"[DBG]   |Δt_pred|/|Δt_gt| = {pred_norm/gt_norm:.3f}")
-                        else:
-                            print(f"[DBG]   |Δt_pred|/|Δt_gt| = inf (gt_norm={gt_norm:.6f})")
-                        
-                        # (3) Frame convention check (rotate pred into GT's frame)
-                        # Since both are in body frame, check if they're aligned
-                        if pred_norm > 1e-6 and gt_norm > 1e-6:
-                            cos_angle = np.dot(pred_t, gt_t) / (pred_norm * gt_norm)
-                            angle_deg = np.arccos(np.clip(cos_angle, -1, 1)) * 180 / np.pi
-                            print(f"[DBG]   angle between pred and gt = {angle_deg:.1f}°")
+                    # Debug prints disabled for cleaner output
+                    # Uncomment the following block if you need detailed debugging:
+                    # if window_idx < 30 and j == 0:
+                    #     print(f"[DBG] Seq {seq_id} win {window_idx:03d}  Δt_pred={pred_t}  Δt_gt={gt_t}")
+                    #     ...
+                    pass
                     
                     # Both pred and gt translations are in body frame - compare directly
                     trans_error = np.linalg.norm(pred_t - gt_t)
@@ -489,21 +477,8 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                 
                 window_counters[seq_id] += 1
                 
-                # Print simple window info every 10 windows
-                if window_idx % 10 == 0:
-                    print(f"[ℹ️  Window] Seq {seq_id} win {window_idx:4d}  "
-                          f"win_scale={scale_factor:6.2f}")
-                    print(f"[ℹ️  ΔT] mean_pred_jump={pred_dist:5.2f}cm  "
-                          f"mean_gt_jump={gt_dist:5.2f}cm")
-                
-                # Window-level diagnostic for problematic windows
-                mean_trans_cm = np.mean(trans_errors) * 100  # convert to cm
-                if mean_trans_cm > 5.0:  # threshold – adjust if too chatty
-                    print(f"[⚠️  Window]  Seq {seq_id}, "
-                          f"start {batch['start_idx'][i].item():5d}  "
-                          f"T_err={mean_trans_cm:6.2f} cm  "
-                          f"R_err={np.mean(rot_errors):5.2f}°  "
-                          f"Scale μ={np.mean(scale_errors):5.2f}%")
+                # Remove verbose window prints - they clutter the output
+                # Statistics are already captured in scale_history and final summaries
                 
                 result = {
                     'pred_poses': pred_poses,  # [20, 7]
@@ -675,6 +650,10 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                            pred_rotations_full[:min_len], gt_rotations_full[:min_len],
                            seq_id, output_dir, frame_offset=all_frame_indices[0])
         
+        # Save all relative poses for the entire sequence
+        save_relative_poses_csv(all_pred, np.concatenate([r['gt_poses'] for r in seq_results_sampled], axis=0),
+                               seq_id, output_dir)
+        
         # Plot full trajectory
         plot_trajectory_3d(
             pred_positions_aligned,
@@ -816,6 +795,8 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
             print(f"   - trajectory_{seq_id}_pred.csv (predictions with errors)")
             print(f"   - trajectory_3d_{seq_id}.png, trajectory_3d_{seq_id}_1s.png, trajectory_3d_{seq_id}_5s.png")
             print(f"   - rotation_3d_{seq_id}.png, rotation_3d_{seq_id}_1s.png, rotation_3d_{seq_id}_5s.png")
+            print(f"   - relative_poses_{seq_id}_gt.csv (ground truth relative poses)")
+            print(f"   - relative_poses_{seq_id}_pred.csv (predicted relative poses with errors)")
             if PLOTLY_AVAILABLE:
                 print(f"   - trajectory_3d_{seq_id}_interactive.html (interactive 3D plot)")
     
@@ -1194,6 +1175,97 @@ def plot_scale_convergence(scale_history, output_dir):
     plt.savefig(os.path.join(output_dir, 'scale_convergence.png'), dpi=150)
     plt.close()
     print(f"\n📊 Scale convergence plot saved to: {output_dir}/scale_convergence.png")
+
+
+def save_relative_poses_csv(pred_rel_poses, gt_rel_poses, seq_id, output_dir):
+    """Save relative poses to separate CSV files for ground truth and predictions
+    
+    Args:
+        pred_rel_poses: Predicted relative poses [N, 7] where each pose is [x,y,z,qx,qy,qz,qw]
+        gt_rel_poses: Ground truth relative poses [N, 7]
+        seq_id: Sequence identifier
+        output_dir: Output directory
+    """
+    # Ensure same length
+    min_len = min(len(pred_rel_poses), len(gt_rel_poses))
+    pred_rel_poses = pred_rel_poses[:min_len]
+    gt_rel_poses = gt_rel_poses[:min_len]
+    
+    # Save ground truth relative poses
+    gt_data = []
+    for i in range(min_len):
+        row = {
+            'step': i,
+            'x': gt_rel_poses[i, 0],
+            'y': gt_rel_poses[i, 1],
+            'z': gt_rel_poses[i, 2],
+            'qx': gt_rel_poses[i, 3],
+            'qy': gt_rel_poses[i, 4],
+            'qz': gt_rel_poses[i, 5],
+            'qw': gt_rel_poses[i, 6],
+            'trans_norm': np.linalg.norm(gt_rel_poses[i, :3])
+        }
+        gt_data.append(row)
+    
+    gt_df = pd.DataFrame(gt_data)
+    gt_csv_path = os.path.join(output_dir, f'relative_poses_{seq_id}_gt.csv')
+    gt_df.to_csv(gt_csv_path, index=False)
+    print(f"Saved ground truth relative poses to {gt_csv_path}")
+    
+    # Save predicted relative poses with errors
+    pred_data = []
+    for i in range(min_len):
+        row = {
+            'step': i,
+            'x': pred_rel_poses[i, 0],
+            'y': pred_rel_poses[i, 1],
+            'z': pred_rel_poses[i, 2],
+            'qx': pred_rel_poses[i, 3],
+            'qy': pred_rel_poses[i, 4],
+            'qz': pred_rel_poses[i, 5],
+            'qw': pred_rel_poses[i, 6],
+            'trans_norm': np.linalg.norm(pred_rel_poses[i, :3])
+        }
+        
+        # Add errors compared to ground truth
+        row['trans_error'] = np.linalg.norm(pred_rel_poses[i, :3] - gt_rel_poses[i, :3])
+        row['scale_ratio'] = np.linalg.norm(pred_rel_poses[i, :3]) / (np.linalg.norm(gt_rel_poses[i, :3]) + 1e-8)
+        
+        # Rotation error
+        pred_q = pred_rel_poses[i, 3:] / (np.linalg.norm(pred_rel_poses[i, 3:]) + 1e-8)
+        gt_q = gt_rel_poses[i, 3:] / (np.linalg.norm(gt_rel_poses[i, 3:]) + 1e-8)
+        dot = np.clip(np.dot(pred_q, gt_q), -1.0, 1.0)
+        rot_error_deg = np.rad2deg(2 * np.arccos(np.abs(dot)))
+        row['rot_error_deg'] = rot_error_deg
+        
+        # Angle between translation vectors (direction error)
+        pred_t = pred_rel_poses[i, :3]
+        gt_t = gt_rel_poses[i, :3]
+        pred_norm = np.linalg.norm(pred_t)
+        gt_norm = np.linalg.norm(gt_t)
+        if pred_norm > 1e-6 and gt_norm > 1e-6:
+            cos_angle = np.dot(pred_t, gt_t) / (pred_norm * gt_norm)
+            angle_deg = np.arccos(np.clip(cos_angle, -1, 1)) * 180 / np.pi
+            row['direction_angle_deg'] = angle_deg
+        else:
+            row['direction_angle_deg'] = np.nan
+        
+        pred_data.append(row)
+    
+    pred_df = pd.DataFrame(pred_data)
+    pred_csv_path = os.path.join(output_dir, f'relative_poses_{seq_id}_pred.csv')
+    pred_df.to_csv(pred_csv_path, index=False)
+    print(f"Saved predicted relative poses to {pred_csv_path}")
+    
+    # Print summary statistics
+    print(f"  Relative poses summary for sequence {seq_id}:")
+    print(f"    Total steps: {len(pred_df)}")
+    print(f"    Mean translation error: {pred_df['trans_error'].mean()*100:.2f} cm")
+    print(f"    Mean rotation error: {pred_df['rot_error_deg'].mean():.2f}°")
+    print(f"    Mean scale ratio: {pred_df['scale_ratio'].mean():.3f}")
+    valid_angles = pred_df['direction_angle_deg'].dropna()
+    if len(valid_angles) > 0:
+        print(f"    Mean direction angle: {valid_angles.mean():.1f}°")
 
 
 def save_evaluation_metrics(trans_errors, rot_errors, scale_errors, output_dir):
