@@ -119,7 +119,7 @@ python process_aria.py
 # For 4x A6000 GPUs with batch size 20 per GPU (recommended):
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
       --epochs 200 \
-      --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
+      --data-dir aria_processed \
       --opt-cnn sgd --opt-trf adamw --batch-size 20 --distributed --amp
 
 # For smaller GPUs with batch size 4 per GPU:
