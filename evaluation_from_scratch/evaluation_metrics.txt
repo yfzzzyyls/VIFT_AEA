@@ -2,23 +2,23 @@ VIFT FROM SCRATCH EVALUATION RESULTS
 =====================================
 
 Translation Error (cm):
-  Mean:   2.10
-  Std:    3.60
-  Median: 0.73
-  95%:    9.03
-  Max:    43.66
+  Mean:   2.20
+  Std:    3.73
+  Median: 0.79
+  95%:    9.50
+  Max:    43.43
 
 Rotation Error (degrees):
-  Mean:   0.67
-  Std:    1.18
-  Median: 0.30
-  95%:    2.41
-  Max:    17.08
+  Mean:   0.89
+  Std:    1.79
+  Median: 0.33
+  95%:    3.63
+  Max:    28.28
 
 Scale Drift (%):
   Mean:   12.54
   Std:    7.58
-  Median: 14.41
+  Median: 14.51
   95%:    20.00
   Max:    20.00
 
