@@ -188,6 +188,14 @@ class AriaRawDataset(Dataset):
         
         # Reshape to flat array
         imu_flat = imu.reshape(-1, 6)
+        
+        # Apply coordinate transformation to match expected convention
+        # Aria uses Y-up, but we may need Y-down for computer vision convention
+        # Transform: [ax, ay, az, gx, gy, gz] -> [ax, -ay, az, gx, -gy, gz]
+        imu_transformed = imu_flat.clone()
+        imu_transformed[:, 1] *= -1  # Flip Y acceleration
+        imu_transformed[:, 4] *= -1  # Flip Y gyroscope
+        imu_flat = imu_transformed
         expected_samples = num_transitions * samples_per_interval
         
         # Validate we have the expected number of samples
@@ -239,9 +247,9 @@ class AriaRawDataset(Dataset):
             # Transform to local frame of pose1
             dt_local = r1.inv().apply(dt_world)
             
-            # Apply Y/Z swap to match expected coordinate convention
-            # The forensics report identified this as the coordinate frame mismatch
-            dt_local_swapped = np.array([dt_local[0], dt_local[2], dt_local[1]])
+            # No coordinate swap needed - use consistent coordinate system
+            # The model will learn in Aria's native coordinate system
+            dt_local_swapped = dt_local  # Keep original coordinates
             
             # NOTE: Despite the name 'dt_local', this is actually being learned
             # by the network as world-frame deltas. This is why integrate_trajectory

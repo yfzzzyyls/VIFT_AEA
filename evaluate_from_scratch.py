@@ -322,12 +322,8 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                 # Apply global scale correction factor (model outputs are ~2.5x over-scaled)
                 pred_poses[:, :3] *= scale_correction
                 
-                # Apply Y/Z swap to predictions to match ground truth coordinate convention
-                # This is the inverse of the swap applied during training
-                pred_poses_swapped = pred_poses.copy()
-                pred_poses_swapped[:, 1] = pred_poses[:, 2]  # New Y = Old Z
-                pred_poses_swapped[:, 2] = pred_poses[:, 1]  # New Z = Old Y
-                pred_poses = pred_poses_swapped
+                # No coordinate swap needed - coordinates match between Aria and expected convention
+                # Only Y sign flip is applied to IMU data during training
                 
                 # Frame convention debug (only for first batch)
                 if batch_idx == 0 and i == 0:
