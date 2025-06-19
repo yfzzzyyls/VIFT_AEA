@@ -51,12 +51,11 @@ IMU_PER_FRAME = 11       # 11 samples per video frame (as processed by process_a
 
 
 class IMUOnlyVIO(nn.Module):
-    """IMU-only version of VIFT for training from scratch.
+    """Pure IMU encoder model - no transformer, just CNN to 7-DoF poses.
     
     Architecture:
-    - IMU encoder (1D CNN) -> 256-dim features
-    - Pose transformer on 256-dim tokens
-    - Separate translation and rotation heads
+    - IMU encoder (1D CNN) -> 256-dim features per transition
+    - Direct prediction heads for translation and rotation
     """
     
     def __init__(self):
@@ -69,12 +68,12 @@ class IMUOnlyVIO(nn.Module):
             
             # Feature dimensions - IMU only
             i_f_len = 256         # IMU feature dimension
-            embedding_dim = 256   # Same as i_f_len (no visual features)
             
             # IMU encoder parameters
             imu_dropout = 0.2
             
-            # Transformer parameters
+            # Transformer parameters (for PoseTransformer)
+            embedding_dim = 768   # Total feature dimension for transformer
             num_layers = 4
             nhead = 8
             dim_feedforward = 2048
@@ -90,50 +89,34 @@ class IMUOnlyVIO(nn.Module):
             fuse_method = 'cat'
         
         self.config = Config()
+        self.n_transitions = self.config.seq_len - 1  # 20
         
         # Use TransformerVIO backbone for IMU encoder
         self.backbone = TransformerVIO(self.config)
         
-        # Create pose transformer that works on 256-dim IMU features
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=self.config.embedding_dim,
-            nhead=self.config.nhead,
-            dim_feedforward=self.config.dim_feedforward,
-            dropout=self.config.dropout,
-            activation='relu',
-            batch_first=True
-        )
-        self.pose_transformer = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers=self.config.num_layers
-        )
-        
-        # Prediction heads
-        hidden_dim = self.config.embedding_dim // 2  # 128
+        # Prediction heads - directly from IMU features
+        hidden_dim = self.config.i_f_len // 2  # 128
         
         # Shared first layer
         self.shared_layer = nn.Sequential(
-            nn.Linear(self.config.embedding_dim, hidden_dim),
-            nn.ReLU()
+            nn.Linear(self.config.i_f_len, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1)
         )
         
         # Translation head
-        self.trans_head = nn.Sequential(
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim, 3)
-        )
+        self.trans_head = nn.Linear(hidden_dim, 3)
         
         # Rotation head (quaternion)
-        self.rot_head = nn.Sequential(
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim, 4)
-        )
+        self.rot_head = nn.Linear(hidden_dim, 4)
         
         # Initialize quaternion head to favor identity rotation
         with torch.no_grad():
-            self.rot_head[-1].bias[:3].fill_(0.0)  # qx, qy, qz = 0
-            self.rot_head[-1].bias[3].fill_(1.0)    # qw = 1
-            self.rot_head[-1].weight.data *= 0.01   # Small weights
+            nn.init.xavier_uniform_(self.trans_head.weight)
+            nn.init.zeros_(self.trans_head.bias)
+            
+            nn.init.xavier_uniform_(self.rot_head.weight, gain=0.01)
+            self.rot_head.bias.data[3] = 0.1  # Slight bias toward w component
         
         # Learnable uncertainty weights for automatic loss balancing
         self.s_t = nn.Parameter(torch.zeros(()))  # Translation log-variance
@@ -207,12 +190,9 @@ class IMUOnlyVIO(nn.Module):
         # Validate feature shape
         assert fi.shape == (B, num_transitions, 256), f"Expected IMU features shape (B, {num_transitions}, 256), got {fi.shape}"
         
-        # Apply pose transformer to IMU features
-        transformer_out = self.pose_transformer(fi)  # [B, 20, 256]
-        
-        # Apply prediction heads
-        batch_size, seq_len, feat_dim = transformer_out.shape
-        features_flat = transformer_out.reshape(-1, feat_dim)  # [B*20, 256]
+        # Direct prediction from IMU features (no transformer)
+        batch_size, seq_len, feat_dim = fi.shape
+        features_flat = fi.reshape(-1, feat_dim)  # [B*20, 256]
         
         # Shared layer
         shared_features = self.shared_layer(features_flat)  # [B*20, 128]
@@ -562,13 +542,13 @@ def main():
     
     if is_main_process:
         print("\n" + "="*60)
-        print("Training IMU-only VIFT on Aria Data")
+        print("Training Pure IMU Model on Aria Data")
         print("="*60)
         print("Model components:")
         print("- IMU Encoder (3-layer 1D CNN from TransformerVIO)")
-        print("- Pose Transformer (4 layers, 8 heads)")
-        print("- 256-dim IMU features only (no visual features)")
-        print("- Quaternion output (3 trans + 4 quat)")
+        print("- Direct prediction heads (NO transformer)")
+        print("- 256-dim IMU features")
+        print("- 7-DoF output (3 trans + 4 quat)")
         print("- Multi-step prediction (all 20 transitions)")
         print(f"- IMU sampling: 11 samples per interval (220 Hz effective rate)")
         print(f"\nTraining Configuration:")
@@ -675,7 +655,7 @@ def main():
             imu_params.append(param)
         elif name in ['s_t', 's_r']:
             uncert_params.append(param)
-        elif 'pose_transformer' in name or 'shared_layer' in name or 'trans_head' in name or 'rot_head' in name:
+        elif 'shared_layer' in name or 'trans_head' in name or 'rot_head' in name:
             trf_params.append(param)
         elif 'backbone.Feature_net.conv' in name or 'backbone.Feature_net.visual_head' in name:
             # Skip visual encoder params - they exist but won't be used
@@ -700,7 +680,7 @@ def main():
     if is_main_process:
         print(f"\nParameter Split:")
         print(f"  IMU encoder parameters: {imu_count:,}")
-        print(f"  Transformer parameters: {trf_count:,}")
+        print(f"  Prediction head parameters: {trf_count:,}")
         print(f"  Uncertainty parameters: {uncert_count:,}")
     
     # Learning rate scaling
@@ -866,13 +846,14 @@ def main():
                     'epoch': epoch,
                     'model_state_dict': model_state,
                     'optimizer_state_dicts': [opt.state_dict() for opt in optimizers],
-                    'warmup_scheduler_state_dicts': [s.state_dict() for s in warmup_schedulers],
                     'cosine_scheduler_state_dicts': [s.state_dict() for s in cosine_schedulers],
                     'train_loss': train_loss,
                     'val_metrics': val_metrics,
                     'config': base_model.config.__dict__,
                     'global_step': global_step,
-                    'use_dual_optimizers': use_dual_optimizers
+                    'use_dual_optimizers': use_dual_optimizers,
+                    'initial_lrs': initial_lrs,
+                    'warmup_steps': warmup_steps
                 }
                 torch.save(checkpoint, checkpoint_dir / 'best_model.pt')
                 print("  ✓ New best model saved")
@@ -882,13 +863,14 @@ def main():
                 'epoch': epoch,
                 'model_state_dict': model_state,
                 'optimizer_state_dicts': [opt.state_dict() for opt in optimizers],
-                'warmup_scheduler_state_dicts': [s.state_dict() for s in warmup_schedulers],
                 'cosine_scheduler_state_dicts': [s.state_dict() for s in cosine_schedulers],
                 'train_loss': train_loss,
                 'val_metrics': val_metrics,
                 'config': base_model.config.__dict__,
                 'global_step': global_step,
-                'use_dual_optimizers': use_dual_optimizers
+                'use_dual_optimizers': use_dual_optimizers,
+                'initial_lrs': initial_lrs,
+                'warmup_steps': warmup_steps
             }
             torch.save(latest_checkpoint, checkpoint_dir / 'latest_model.pt')
     
