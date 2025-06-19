@@ -305,9 +305,9 @@ class VIFTFromScratch(nn.Module):
             gt_trans = gt_poses[:, :, :3]      # [B, 20, 3]
             gt_rot = gt_poses[:, :, 3:]        # [B, 20, 4]
             
-            # Adaptive scale normalization based on batch-wise RMS of ground-truth distances
-            scale_norm = gt_trans.reshape(-1, 3).norm(dim=-1).mean().clamp(min=1.0)
-            trans_loss_raw = F.smooth_l1_loss(pred_trans / scale_norm, gt_trans / scale_norm, reduction='mean')
+            # Remove scale normalization to preserve metric scale from IMU
+            # This allows the model to learn absolute scale which is crucial for VIO
+            trans_loss_raw = F.smooth_l1_loss(pred_trans, gt_trans, reduction='mean')
             rot_loss_raw = self._robust_geodesic_loss_stable(pred_rot, gt_rot)
             
             # --- FIX 1: scale rotation loss so its numeric range matches translation ---
@@ -332,8 +332,9 @@ class VIFTFromScratch(nn.Module):
             gt_path_length = torch.sum(torch.norm(gt_trans, dim=-1), dim=1) / num_transitions      # [B]
             path_loss = F.mse_loss(pred_path_length, gt_path_length)
             
-            # Curriculum learning: gradually increase path weight from 0.02 to 0.1 over 5 epochs
-            path_weight = min(0.02 + (0.08 * epoch / 5.0), 0.1)
+            # Curriculum learning: gradually increase path weight from 0.02 to 0.2 over 10 epochs
+            # Increased final weight to 0.2 for stronger scale regularization
+            path_weight = min(0.02 + (0.18 * epoch / 10.0), 0.2)
             total_loss = total_loss + path_weight * path_loss
             
             return {
@@ -444,6 +445,26 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
         if loss_dict is None:
             print(f"NaN loss detected at batch {batch_idx}, skipping...")
             continue
+        
+        # Scale monitoring (first batch of each epoch)
+        if batch_idx == 0 and predictions is not None:
+            with torch.no_grad():
+                pred_trans = predictions['poses'][:, :, :3]
+                gt_trans = batch['gt_poses'][:, :, :3]
+                
+                # Compute scale ratio
+                pred_norms = pred_trans.reshape(-1, 3).norm(dim=-1)
+                gt_norms = gt_trans.reshape(-1, 3).norm(dim=-1)
+                valid_mask = gt_norms > 1e-6
+                
+                if valid_mask.any():
+                    scale_ratios = pred_norms[valid_mask] / gt_norms[valid_mask]
+                    mean_scale = scale_ratios.mean().item()
+                    print(f"\n[Scale Monitor] Epoch {epoch}: mean |pred|/|gt| = {mean_scale:.3f}")
+                    
+                    # Warn if scale is diverging
+                    if mean_scale > 1.5 or mean_scale < 0.67:
+                        print(f"  ⚠️  WARNING: Scale significantly off from 1.0!")
         
         loss = loss_dict['total_loss']
         

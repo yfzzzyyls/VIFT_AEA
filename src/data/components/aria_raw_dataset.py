@@ -239,11 +239,15 @@ class AriaRawDataset(Dataset):
             # Transform to local frame of pose1
             dt_local = r1.inv().apply(dt_world)
             
+            # Apply Y/Z swap to match expected coordinate convention
+            # The forensics report identified this as the coordinate frame mismatch
+            dt_local_swapped = np.array([dt_local[0], dt_local[2], dt_local[1]])
+            
             # Relative rotation: q_rel = q1^(-1) * q2
             r_rel = r1.inv() * r2
             q_rel = r_rel.as_quat()  # Returns in xyzw format
             
-            gt_poses.append(np.concatenate([dt_local, q_rel]))  # [7]
+            gt_poses.append(np.concatenate([dt_local_swapped, q_rel]))  # [7]
         
         gt_poses = torch.tensor(np.array(gt_poses), dtype=torch.float32)  # [20, 7]
         

@@ -30,7 +30,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from train_aria_from_scratch import VIFTFromScratch
 from src.data.components.aria_raw_dataset import AriaRawDataset
-from src.utils.imu_utils import remove_gravity
+# Removed remove_gravity import - always use raw IMU
 
 
 def load_checkpoint(checkpoint_path, device):
@@ -267,7 +267,7 @@ def compute_rpe(pred_poses, gt_poses, delta=1):
     return rpe_stats
 
 
-def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_sim3_alignment=False, remove_gravity=False, scale_correction=1.0):
+def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_sim3_alignment=False, scale_correction=1.0):
     """Evaluate model on test data
     
     Args:
@@ -295,9 +295,7 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
         print(f"   Applying global scale correction: {scale_correction:.2f}x")
     if use_sim3_alignment:
         print("   Using Sim(3) alignment for scale correction")
-    if remove_gravity:
-        print("   ⚠️  WARNING: Removing gravity from IMU data")
-        print("   ⚠️  This creates train/test mismatch - model was trained with raw IMU!")
+    # Always use raw IMU to match training
     
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(test_loader, desc="Processing batches")):
@@ -305,9 +303,8 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
             images = batch['images'].to(device)
             imu = batch['imu'].to(device)
             
-            # Optionally remove gravity
-            if remove_gravity:
-                imu = remove_gravity(imu)
+            # Always use raw IMU to match training
+            # No gravity removal - model was trained with raw IMU
             
             gt_poses = batch['gt_poses'].to(device)
             
@@ -324,6 +321,52 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                 
                 # Apply global scale correction factor (model outputs are ~2.5x over-scaled)
                 pred_poses[:, :3] *= scale_correction
+                
+                # Apply Y/Z swap to predictions to match ground truth coordinate convention
+                # This is the inverse of the swap applied during training
+                pred_poses_swapped = pred_poses.copy()
+                pred_poses_swapped[:, 1] = pred_poses[:, 2]  # New Y = Old Z
+                pred_poses_swapped[:, 2] = pred_poses[:, 1]  # New Z = Old Y
+                pred_poses = pred_poses_swapped
+                
+                # Frame convention debug (only for first batch)
+                if batch_idx == 0 and i == 0:
+                    print("\n" + "="*50)
+                    print("FRAME CONVENTION MICRO-EXPERIMENT")
+                    print("="*50)
+                    
+                    # Test different axis transformations
+                    transforms = {
+                        'Original': np.eye(3),
+                        'Flip X': np.diag([-1, 1, 1]),
+                        'Flip Y': np.diag([1, -1, 1]),
+                        'Flip Z': np.diag([1, 1, -1]),
+                        'Swap XY': np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]]),
+                        'Swap XZ': np.array([[0, 0, 1], [0, 1, 0], [1, 0, 0]]),
+                        'Swap YZ': np.array([[1, 0, 0], [0, 0, 1], [0, 1, 0]]),
+                    }
+                    
+                    for name, T in transforms.items():
+                        angles = []
+                        for j in range(20):
+                            pred_t = pred_poses[j, :3].copy()
+                            gt_t = gt_poses_sample[j, :3]
+                            
+                            # Apply transform
+                            pred_t_transformed = T @ pred_t
+                            
+                            pred_norm = np.linalg.norm(pred_t_transformed)
+                            gt_norm = np.linalg.norm(gt_t)
+                            
+                            if pred_norm > 1e-6 and gt_norm > 1e-6:
+                                cos_angle = np.dot(pred_t_transformed, gt_t) / (pred_norm * gt_norm)
+                                angle = np.arccos(np.clip(cos_angle, -1, 1)) * 180 / np.pi
+                                angles.append(angle)
+                        
+                        mean_angle = np.mean(angles)
+                        print(f"{name:10s}: mean angle = {mean_angle:6.1f}°")
+                    
+                    print("="*50 + "\n")
                 
                 # Ensure quaternion sign continuity for predictions to avoid 180° jumps
                 for k in range(1, len(pred_poses)):
@@ -342,21 +385,8 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                     # Apply scale to predictions
                     pred_poses[:, :3] = aligned_trans
                 else:
-                    # Even without Sim(3), clamp predicted scale to prevent drift
-                    # This is a temporary fix for sequences like 019
-                    pred_norms = np.linalg.norm(pred_poses[:, :3], axis=1)
-                    gt_norms = np.linalg.norm(gt_poses_sample[:, :3], axis=1)
-                    
-                    # Compute per-step scale factors
-                    scale_factors = np.zeros_like(pred_norms)
-                    for j in range(len(pred_norms)):
-                        if gt_norms[j] > 1e-6:
-                            scale_factors[j] = pred_norms[j] / gt_norms[j]
-                            # Clamp individual scale factors to [0.8, 1.2]
-                            if scale_factors[j] > 1.2:
-                                pred_poses[j, :3] *= 1.2 / scale_factors[j]
-                            elif scale_factors[j] < 0.8:
-                                pred_poses[j, :3] *= 0.8 / scale_factors[j]
+                    # No scale clamping - let the model's learned scale show through
+                    pass
                 
                 # Initialize or update cumulative scale tracking
                 seq_id = batch['seq_name'][i]
@@ -364,6 +394,33 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                     window_counters[seq_id] = 0
                 
                 window_idx = window_counters[seq_id]
+                
+                # ─────────────────────────────────────────────────────────────
+                # QUICK VISUAL / CSV CHECK (always on – no debug flag needed)
+                # ─────────────────────────────────────────────────────────────
+                # 1) print the 20 raw relative translations (m) for this window
+                if window_idx < 5:  # Only print first 5 windows per sequence
+                    np.set_printoptions(precision=4, suppress=True)
+                    print(f"\n[Δt window {window_idx:03d} | Seq {seq_id}] "
+                          f"pred (m):\n{pred_poses[:, :3]}")
+                    print(f"[Δt window {window_idx:03d} | Seq {seq_id}] "
+                          f"gt   (m):\n{gt_poses_sample[:, :3]}\n")
+                
+                # 2) dump the first 5 s of relative motion once per sequence
+                #    (20 Hz → 100 steps; include *all* 7-D pose rows)
+                if window_idx == 0:                         # only first window of the seq
+                    first_5s = min(100, pred_poses.shape[0])
+                    csv_path = os.path.join(
+                        output_dir, f"rel_pose_first5s_seq{seq_id}.csv")
+                    pd.DataFrame(
+                        np.hstack([pred_poses[:first_5s],
+                                   gt_poses_sample[:first_5s]]),
+                        columns=[
+                            'pred_x','pred_y','pred_z','pred_qx','pred_qy','pred_qz','pred_qw',
+                            'gt_x',  'gt_y',  'gt_z',  'gt_qx', 'gt_qy', 'gt_qz', 'gt_qw'
+                        ]).to_csv(csv_path, index=False)
+                    print(f"[INFO] wrote first-5-s relative poses to {csv_path}")
+                # ─────────────────────────────────────────────────────────────
                 
                 # Compute errors for all transitions
                 trans_errors = []
@@ -696,6 +753,43 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
     
     # Save numerical results
     save_evaluation_metrics(all_trans_errors, all_rot_errors, all_scale_errors, output_dir)
+    
+    # Plot scale convergence
+    if scale_history and any(len(scales) > 0 for scales in scale_history.values()):
+        plot_scale_convergence(scale_history, output_dir)
+    
+    # Perform sanity checks
+    print("\n" + "="*50)
+    print("📋 SANITY CHECKS")
+    print("="*50)
+    
+    # Check 1: Scale convergence
+    scale_ratio = total_pred_len / (total_gt_len + 1e-8)
+    print(f"\n✓ Scale Check:")
+    print(f"  Total pred/gt length ratio: {scale_ratio:.3f}")
+    if 0.95 <= scale_ratio <= 1.05:
+        print("  ✅ PASS: Scale within 5% of ground truth")
+    else:
+        print(f"  ❌ FAIL: Scale off by {abs(1.0 - scale_ratio)*100:.1f}%")
+    
+    # Check 2: Mean translation angle
+    if batch_idx > 0:  # Only if we have data
+        print(f"\n✓ Coordinate Frame Check:")
+        print(f"  Mean angle between pred and gt: <printed above>")
+        print(f"  ✅ PASS if < 5° (after Y/Z swap fix)")
+    
+    # Check 3: First 5s median error
+    first_5s_errors = all_trans_errors[:100] if len(all_trans_errors) > 100 else all_trans_errors
+    median_5s_error = np.median(first_5s_errors) * 100
+    print(f"\n✓ First 5s Accuracy Check:")
+    print(f"  Median translation error: {median_5s_error:.2f} cm")
+    if median_5s_error < 3.0:
+        print("  ✅ PASS: Median error < 3 cm")
+    else:
+        print(f"  ❌ FAIL: Median error too high")
+    
+    # Note: Uncertainty weights check would require passing checkpoint data
+    # For now, this check is informational only
     
     # Scale analysis summary
     print("\n" + "="*50)
@@ -1066,6 +1160,42 @@ def plot_sample_trajectories(results, output_dir):
     print(f"\n📊 Plots saved to: {plot_dir}/")
 
 
+def plot_scale_convergence(scale_history, output_dir):
+    """Plot scale convergence over windows for each sequence"""
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    axes = axes.flatten()
+    
+    for idx, (seq_id, scales) in enumerate(scale_history.items()):
+        if idx >= 4:  # Only plot first 4 sequences
+            break
+        
+        ax = axes[idx]
+        windows = np.arange(len(scales))
+        
+        # Plot scale evolution
+        ax.plot(windows, scales, 'b-', linewidth=2)
+        ax.axhline(y=1.0, color='r', linestyle='--', label='Target (1.0)')
+        ax.axhline(y=0.95, color='g', linestyle=':', alpha=0.5)
+        ax.axhline(y=1.05, color='g', linestyle=':', alpha=0.5, label='±5% bounds')
+        
+        # Add statistics
+        mean_scale = np.mean(scales)
+        ax.axhline(y=mean_scale, color='orange', linestyle='-', alpha=0.7, label=f'Mean: {mean_scale:.3f}')
+        
+        ax.set_xlabel('Window Index')
+        ax.set_ylabel('Scale (pred/gt)')
+        ax.set_title(f'Sequence {seq_id}')
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8)
+        ax.set_ylim([0.7, 1.3])
+    
+    plt.suptitle('Scale Convergence Analysis', fontsize=16)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'scale_convergence.png'), dpi=150)
+    plt.close()
+    print(f"\n📊 Scale convergence plot saved to: {output_dir}/scale_convergence.png")
+
+
 def save_evaluation_metrics(trans_errors, rot_errors, scale_errors, output_dir):
     """Save evaluation metrics to file"""
     results_file = os.path.join(output_dir, 'evaluation_metrics.txt')
@@ -1112,10 +1242,9 @@ def main():
                         help='Number of data loading workers')
     parser.add_argument('--sim3', action='store_true',
                         help='Apply Sim(3) alignment to correct scale drift')
-    parser.add_argument('--remove-gravity', action='store_true',
-                        help='Remove gravity from IMU data before inference')
-    parser.add_argument('--scale-correction', type=float, default=0.4,
-                        help='Global scale correction factor (default: 0.4 based on velocity analysis)')
+    # Removed --remove-gravity flag to maintain train/test consistency
+    parser.add_argument('--scale-correction', type=float, default=1.0,
+                        help='Global scale correction factor (default: 1.0, no correction)')
     
     args = parser.parse_args()
     
@@ -1167,7 +1296,7 @@ def main():
     
     # Evaluate
     results = evaluate_model(model, test_loader, device, str(output_dir), test_sequences, 
-                           use_sim3_alignment=args.sim3, remove_gravity=args.remove_gravity,
+                           use_sim3_alignment=args.sim3,
                            scale_correction=args.scale_correction)
     
     print("\n✅ Evaluation complete!")

@@ -177,13 +177,11 @@ python train_aria_from_scratch.py \
     --checkpoint-dir checkpoints_from_scratch \
     --num-workers 4
 
-# Multi-GPU training with distributed data parallel
+# Multi-GPU training with distributed data parallel (recommended)
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --epochs 200 \
     --data-dir aria_processed \
-    --epochs 50 \
-    --batch-size 16 \
-    --checkpoint-dir checkpoints_distributed \
-    --distributed
+    --opt-cnn sgd --opt-trf adamw --batch-size 20 --distributed --amp
 
 # 4. Monitor training progress
 tail -f train.log
