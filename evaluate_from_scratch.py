@@ -172,9 +172,9 @@ def integrate_trajectory(relative_poses, initial_pose=None):
         rel_rotation = R.from_quat(rel_quat)
         
         # Apply transformation
-        # rel_trans is already in body frame from the dataset
-        # Convert to world frame before accumulating
-        world_trans = current_rotation.apply(rel_trans)
+        # rel_trans comes from the **body/device frame**, so we must rotate
+        # it into the current world frame before accumulating.
+        world_trans = current_rotation.apply(rel_trans)  # body → world
         current_position += world_trans
         current_rotation = current_rotation * rel_rotation
         

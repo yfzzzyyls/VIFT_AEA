@@ -243,6 +243,10 @@ class AriaRawDataset(Dataset):
             # The forensics report identified this as the coordinate frame mismatch
             dt_local_swapped = np.array([dt_local[0], dt_local[2], dt_local[1]])
             
+            # NOTE: Despite the name 'dt_local', this is actually being learned
+            # by the network as world-frame deltas. This is why integrate_trajectory
+            # should NOT apply rotation
+            
             # Relative rotation: q_rel = q1^(-1) * q2
             r_rel = r1.inv() * r2
             q_rel = r_rel.as_quat()  # Returns in xyzw format
