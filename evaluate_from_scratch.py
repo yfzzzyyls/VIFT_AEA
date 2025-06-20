@@ -285,12 +285,16 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
     all_results = []
     sequence_results = {seq_id: [] for seq_id in test_sequences}
     
+    # For averaging overlapping predictions with stride=1
+    sequence_predictions = {seq_id: {} for seq_id in test_sequences}  # frame_idx -> list of predictions
+    
     # Track cumulative scale per sequence
     cumulative_scales = {}
     window_counters = {}
     scale_history = {seq_id: [] for seq_id in test_sequences}  # Track scale over time
     
-    print("\n🔍 Evaluating on test sequences...")
+    print("\n🔍 Evaluating on test sequences with overlapping window averaging...")
+    print(f"   Window size: 21 frames, stride: 1 (20 frame overlap)")
     if scale_correction != 1.0:
         print(f"   Applying global scale correction: {scale_correction:.2f}x")
     if use_sim3_alignment:
@@ -395,12 +399,13 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                 # QUICK VISUAL / CSV CHECK (always on – no debug flag needed)
                 # ─────────────────────────────────────────────────────────────
                 # 1) print the 20 raw relative translations (m) for this window
-                if window_idx < 5:  # Only print first 5 windows per sequence
-                    np.set_printoptions(precision=4, suppress=True)
-                    print(f"\n[Δt window {window_idx:03d} | Seq {seq_id}] "
-                          f"pred (m):\n{pred_poses[:, :3]}")
-                    print(f"[Δt window {window_idx:03d} | Seq {seq_id}] "
-                          f"gt   (m):\n{gt_poses_sample[:, :3]}\n")
+                # Commented out to reduce output during evaluation
+                # if window_idx < 5:  # Only print first 5 windows per sequence
+                #     np.set_printoptions(precision=4, suppress=True)
+                #     print(f"\n[Δt window {window_idx:03d} | Seq {seq_id}] "
+                #           f"pred (m):\n{pred_poses[:, :3]}")
+                #     print(f"[Δt window {window_idx:03d} | Seq {seq_id}] "
+                #           f"gt   (m):\n{gt_poses_sample[:, :3]}\n")
                 
                 # 2) dump the first 5 s of relative motion once per sequence
                 #    (20 Hz → 100 steps; include *all* 7-D pose rows)
@@ -491,8 +496,75 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                 seq_id = batch['seq_name'][i]
                 if seq_id in sequence_results:
                     sequence_results[seq_id].append(result)
+                    
+                # Store predictions by frame index for averaging
+                start_idx = batch['start_idx'][i].item()
+                
+                # Ensure sequence is in sequence_predictions dictionary
+                if seq_id not in sequence_predictions:
+                    sequence_predictions[seq_id] = {}
+                    print(f"Note: Found new sequence {seq_id} during evaluation")
+                
+                for j in range(20):  # 20 transitions in each window
+                    frame_idx = start_idx + j
+                    if frame_idx not in sequence_predictions[seq_id]:
+                        sequence_predictions[seq_id][frame_idx] = []
+                    sequence_predictions[seq_id][frame_idx].append({
+                        'pred_pose': pred_poses[j],  # [7]
+                        'gt_pose': gt_poses_sample[j]  # [7]
+                    })
     
-    # Compute overall statistics
+    # Average overlapping predictions
+    print("\n📊 Averaging overlapping predictions...")
+    averaged_sequence_results = {}
+    
+    for seq_id in test_sequences:
+        if seq_id not in sequence_predictions or not sequence_predictions[seq_id]:
+            continue
+            
+        # Sort frame indices
+        frame_indices = sorted(sequence_predictions[seq_id].keys())
+        
+        averaged_predictions = []
+        averaged_gt = []
+        
+        for frame_idx in frame_indices:
+            predictions_at_frame = sequence_predictions[seq_id][frame_idx]
+            
+            # Average predictions at this frame
+            pred_poses = np.array([p['pred_pose'] for p in predictions_at_frame])  # [N, 7]
+            gt_poses = np.array([p['gt_pose'] for p in predictions_at_frame])  # [N, 7]
+            
+            # Average translations
+            avg_trans = np.mean(pred_poses[:, :3], axis=0)
+            
+            # Average quaternions (using quaternion averaging)
+            # First ensure all quaternions have the same sign
+            quats = pred_poses[:, 3:].copy()
+            for i in range(1, len(quats)):
+                if np.dot(quats[i], quats[0]) < 0:
+                    quats[i] *= -1
+            
+            # Simple quaternion averaging (works well for small variations)
+            avg_quat = np.mean(quats, axis=0)
+            avg_quat = avg_quat / (np.linalg.norm(avg_quat) + 1e-8)
+            
+            # Combine averaged pose
+            avg_pose = np.concatenate([avg_trans, avg_quat])
+            averaged_predictions.append(avg_pose)
+            
+            # Ground truth should be the same for all overlapping windows
+            averaged_gt.append(gt_poses[0])  # All GT should be identical
+        
+        averaged_sequence_results[seq_id] = {
+            'pred_poses': np.array(averaged_predictions),  # [N_frames, 7]
+            'gt_poses': np.array(averaged_gt),  # [N_frames, 7]
+            'frame_indices': frame_indices
+        }
+        
+        print(f"  Sequence {seq_id}: {len(averaged_predictions)} averaged predictions from {len(frame_indices)} frames")
+    
+    # Compute overall statistics (using original non-averaged results for consistency)
     all_trans_errors = np.concatenate([r['trans_errors'] for r in all_results])
     all_rot_errors = np.concatenate([r['rot_errors'] for r in all_results])
     all_scale_errors = np.concatenate([r['scale_errors'] for r in all_results if len(r['scale_errors']) > 0])
@@ -539,85 +611,54 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
     fps = 20  # Aria dataset is 20 FPS
     
     for seq_id in test_sequences:
-        if seq_id not in sequence_results:
-            print(f"\nSequence {seq_id}: Not found in results")
-            continue
-            
-        if not sequence_results[seq_id]:
-            print(f"\nSequence {seq_id}: No results available")
+        if seq_id not in averaged_sequence_results:
+            print(f"\nSequence {seq_id}: Not found in averaged results")
             continue
         
-        # Sort by start index to maintain chronological order
-        seq_results = sorted(sequence_results[seq_id], key=lambda x: x['start_idx'])
+        avg_results = averaged_sequence_results[seq_id]
+        pred_poses_avg = avg_results['pred_poses']  # [N_frames, 7]
+        gt_poses_avg = avg_results['gt_poses']  # [N_frames, 7]
+        frame_indices = avg_results['frame_indices']
         
         print(f"\nSequence {seq_id}:")
-        print(f"  Total windows: {len(seq_results)}")
-        
-        # Keep only non-overlapping windows to avoid double-counting
-        # Use sequence_length - 1 to stay in sync with model configuration
-        overlap_stride = 20  # Default for 21-frame sequences (20 transitions)
-        if hasattr(model, 'config') and hasattr(model.config, 'seq_len'):
-            overlap_stride = model.config.seq_len - 1
-        seq_results_sampled = [r for r in seq_results if r['start_idx'] % overlap_stride == 0]
-        print(f"  Non-overlapping windows: {len(seq_results_sampled)}")
-        
-        # If no non-overlapping windows found, show all start indices for debugging
-        if len(seq_results_sampled) == 0:
-            print(f"  WARNING: No non-overlapping windows found!")
-            print(f"  Start indices: {[r['start_idx'] for r in seq_results[:10]]}...")
-            continue
+        print(f"  Total averaged predictions: {len(pred_poses_avg)}")
+        print(f"  Frame range: {frame_indices[0]} to {frame_indices[-1]}")
         
         # Load raw ground truth poses from file
         seq_dir = test_loader.dataset.data_dir / seq_id
         with open(seq_dir / 'poses_quaternion.json', 'r') as f:
             raw_poses = json.load(f)
         
-        # Get ground truth absolute poses for the frames we're evaluating
-        # We need to track which frames are covered by our predictions
-        all_frame_indices = []
-        for r in seq_results_sampled:
-            start_idx = r['start_idx']
-            # Each window covers 21 frames (20 transitions)
-            # Include all frames starting from start_idx
-            frame_indices = list(range(start_idx, start_idx + 21))
-            all_frame_indices.extend(frame_indices)
-        
-        # Remove duplicates and sort
-        all_frame_indices = sorted(list(set(all_frame_indices)))
-        
-        # Extract ground truth absolute poses
-        gt_positions_full = np.array([raw_poses[i]['translation'] for i in all_frame_indices])
-        gt_quaternions = np.array([raw_poses[i]['quaternion'] for i in all_frame_indices])
+        # Get ground truth absolute poses for all frames in the sequence
+        num_frames = len(raw_poses)
+        gt_positions_all = np.array([pose['translation'] for pose in raw_poses])
+        gt_quaternions_all = np.array([pose['quaternion'] for pose in raw_poses])
         
         # Make ground truth quaternion stream sign-continuous
-        for k in range(1, len(gt_quaternions)):
-            if np.dot(gt_quaternions[k], gt_quaternions[k-1]) < 0:
-                gt_quaternions[k] *= -1
+        for k in range(1, len(gt_quaternions_all)):
+            if np.dot(gt_quaternions_all[k], gt_quaternions_all[k-1]) < 0:
+                gt_quaternions_all[k] *= -1
         
-        # Build all_pred without double steps
-        all_pred = []
-        for n, r in enumerate(seq_results_sampled):
-            steps = r['pred_poses']
-            if n:                       # every window except the first
-                steps = steps[1:]       # drop duplicate step 0
-            all_pred.append(steps)
-        all_pred = np.concatenate(all_pred, axis=0)
-        
-        # Make quaternion stream sign-continuous to avoid 180° jumps
-        for k in range(1, len(all_pred)):
-            if np.dot(all_pred[k, 3:], all_pred[k-1, 3:]) < 0:
-                all_pred[k, 3:] *= -1
-        
-        # Integrate predictions starting from the first frame
-        initial_frame_idx = all_frame_indices[0]
+        # Initial pose from ground truth (first frame with predictions)
+        initial_frame_idx = frame_indices[0]
         initial_pose = np.concatenate([
             raw_poses[initial_frame_idx]['translation'],
             raw_poses[initial_frame_idx]['quaternion']
         ])
-        pred_positions_full, pred_rotations_full = integrate_trajectory(all_pred, initial_pose)
         
-        # For ground truth rotations, use the raw quaternions
-        gt_rotations_full = gt_quaternions
+        # Make averaged predictions quaternion stream sign-continuous
+        for k in range(1, len(pred_poses_avg)):
+            if np.dot(pred_poses_avg[k, 3:], pred_poses_avg[k-1, 3:]) < 0:
+                pred_poses_avg[k, 3:] *= -1
+        
+        # Integrate averaged predictions
+        pred_positions_full, pred_rotations_full = integrate_trajectory(pred_poses_avg, initial_pose)
+        
+        # Get corresponding ground truth for the predicted frames
+        # +1 because we include the initial pose
+        gt_frame_indices = [initial_frame_idx] + [initial_frame_idx + i + 1 for i in range(len(pred_poses_avg))]
+        gt_positions_full = gt_positions_all[gt_frame_indices]
+        gt_rotations_full = gt_quaternions_all[gt_frame_indices]
         
         # Ensure arrays have matching shapes for APE computation
         min_len = min(len(pred_positions_full), len(gt_positions_full))
@@ -628,15 +669,15 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
         ape_stats = compute_ape(pred_positions_aligned, gt_positions_aligned)
         print(f"  APE - Mean: {ape_stats['mean']*100:.2f}cm, RMSE: {ape_stats['rmse']*100:.2f}cm")
         
-        # Compute RPE for this sequence
-        rpe_stats = compute_rpe(all_pred, np.concatenate([r['gt_poses'] for r in seq_results_sampled], axis=0))
+        # Compute RPE for this sequence using averaged predictions
+        rpe_stats = compute_rpe(pred_poses_avg, gt_poses_avg)
         print(f"  RPE - Trans: {rpe_stats['trans']['mean']*100:.2f}cm, Rot: {rpe_stats['rot']['mean']:.2f}°")
         
         # Sequence-level path length diagnostic
         seq_gt_len = np.sum(np.linalg.norm(np.diff(gt_positions_full, axis=0), axis=1))
         seq_pred_len = np.sum(np.linalg.norm(np.diff(pred_positions_full, axis=0), axis=1))
-        # Collect scale errors for this sequence
-        seq_scale_errors = np.concatenate([r['scale_errors'] for r in seq_results_sampled if len(r['scale_errors']) > 0])
+        # Compute scale errors for averaged predictions
+        seq_scale_errors = compute_scale_drift(pred_poses_avg, gt_poses_avg)
         print(f"  🛤️  Path-length ratio: {seq_pred_len/(seq_gt_len+1e-8):.3f}")
         print(f"  📏 Seq scale-drift  mean={np.mean(seq_scale_errors):.2f}%  "
               f"max={np.max(seq_scale_errors):.2f}%")
@@ -644,10 +685,10 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
         # Save trajectories to CSV with global frame indices
         save_trajectory_csv(pred_positions_aligned, gt_positions_aligned, 
                            pred_rotations_full[:min_len], gt_rotations_full[:min_len],
-                           seq_id, output_dir, frame_offset=all_frame_indices[0])
+                           seq_id, output_dir, frame_offset=initial_frame_idx)
         
         # Save all relative poses for the entire sequence
-        save_relative_poses_csv(all_pred, np.concatenate([r['gt_poses'] for r in seq_results_sampled], axis=0),
+        save_relative_poses_csv(pred_poses_avg, gt_poses_avg,
                                seq_id, output_dir)
         
         # Plot full trajectory
@@ -675,10 +716,10 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
         )
         
         # Generate 1-second plots
-        frames_1s = min(fps, len(all_pred))
+        frames_1s = min(fps, len(pred_poses_avg))
         if frames_1s > 0:
             # For predictions, integrate only the first second
-            pred_positions_1s, pred_rotations_1s = integrate_trajectory(all_pred[:frames_1s], initial_pose)
+            pred_positions_1s, pred_rotations_1s = integrate_trajectory(pred_poses_avg[:frames_1s], initial_pose)
             
             # For ground truth, use raw poses for first second
             gt_positions_1s = gt_positions_full[:frames_1s + 1]  # +1 because we need initial pose too
@@ -701,10 +742,10 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
             )
         
         # Generate 5-second plots
-        frames_5s = min(5 * fps, len(all_pred))
+        frames_5s = min(5 * fps, len(pred_poses_avg))
         if frames_5s > 0:
             # For predictions, integrate only the first 5 seconds
-            pred_positions_5s, pred_rotations_5s = integrate_trajectory(all_pred[:frames_5s], initial_pose)
+            pred_positions_5s, pred_rotations_5s = integrate_trajectory(pred_poses_avg[:frames_5s], initial_pose)
             
             # For ground truth, use raw poses for first 5 seconds
             gt_positions_5s = gt_positions_full[:frames_5s + 1]  # +1 because we need initial pose too
@@ -725,6 +766,17 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                 os.path.join(output_dir, f'rotation_3d_{seq_id}_5s.png'),
                 time_window='5s'
             )
+    
+    # Print summary of averaging benefit
+    print("\n" + "="*50)
+    print("📊 AVERAGING SUMMARY")
+    print("="*50)
+    total_predictions = sum(len(avg_results['pred_poses']) for avg_results in averaged_sequence_results.values())
+    total_windows = len(all_results)
+    print(f"Total windows processed: {total_windows}")
+    print(f"Total unique predictions after averaging: {total_predictions}")
+    print(f"Average overlap per prediction: {total_windows * 20 / total_predictions:.1f}x")
+    print("="*50)
     
     # Save numerical results
     save_evaluation_metrics(all_trans_errors, all_rot_errors, all_scale_errors, output_dir)

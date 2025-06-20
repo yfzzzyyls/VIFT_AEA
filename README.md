@@ -148,13 +148,22 @@ python extract_aria_latent_features_for_kitti.py
 # 3. Reorganize Aria data to match KITTI format
 python reorganize_aria_to_kitti_structure.py
 
-# 4. Test KITTI model on Aria
-python src/eval.py \
-    ckpt_path=logs/train/runs/[kitti_timestamp]/checkpoints/best.ckpt \
-    model=weighted_latent_vio_tf \
-    data=latent_kitti_vio \
-    data.test_loader.root_dir=/home/external/VIFT_AEA/data/aria_latent_as_kitti/val_10 \
-    trainer=gpu trainer.devices=1 logger=csv
+# 4. Convert Aria IMU data to MATLAB format for compatibility
+python convert_aria_imu_to_matlab.py
+
+# 5. Test KITTI model on Aria using custom evaluation script
+# Option A: Quick test (first 10 samples)
+python eval_cross_domain_quick.py
+
+# Option B: Full evaluation with proper KITTI metrics
+python eval_cross_domain.py
+
+# Note: The evaluation will show KITTI sequence numbers (05, 07, 10) but these
+# actually correspond to Aria sequences:
+#   - KITTI 05 = Aria 016
+#   - KITTI 07 = Aria 017
+#   - KITTI 10 = Aria 018+019
+# This mapping is necessary for compatibility with KITTI evaluation tools.
 ```
 
 ### Workflow 4: Train VIFT From Scratch on Aria (All Components)
