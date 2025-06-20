@@ -310,10 +310,6 @@ class VIFTFromScratch(nn.Module):
             trans_loss_raw = F.smooth_l1_loss(pred_trans, gt_trans, reduction='mean')
             rot_loss_raw = self._robust_geodesic_loss_stable(pred_rot, gt_rot)
             
-            # --- FIX 1: scale rotation loss so its numeric range matches translation ---
-            ROT_SCALE = 10.0
-            rot_loss_raw = rot_loss_raw * ROT_SCALE
-            
             # --- FIX 2: clamp and regularise log-variances to stop weight explosion ---
             # Tighter clamp (±2) keeps gradients well-behaved: exp(-2) = 0.135, exp(2) = 7.39
             s_t_c = torch.clamp(self.s_t, -2., 2.)
@@ -354,41 +350,6 @@ class VIFTFromScratch(nn.Module):
             }
 
 
-def compute_loss(model, predictions, batch, is_training=True):
-    """Process loss computation results and update running statistics
-    
-    Args:
-        model: Model instance (to access running stats)
-        predictions: Model predictions with loss components
-        batch: Input batch (not used now since loss is computed in forward)
-        is_training: Whether we're in training mode (to update running stats)
-    """
-    # Loss is already computed in the forward pass
-    if 'total_loss' not in predictions:
-        raise ValueError("Loss not computed in forward pass. Make sure gt_poses is in batch.")
-    
-    total_loss = predictions['total_loss']
-    trans_loss_raw = predictions['trans_loss_raw']
-    rot_loss_raw = predictions['rot_loss_raw']
-    
-    if torch.isnan(trans_loss_raw) or torch.isnan(rot_loss_raw):
-        return None
-    
-    # Get the actual model (unwrap DDP if needed)
-    base_model = model.module if hasattr(model, 'module') else model
-    
-    # No longer need to update running statistics with new loss formulation
-    
-    return {
-        'total_loss': total_loss,
-        'trans_loss': trans_loss_raw,  # Report raw loss for monitoring
-        'rot_loss': rot_loss_raw,      # Report raw loss for monitoring
-        'path_loss': predictions.get('path_loss', 0.0),  # Path length loss
-        's_t': predictions.get('s_t', 0.0),  # Translation uncertainty (raw)
-        's_r': predictions.get('s_r', 0.0),  # Rotation uncertainty (raw)
-        's_t_c': predictions.get('s_t_c', 0.0),  # Translation uncertainty (clamped)
-        's_r_c': predictions.get('s_r_c', 0.0)   # Rotation uncertainty (clamped)
-    }
 
 
 def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=None, global_step=0, use_amp=False):
@@ -439,11 +400,14 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
         else:
             predictions = model(batch, epoch=epoch, batch_idx=batch_idx)
         
-        # Compute loss
-        loss_dict = compute_loss(model, predictions, batch)
-        
-        if loss_dict is None:
-            print(f"NaN loss detected at batch {batch_idx}, skipping...")
+        # Check for NaN in loss components
+        if 'total_loss' not in predictions:
+            print(f"No loss computed for batch {batch_idx}, skipping...")
+            continue
+            
+        # Check for NaN in loss components before using them
+        if torch.isnan(predictions['trans_loss_raw']) or torch.isnan(predictions['rot_loss_raw']):
+            print(f"NaN loss components detected at batch {batch_idx}, skipping...")
             continue
         
         # Scale monitoring (first batch of each epoch)
@@ -466,12 +430,7 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
                     if mean_scale > 1.5 or mean_scale < 0.67:
                         print(f"  ⚠️  WARNING: Scale significantly off from 1.0!")
         
-        loss = loss_dict['total_loss']
-        
-        # Check for NaN
-        if torch.isnan(loss):
-            print(f"NaN loss detected at batch {batch_idx}, skipping...")
-            continue
+        loss = predictions['total_loss']
         
         # Backward pass
         for opt in optimizers:
@@ -524,8 +483,8 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
         num_batches += 1
         
         # Calculate uncertainty weights using clamped values
-        exp_neg_s_t = torch.exp(-loss_dict['s_t_c']).item()
-        exp_neg_s_r = torch.exp(-loss_dict['s_r_c']).item()
+        exp_neg_s_t = torch.exp(-predictions['s_t_c']).item()
+        exp_neg_s_r = torch.exp(-predictions['s_r_c']).item()
         
         # Warn if weights are diverging
         if exp_neg_s_t > 1000 or exp_neg_s_r > 1000:
@@ -535,9 +494,9 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_schedulers=
         # Update progress bar
         progress_bar.set_postfix({
             'loss': f"{loss.item():.4f}",
-            'trans': f"{loss_dict['trans_loss'].item():.4f}",
-            'rot': f"{loss_dict['rot_loss'].item():.4f}",
-            'path': f"{loss_dict['path_loss']:.4f}",
+            'trans': f"{predictions['trans_loss_raw'].item():.4f}",
+            'rot': f"{predictions['rot_loss_raw'].item():.4f}",
+            'path': f"{predictions['path_loss'].item():.4f}",
             'w_t': f"{exp_neg_s_t:.1f}",
             'w_r': f"{exp_neg_s_r:.1f}"
         })
@@ -565,10 +524,12 @@ def validate(model, dataloader, device):
             # Forward pass (use epoch=0 for validation to use base path weight)
             predictions = model(batch, epoch=0)
             
-            # Compute loss
-            loss_dict = compute_loss(model, predictions, batch, is_training=False)
-            
-            if loss_dict is None:
+            # Check if loss was computed
+            if 'total_loss' not in predictions:
+                continue
+                
+            # Check for NaN in loss components
+            if torch.isnan(predictions['trans_loss_raw']) or torch.isnan(predictions['rot_loss_raw']):
                 continue
             
             # Compute errors for multi-step prediction
@@ -592,7 +553,7 @@ def validate(model, dataloader, device):
             angle_error = 2 * torch.acos(dot_product)
             rot_error = torch.rad2deg(angle_error).mean()
             
-            total_loss += loss_dict['total_loss'].item()
+            total_loss += predictions['total_loss'].item()
             total_trans_error += trans_error.item()
             total_rot_error += rot_error.item()
             num_batches += 1
