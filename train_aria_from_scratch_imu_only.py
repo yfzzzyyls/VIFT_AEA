@@ -121,6 +121,7 @@ class IMUOnlyVIO(nn.Module):
         # Learnable uncertainty weights for automatic loss balancing
         self.s_t = nn.Parameter(torch.zeros(()))  # Translation log-variance
         self.s_r = nn.Parameter(torch.zeros(()))  # Rotation log-variance
+        self.s_p = nn.Parameter(torch.zeros(()))  # Path log-variance
     
     def _robust_geodesic_loss_stable(self, pred_quat, gt_quat):
         """Numerically stable quaternion geodesic loss using atan2."""
@@ -149,6 +150,10 @@ class IMUOnlyVIO(nn.Module):
         """Forward pass using only IMU data."""
         seq_len = self.config.seq_len
         num_transitions = seq_len - 1
+        
+        # Ensure ground truth is present during training
+        if self.training and 'gt_poses' not in batch:
+            raise ValueError("Ground truth poses must be provided during training!")
         
         # Only use IMU data (ignore images)
         imu = batch['imu']  # [B, num_transitions * samples_per_interval, 6]
@@ -190,7 +195,7 @@ class IMUOnlyVIO(nn.Module):
         # Validate feature shape
         assert fi.shape == (B, num_transitions, 256), f"Expected IMU features shape (B, {num_transitions}, 256), got {fi.shape}"
         
-        # Direct prediction from IMU features (no transformer)
+        # Direct prediction from IMU
         batch_size, seq_len, feat_dim = fi.shape
         features_flat = fi.reshape(-1, feat_dim)  # [B*20, 256]
         
@@ -226,28 +231,25 @@ class IMUOnlyVIO(nn.Module):
             trans_loss_raw = F.smooth_l1_loss(pred_trans / scale_norm, gt_trans / scale_norm, reduction='mean')
             rot_loss_raw = self._robust_geodesic_loss_stable(pred_rot, gt_rot)
             
-            # Scale rotation loss
-            ROT_SCALE = 10.0
-            rot_loss_raw = rot_loss_raw * ROT_SCALE
-            
-            # Clamp and regularize log-variances
-            s_t_c = torch.clamp(self.s_t, -2., 2.)
-            s_r_c = torch.clamp(self.s_r, -2., 2.)
-            
-            # Homoscedastic uncertainty loss
-            total_loss = (torch.exp(-s_t_c) * trans_loss_raw 
-                          + torch.exp(-s_r_c) * rot_loss_raw 
-                          + s_t_c + s_r_c 
-                          + 1e-4 * (s_t_c**2 + s_r_c**2))
-            
             # Path length prior
             pred_path_length = torch.sum(torch.norm(pred_trans, dim=-1), dim=1) / num_transitions  # [B]
             gt_path_length = torch.sum(torch.norm(gt_trans, dim=-1), dim=1) / num_transitions      # [B]
             path_loss = F.mse_loss(pred_path_length, gt_path_length)
             
-            # Curriculum learning for path weight
-            path_weight = min(0.02 + (0.08 * epoch / 5.0), 0.1)
-            total_loss = total_loss + path_weight * path_loss
+            # Clamp and regularize log-variances
+            s_t_c = torch.clamp(self.s_t, -2., 2.)
+            s_r_c = torch.clamp(self.s_r, -2., 2.)
+            s_p_c = torch.clamp(self.s_p, -2., 2.)
+            
+            # Curriculum learning factor for path loss
+            path_factor = min(0.02 + (0.08 * epoch / 5.0), 0.1) / 0.1  # Normalize to [0.2, 1.0]
+            
+            # Homoscedastic uncertainty loss with path loss included
+            total_loss = (torch.exp(-s_t_c) * trans_loss_raw 
+                          + torch.exp(-s_r_c) * rot_loss_raw 
+                          + torch.exp(-s_p_c) * path_loss * path_factor
+                          + s_t_c + s_r_c + s_p_c * path_factor
+                          + 1e-4 * (s_t_c**2 + s_r_c**2 + s_p_c**2 * path_factor))
             
             return {
                 'poses': normalized_poses,
@@ -257,8 +259,10 @@ class IMUOnlyVIO(nn.Module):
                 'path_loss': path_loss,
                 's_t': self.s_t.detach(),
                 's_r': self.s_r.detach(),
+                's_p': self.s_p.detach(),
                 's_t_c': s_t_c.detach(),
-                's_r_c': s_r_c.detach()
+                's_r_c': s_r_c.detach(),
+                's_p_c': s_p_c.detach()
             }
         else:
             return {
@@ -331,19 +335,12 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_steps=0, gl
         else:
             predictions = model(batch_cuda, epoch=epoch, batch_idx=batch_idx)
         
-        # Compute loss
-        loss_dict = compute_loss(model, predictions, batch_cuda)
-        
-        if loss_dict is None:
+        # Check for NaN in losses
+        if torch.isnan(predictions['trans_loss_raw']) or torch.isnan(predictions['rot_loss_raw']):
             print(f"NaN loss detected at batch {batch_idx}, skipping...")
             continue
         
-        loss = loss_dict['total_loss']
-        
-        # Check for NaN
-        if torch.isnan(loss):
-            print(f"NaN loss detected at batch {batch_idx}, skipping...")
-            continue
+        loss = predictions['total_loss']
         
         # Backward pass
         for opt in optimizers:
@@ -385,8 +382,8 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_steps=0, gl
         num_batches += 1
         
         # Calculate uncertainty weights
-        exp_neg_s_t = torch.exp(-loss_dict['s_t_c']).item()
-        exp_neg_s_r = torch.exp(-loss_dict['s_r_c']).item()
+        exp_neg_s_t = torch.exp(-predictions['s_t_c']).item()
+        exp_neg_s_r = torch.exp(-predictions['s_r_c']).item()
         
         # Warn if weights are diverging
         if exp_neg_s_t > 1000 or exp_neg_s_r > 1000:
@@ -395,9 +392,9 @@ def train_epoch(model, dataloader, optimizers, device, epoch, warmup_steps=0, gl
         # Update progress bar
         progress_bar.set_postfix({
             'loss': f"{loss.item():.4f}",
-            'trans': f"{loss_dict['trans_loss'].item():.4f}",
-            'rot': f"{loss_dict['rot_loss'].item():.4f}",
-            'path': f"{loss_dict['path_loss']:.4f}",
+            'trans': f"{predictions['trans_loss_raw'].item():.4f}",
+            'rot': f"{predictions['rot_loss_raw'].item():.4f}",
+            'path': f"{predictions['path_loss']:.4f}",
             'w_t': f"{exp_neg_s_t:.1f}",
             'w_r': f"{exp_neg_s_r:.1f}"
         })
@@ -424,10 +421,8 @@ def validate(model, dataloader, device):
             # Forward pass
             predictions = model(batch_cuda, epoch=0)
             
-            # Compute loss
-            loss_dict = compute_loss(model, predictions, batch_cuda, is_training=False)
-            
-            if loss_dict is None:
+            # Check for NaN
+            if torch.isnan(predictions['trans_loss_raw']) or torch.isnan(predictions['rot_loss_raw']):
                 continue
             
             # Compute errors
@@ -451,7 +446,7 @@ def validate(model, dataloader, device):
             angle_error = 2 * torch.acos(dot_product)
             rot_error = torch.rad2deg(angle_error).mean()
             
-            total_loss += loss_dict['total_loss'].item()
+            total_loss += predictions['total_loss'].item()
             total_trans_error += trans_error.item()
             total_rot_error += rot_error.item()
             num_batches += 1
@@ -653,7 +648,7 @@ def main():
     for name, param in base_model.named_parameters():
         if 'backbone.Feature_net.inertial_encoder' in name:
             imu_params.append(param)
-        elif name in ['s_t', 's_r']:
+        elif name in ['s_t', 's_r', 's_p']:
             uncert_params.append(param)
         elif 'shared_layer' in name or 'trans_head' in name or 'rot_head' in name:
             trf_params.append(param)
