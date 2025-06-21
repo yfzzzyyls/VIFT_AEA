@@ -307,6 +307,19 @@ class PoseTransformer(nn.Module):
         pos_embedding = pos_embedding.unsqueeze(0)
         return pos_embedding
 
+    def generate_square_subsequent_mask(self, sz, device=None, dtype=None):
+        """Generate a square causal mask for sequence.
+        The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0).
+        """
+        if device is None:
+            device = torch.device("cpu")
+        if dtype is None:
+            dtype = torch.float32
+        return torch.triu(
+                torch.full((sz, sz), float("-inf"), dtype=dtype, device=device),
+                diagonal=1
+        )
+
     def forward(self, visual_inertial_features):
         seq_length = visual_inertial_features.size(1)
 
@@ -315,8 +328,8 @@ class PoseTransformer(nn.Module):
         visual_inertial_features += pos_embedding
 
         # Passing through the transformer encoder with the mask
-        #output = self.transformer_encoder(visual_inertial_features, mask=mask, is_causal=True)
-        output = self.transformer_encoder(visual_inertial_features, mask=None)
+        mask = self.generate_square_subsequent_mask(seq_length, visual_inertial_features.device)
+        output = self.transformer_encoder(visual_inertial_features, mask=mask, is_causal=True)
 
         # Pass the output through the fully connected layer
         output = self.fc(output)

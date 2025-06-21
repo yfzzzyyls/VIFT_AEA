@@ -157,7 +157,7 @@ class VIFTFromScratch(nn.Module):
         }
 
 
-def compute_loss(predictions, batch, alpha=10.0, beta=5.0):
+def compute_loss(predictions, batch, alpha=1.0, beta=5.0):
     """Compute loss with quaternion representation for multi-step prediction
     
     Args:
@@ -191,7 +191,7 @@ def compute_loss(predictions, batch, alpha=10.0, beta=5.0):
     
     # Combined loss with proper weighting
     # Translation needs higher weight as it's in meters
-    total_loss = alpha * trans_loss + beta * scale_loss + rot_loss
+    total_loss = alpha * trans_loss + beta * scale_loss + 100 * rot_loss
     
     return {
         'total_loss': total_loss,
@@ -424,7 +424,7 @@ def main():
         print(f"- Batch size per GPU: {args.batch_size}")
         print(f"- Total batch size: {args.batch_size * world_size}")
         print(f"- Learning rate: {args.lr}")
-        print(f"- Window stride: 10 (non-overlapping transitions)")
+        print(f"- Window stride: 1 (overlapping windows with causal masking)")
         print("="*60 + "\n")
     
     # Create data module
@@ -434,7 +434,7 @@ def main():
         batch_size=args.batch_size,  # Per GPU batch size
         num_workers=args.num_workers,
         sequence_length=11,
-        stride=10  # Ensures all transitions are covered (minimal frame overlap)
+        stride=1  # Overlapping windows for more training examples with causal masking
     )
     data_module.setup()
     
