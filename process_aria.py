@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Process all sequences from AriaEveryday dataset with real IMU data.
+Process first 20 sequences from AriaEveryday dataset with real IMU data.
 Combines shell script logic with processing script and adds IMU order assertions.
 """
 
@@ -20,7 +20,6 @@ import numpy as np
 import torch
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
-from typing import Tuple
 
 # Import Aria tools (required)
 from projectaria_tools.core import data_provider
@@ -639,88 +638,16 @@ def process_sequence_wrapper(args):
     return processor.process_sequence(seq_path, seq_id)
 
 
-def create_splits(output_path: Path, split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15)):
-    """Create train/val/test splits from processed Aria data."""
-    print("\n🔄 Creating train/val/test splits...")
-    
-    # Get all sequence directories
-    sequences = sorted([d for d in output_path.iterdir() 
-                       if d.is_dir() and d.name.isdigit()])
-    
-    num_sequences = len(sequences)
-    print(f"📊 Found {num_sequences} sequences for splitting")
-    
-    # Calculate split sizes
-    train_size = int(num_sequences * split_ratios[0])
-    val_size = int(num_sequences * split_ratios[1])
-    test_size = num_sequences - train_size - val_size
-    
-    # Split sequences
-    train_seqs = sequences[:train_size]
-    val_seqs = sequences[train_size:train_size + val_size]
-    test_seqs = sequences[train_size + val_size:]
-    
-    print(f"📈 Split distribution: {len(train_seqs)} train, {len(val_seqs)} val, {len(test_seqs)} test")
-    
-    # Create split directories
-    for split_name, split_seqs in [('train', train_seqs), ('val', val_seqs), ('test', test_seqs)]:
-        split_dir = output_path / split_name
-        
-        # Remove existing split directory if exists
-        if split_dir.exists():
-            if split_dir.is_symlink() or split_dir.is_dir():
-                shutil.rmtree(split_dir)
-        
-        # Create new split directory
-        split_dir.mkdir(exist_ok=True)
-        
-        # Create symbolic links to sequences
-        for seq in split_seqs:
-            link_path = split_dir / seq.name
-            # Create relative symlink
-            rel_path = Path('..') / seq.name
-            if link_path.exists():
-                link_path.unlink()
-            link_path.symlink_to(rel_path)
-        
-        print(f"✅ Created {split_name} split with {len(split_seqs)} sequences")
-    
-    # Save split information
-    split_info = {
-        'total_sequences': num_sequences,
-        'split_ratios': split_ratios,
-        'splits': {
-            'train': [s.name for s in train_seqs],
-            'val': [s.name for s in val_seqs],
-            'test': [s.name for s in test_seqs]
-        }
-    }
-    
-    with open(output_path / 'splits.json', 'w') as f:
-        json.dump(split_info, f, indent=2)
-    
-    print(f"💾 Saved split information to {output_path / 'splits.json'}")
-    return split_info
-
-
 def main():
-    parser = argparse.ArgumentParser(description='Process all AriaEveryday sequences with real IMU data')
+    parser = argparse.ArgumentParser(description='Process first 20 AriaEveryday sequences with real IMU data')
     parser.add_argument('--input-dir', type=str, default='/mnt/ssd_ext/incSeg-data/aria_everyday',
                        help='Path to raw AriaEveryday dataset')
-    parser.add_argument('--output-dir', type=str, default='/mnt/ssd_ext/incSeg-data/aria_processed',
+    parser.add_argument('--output-dir', type=str, default='./aria_processed',
                        help='Output directory')
     parser.add_argument('--max-frames', type=int, default=1000,
                        help='Max frames per sequence (default: 1000, evenly sampled)')
     parser.add_argument('--num-workers', type=int, default=4,
                        help='Number of parallel workers')
-    parser.add_argument('--max-sequences', type=int, default=-1,
-                       help='Maximum number of sequences to process (-1 for all)')
-    parser.add_argument('--train-ratio', type=float, default=0.7,
-                       help='Ratio of data for training (default: 0.7)')
-    parser.add_argument('--val-ratio', type=float, default=0.15,
-                       help='Ratio of data for validation (default: 0.15)')
-    parser.add_argument('--create-splits', action='store_true', default=True,
-                       help='Create train/val/test splits after processing (default: True)')
     
     args = parser.parse_args()
     
@@ -734,18 +661,14 @@ def main():
             if vrs_files:
                 all_sequences.append(d)
     
-    # Process all sequences or limit if specified
-    if args.max_sequences > 0:
-        sequences_to_process = all_sequences[:args.max_sequences]
-        print(f"🎯 Processing First {args.max_sequences} AriaEveryday Sequences")
-    else:
-        sequences_to_process = all_sequences
-        print(f"🎯 Processing All AriaEveryday Sequences")
+    # Take first 20 sequences
+    sequences_to_process = all_sequences[:20]
     
+    print(f"🎯 Processing First 20 AriaEveryday Sequences")
     print(f"📁 Input: {args.input_dir}")
     print(f"📁 Output: {args.output_dir}")
     print(f"🔢 Found {len(all_sequences)} total sequences")
-    print(f"🎬 Processing {len(sequences_to_process)} sequences")
+    print(f"🎬 Processing first 20 sequences")
     print("=" * 60)
     
     # Create output directory
@@ -834,30 +757,18 @@ def main():
     print(f"  - IMU extracted between consecutive frames")
     print(f"\n📁 Output saved to: {output_path}")
     
-    # Show some statistics about processed sequences
-    if sequences_to_process:
-        print(f"\n✅ First sequence: 000 - {sequence_mapping.get('000', 'N/A')}")
-        print(f"✅ Last sequence: {len(sequences_to_process)-1:03d} - {sequence_mapping.get(f'{len(sequences_to_process)-1:03d}', 'N/A')}")
-    
-    # Create train/val/test splits if requested
-    if args.create_splits and processed_count > 0:
-        test_ratio = 1.0 - args.train_ratio - args.val_ratio
-        split_ratios = (args.train_ratio, args.val_ratio, test_ratio)
-        split_info = create_splits(output_path, split_ratios)
-        
-        print(f"\n📊 Data Split Summary:")
-        print(f"  - Train: {len(split_info['splits']['train'])} sequences ({args.train_ratio*100:.0f}%)")
-        print(f"  - Val: {len(split_info['splits']['val'])} sequences ({args.val_ratio*100:.0f}%)")
-        print(f"  - Test: {len(split_info['splits']['test'])} sequences ({test_ratio*100:.0f}%)")
+    # Verify sequence 005 is included
+    if "005" in sequence_mapping:
+        print(f"\n✅ Sequence 005 ({sequence_mapping['005']}) is included in the processed data")
+    else:
+        raise ValueError("Sequence 005 is missing from the processed data!")
     
     print("\n🎯 Next steps:")
-    print("Train from scratch with all data:")
-    print("   torchrun --nproc_per_node=4 train_aria_from_scratch.py \\")
-    print("     --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \\")
-    print("     --opt-cnn sgd --opt-trf adamw --batch-size 20 --distributed --amp")
-    print("\nOr generate latent features for pre-trained approach:")
-    print("   python generate_all_pretrained_latents_between_frames.py \\")
-    print("     --processed-dir /mnt/ssd_ext/incSeg-data/aria_processed")
+    print("1. Run the debug script to verify IMU-image alignment:")
+    print("   python debug_imu_image_alignment.py")
+    print("2. Generate latent features:")
+    print("   python generate_all_pretrained_latents_between_frames.py")
+    print("3. Train the model with properly aligned data")
 
 
 if __name__ == "__main__":

@@ -7,13 +7,6 @@ import json
 import torch.nn.functional as F
 from scipy.spatial.transform import Rotation as R
 
-# -----------------------------------------------
-# Aria hardware specifications
-VIDEO_FPS = 20           # Aria RGB stream at 20 FPS
-IMU_RATE_HZ = 1000       # Aria high-rate IMU at 1kHz
-IMU_PER_FRAME = IMU_RATE_HZ // VIDEO_FPS   # 50 samples per video frame
-# -----------------------------------------------
-
 
 class AriaRawDataset(Dataset):
     """
@@ -59,7 +52,7 @@ class AriaRawDataset(Dataset):
         """Create sliding window samples from a sequence."""
         # Load data
         visual_data = torch.load(seq_dir / 'visual_data.pt')  # [N, 3, H, W]
-        imu_data = torch.load(seq_dir / 'imu_data.pt')        # [N-1, samples_per_interval, 6]
+        imu_data = torch.load(seq_dir / 'imu_data.pt')        # [N-1, 11, 6]
         
         with open(seq_dir / 'poses_quaternion.json', 'r') as f:
             poses_data = json.load(f)
@@ -82,7 +75,7 @@ class AriaRawDataset(Dataset):
             
             # Extract window data
             window_visual = visual_data[start_idx:end_idx]  # [11, 3, H, W]
-            window_imu = imu_data[start_idx:start_idx + self.sequence_length - 1]  # [seq_len-1, samples_per_interval, 6]
+            window_imu = imu_data[start_idx:start_idx + self.sequence_length - 1]  # [10, 11, 6]
             window_poses = poses_data[start_idx:end_idx]    # 11 poses
             
             # Store absolute poses for this window
@@ -107,66 +100,6 @@ class AriaRawDataset(Dataset):
     def __len__(self):
         return len(self.samples)
     
-    def _remove_gravity(self, imu_window, num_transitions=None, samples_per_interval=None):
-        """Remove gravity bias from IMU accelerometer data
-        
-        Args:
-            imu_window: [N,6] tensor with (ax,ay,az,gx,gy,gz)
-            num_transitions: Number of transitions (defaults to auto-detect)
-            samples_per_interval: Samples per interval (defaults to 10)
-        
-        Returns:
-            IMU tensor with gravity-bias removed from accelerometer
-        """
-        # Auto-detect parameters if not provided
-        if num_transitions is None or samples_per_interval is None:
-            # Try common configurations
-            total_samples = imu_window.shape[0]
-            if total_samples == 1000:  # 20 transitions * 50 samples (1kHz IMU, 20fps video)
-                num_transitions, samples_per_interval = 20, 50
-            elif total_samples == 500:  # 10 transitions * 50 samples
-                num_transitions, samples_per_interval = 10, 50
-            elif total_samples == 200:  # 20 transitions * 10 samples (legacy 100Hz)
-                num_transitions, samples_per_interval = 20, 10
-            elif total_samples == 220:  # 20 transitions * 11 samples (legacy)
-                num_transitions, samples_per_interval = 20, 11
-            elif total_samples == 100:  # 10 transitions * 10 samples (legacy)
-                num_transitions, samples_per_interval = 10, 10
-            elif total_samples == 110:  # 10 transitions * 11 samples (legacy)
-                num_transitions, samples_per_interval = 10, 11
-            else:
-                # Try to guess based on expected frame count
-                if total_samples % IMU_PER_FRAME == 0:
-                    num_transitions = total_samples // IMU_PER_FRAME
-                    samples_per_interval = IMU_PER_FRAME
-                else:
-                    print(f"WARNING: Cannot determine IMU configuration for {total_samples} samples")
-                    return imu_window
-        
-        # Validate
-        expected_samples = num_transitions * samples_per_interval
-        if imu_window.shape[0] != expected_samples:
-            print(f"WARNING: Expected {expected_samples} IMU samples, got {imu_window.shape[0]}")
-            return imu_window
-        
-        assert imu_window.shape[1] == 6, f"IMU must have 6 channels (ax,ay,az,gx,gy,gz), got {imu_window.shape[1]}"
-        
-        # Extract accelerometer data
-        accel = imu_window[:, :3]
-        
-        # Reshape to compute per-transition bias
-        accel_reshaped = accel.view(num_transitions, samples_per_interval, 3)
-        bias = accel_reshaped.mean(dim=1, keepdim=True)  # [num_transitions, 1, 3]
-        
-        # Expand bias for each sample in each transition
-        bias_expanded = bias.expand(num_transitions, samples_per_interval, 3).reshape(-1, 3)
-        
-        # Remove bias from accelerometer
-        accel_corrected = accel - bias_expanded
-        
-        # Concatenate back with gyroscope data
-        return torch.cat([accel_corrected, imu_window[:, 3:]], dim=-1)
-    
     def __getitem__(self, idx):
         sample = self.samples[idx]
         
@@ -177,52 +110,12 @@ class AriaRawDataset(Dataset):
         if visual.shape[-2:] != (256, 512):
             visual = F.interpolate(visual, size=(256, 512), mode='bilinear', align_corners=False)
                 
-        # Get IMU data - expected format varies based on sampling rate
-        # Standard: 50 samples per interval at 1kHz IMU, 20fps video
-        # For 21 frames (20 transitions): (21-1)*50 = 1000 samples
-        imu = sample['imu']  # Expected [20, samples_per_interval, 6]
+        # Get IMU data - already in correct format (11 samples per interval)
+        # VIFT expects 110 samples (11 per transition)
+        imu = sample['imu']  # [10, 11, 6]
         
-        # Check actual IMU data shape and adapt
-        num_transitions = len(sample['poses']) - 1  # Should be 20 for 21 frames
-        samples_per_interval = imu.shape[1] if imu.ndim == 3 else IMU_PER_FRAME
-        
-        # Reshape to flat array
-        imu_flat = imu.reshape(-1, 6)
-        
-        # Apply coordinate transformation to match expected convention
-        # Aria uses Y-up, but we may need Y-down for computer vision convention
-        # Transform: [ax, ay, az, gx, gy, gz] -> [ax, -ay, az, gx, -gy, gz]
-        imu_transformed = imu_flat.clone()
-        imu_transformed[:, 1] *= -1  # Flip Y acceleration
-        imu_transformed[:, 4] *= -1  # Flip Y gyroscope
-        imu_flat = imu_transformed
-        expected_samples = num_transitions * samples_per_interval
-        
-        # Validate we have the expected number of samples
-        assert imu_flat.shape[0] == expected_samples, f"Expected {expected_samples} IMU samples, got {imu_flat.shape[0]}"
-        
-        # Validate IMU data has expected format (ax, ay, az, gx, gy, gz)
-        # Gyroscope values should be reasonable (< 10 rad/s typical, < 20 rad/s extreme)
-        gyro_data = imu_flat[:, 3:]  # Extract gyroscope columns
-        gyro_magnitude = torch.norm(gyro_data, dim=-1)
-        if gyro_magnitude.max() > 20.0:
-            raise ValueError(f"Gyroscope values too large (max: {gyro_magnitude.max():.2f} rad/s). "
-                           f"Expected IMU format: (ax, ay, az, gx, gy, gz)")
-        
-        # Check accelerometer range (typical range is ±40 m/s² for Aria)
-        # Some sequences have outliers that spike up to 100+ m/s², log warning instead of failing
-        accel_data = imu_flat[:, :3]
-        accel_magnitude = torch.norm(accel_data, dim=-1)
-        if accel_magnitude.max() > 100.0:
-            import warnings
-            seq_name = sample.get('seq_name', f'index_{idx}')
-            warnings.warn(f"Large accelerometer values detected in {seq_name}: "
-                         f"max={accel_magnitude.max():.2f} m/s². These will be handled by runtime checks.")
-        
-        # Remove gravity bias from accelerometer for consistent preprocessing
-        # DISABLED: Gravity removal can amplify outliers. Let the model learn to handle gravity.
-        # imu_processed = self._remove_gravity(imu_flat, num_transitions, samples_per_interval)
-        imu_processed = imu_flat  # Use raw IMU data
+        # Reshape to [110, 6]
+        imu_110 = imu.reshape(-1, 6)  # [110, 6]
         
         # Get ground truth poses
         poses = sample['poses']
@@ -247,26 +140,18 @@ class AriaRawDataset(Dataset):
             # Transform to local frame of pose1
             dt_local = r1.inv().apply(dt_world)
             
-            # No coordinate swap needed - use consistent coordinate system
-            # The model will learn in Aria's native coordinate system
-            dt_local_swapped = dt_local  # Keep original coordinates
-            
-            # NOTE: Despite the name 'dt_local', this is actually being learned
-            # by the network as world-frame deltas. This is why integrate_trajectory
-            # should NOT apply rotation
-            
             # Relative rotation: q_rel = q1^(-1) * q2
             r_rel = r1.inv() * r2
             q_rel = r_rel.as_quat()  # Returns in xyzw format
             
-            gt_poses.append(np.concatenate([dt_local_swapped, q_rel]))  # [7]
+            gt_poses.append(np.concatenate([dt_local, q_rel]))  # [7]
         
-        gt_poses = torch.tensor(np.array(gt_poses), dtype=torch.float32)  # [20, 7]
+        gt_poses = torch.tensor(np.array(gt_poses), dtype=torch.float32)  # [10, 7]
         
         return {
-            'images': visual,        # [seq_len, 3, 256, 512]
-            'imu': imu_processed,   # [num_transitions * samples_per_interval, 6]
-            'gt_poses': gt_poses,   # [num_transitions, 7] (3 trans + 4 quat)
+            'images': visual,        # [11, 3, 256, 512]
+            'imu': imu_110,         # [110, 6]
+            'gt_poses': gt_poses,   # [10, 7] (3 trans + 4 quat)
             'seq_name': sample['seq_name'],
             'start_idx': sample['start_idx']
         }

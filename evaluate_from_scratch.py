@@ -30,7 +30,34 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from train_aria_from_scratch import VIFTFromScratch
 from src.data.components.aria_raw_dataset import AriaRawDataset
-# Removed remove_gravity import - always use raw IMU
+
+
+def remove_gravity(imu_window: torch.Tensor) -> torch.Tensor:
+    """Remove gravity bias from IMU accelerometer data
+    
+    Args:
+        imu_window: [B,110,6] tensor with (ax,ay,az,gx,gy,gz)
+    
+    Returns:
+        IMU tensor with gravity-bias removed from accelerometer
+    """
+    # Extract accelerometer data
+    accel = imu_window[..., :3]  # [B, 110, 3]
+    
+    # Reshape to compute per-frame bias (11 frames x 10 IMU samples per frame)
+    # Average across the 10 samples within each frame
+    # Use contiguous() to ensure safe reshape on potentially non-contiguous tensors
+    accel_reshaped = accel.contiguous().view(accel.shape[0], 11, 10, 3)
+    bias = accel_reshaped.mean(dim=2, keepdim=True)  # [B, 11, 1, 3]
+    
+    # Expand bias for each of the 10 samples in each frame (no memory copy)
+    bias_expanded = bias.expand(-1, 11, 10, -1).contiguous().view(accel.shape)
+    
+    # Remove bias from accelerometer
+    accel_corrected = accel - bias_expanded
+    
+    # Concatenate back with gyroscope data
+    return torch.cat([accel_corrected, imu_window[..., 3:]], dim=-1)
 
 
 def load_checkpoint(checkpoint_path, device):
@@ -48,18 +75,8 @@ def load_checkpoint(checkpoint_path, device):
         else:
             new_state_dict[k] = v
     
-    # Handle missing keys for backward compatibility
-    model_state = model.state_dict()
-    for key in model_state.keys():
-        if key not in new_state_dict:
-            print(f"Warning: Missing key '{key}' in checkpoint, using default initialization")
-            new_state_dict[key] = model_state[key]
-    
     model.load_state_dict(new_state_dict)
     model.eval()
-    
-    # Disable anomaly detection for performance
-    # torch.autograd.set_detect_anomaly(True)
     
     print(f"\n📊 Model Information:")
     print(f"   Loaded checkpoint from epoch {checkpoint['epoch']}")
@@ -72,40 +89,6 @@ def load_checkpoint(checkpoint_path, device):
             print(f"   Val rotation error: {metrics['rot_error']:.2f}°")
     
     return model
-
-
-def sim3_alignment(pred_translations, gt_translations):
-    """Apply Sim(3) alignment to find optimal scale between predicted and GT translations
-    
-    Args:
-        pred_translations: Predicted translations [N, 3]
-        gt_translations: Ground truth translations [N, 3]
-    
-    Returns:
-        scale: Optimal scale factor
-        aligned_translations: Scaled predicted translations
-    """
-    # Compute centroids
-    pred_centroid = np.mean(pred_translations, axis=0)
-    gt_centroid = np.mean(gt_translations, axis=0)
-    
-    # Center the translations
-    pred_centered = pred_translations - pred_centroid
-    gt_centered = gt_translations - gt_centroid
-    
-    # Compute scale using Frobenius norm ratio
-    pred_norm = np.linalg.norm(pred_centered, 'fro')
-    gt_norm = np.linalg.norm(gt_centered, 'fro')
-    
-    if pred_norm > 1e-8:
-        scale = gt_norm / pred_norm
-    else:
-        scale = 1.0
-    
-    # Apply scale
-    aligned_translations = pred_centered * scale + gt_centroid
-    
-    return scale, aligned_translations
 
 
 def compute_scale_drift(pred_poses, gt_poses):
@@ -125,11 +108,10 @@ def compute_scale_drift(pred_poses, gt_poses):
         pred_trans_norm = np.linalg.norm(pred_poses[i, :3])
         gt_trans_norm = np.linalg.norm(gt_poses[i, :3])
         
-        # Clamp denominator to avoid explosion on tiny steps (<1cm)
-        # Matches TUM/KITTI evaluation scripts
-        denominator = max(gt_trans_norm, 0.01)  # 1cm minimum
-        scale_error = 100.0 * abs(pred_trans_norm - gt_trans_norm) / denominator
-        scale_errors.append(scale_error)
+        # Avoid division by zero
+        if gt_trans_norm > 1e-6:
+            scale_error = 100.0 * abs(pred_trans_norm - gt_trans_norm) / gt_trans_norm
+            scale_errors.append(scale_error)
     
     return np.array(scale_errors)
 
@@ -169,19 +151,21 @@ def integrate_trajectory(relative_poses, initial_pose=None):
         if np.any(np.isnan(rel_quat)) or np.linalg.norm(rel_quat) < 0.5:
             rel_quat = np.array([0, 0, 0, 1])
         
+        # Fix quaternion double-cover ambiguity
+        # Ensure we take the shortest path by checking dot product
+        current_quat = current_rotation.as_quat()
+        dot = np.dot(rel_quat, current_quat)
+        # Handle both negative dot product and near-zero (≈180°) cases
+        if dot < 0.0 or np.isclose(dot, 0.0, atol=1e-6):
+            rel_quat = -rel_quat  # Flip sign to maintain shortest-arc convention
+        # Note: rel_quat is already normalized above, no need to normalize again
+        
         rel_rotation = R.from_quat(rel_quat)
         
         # Apply transformation
-        # rel_trans comes from the **body/device frame**, so we must rotate
-        # it into the current world frame before accumulating.
-        world_trans = current_rotation.apply(rel_trans)  # body → world
+        world_trans = current_rotation.apply(rel_trans)
         current_position += world_trans
         current_rotation = current_rotation * rel_rotation
-        
-        # Re-normalize quaternion to prevent numerical drift
-        current_quat = current_rotation.as_quat()
-        current_quat = current_quat / (np.linalg.norm(current_quat) + 1e-8)
-        current_rotation = R.from_quat(current_quat)
         
         absolute_positions[i + 1] = current_position
         absolute_rotations[i + 1] = current_rotation.as_quat()
@@ -267,189 +251,43 @@ def compute_rpe(pred_poses, gt_poses, delta=1):
     return rpe_stats
 
 
-def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_sim3_alignment=False, scale_correction=1.0):
-    """Evaluate model on test data
-    
-    Args:
-        model: The model to evaluate
-        test_loader: DataLoader for test data
-        device: torch device
-        output_dir: Directory to save results
-        test_sequences: List of test sequence IDs
-        use_sim3_alignment: If True, apply Sim(3) alignment to predictions
-        remove_gravity: If True, remove gravity from IMU data before inference
-        scale_correction: Global scale correction factor to apply to predictions
-    """
+def evaluate_model(model, test_loader, device, output_dir, test_sequences):
+    """Evaluate model on test data"""
     os.makedirs(output_dir, exist_ok=True)
     
     all_results = []
     sequence_results = {seq_id: [] for seq_id in test_sequences}
     
-    # For averaging overlapping predictions with stride=1
-    sequence_predictions = {seq_id: {} for seq_id in test_sequences}  # frame_idx -> list of predictions
-    
-    # Track cumulative scale per sequence
-    cumulative_scales = {}
-    window_counters = {}
-    scale_history = {seq_id: [] for seq_id in test_sequences}  # Track scale over time
-    
-    print("\n🔍 Evaluating on test sequences with overlapping window averaging...")
-    print(f"   Window size: 21 frames, stride: 1 (20 frame overlap)")
-    if scale_correction != 1.0:
-        print(f"   Applying global scale correction: {scale_correction:.2f}x")
-    if use_sim3_alignment:
-        print("   Using Sim(3) alignment for scale correction")
-    # Always use raw IMU to match training
+    print("\n🔍 Evaluating on test sequences...")
     
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(test_loader, desc="Processing batches")):
             # Move to device
             images = batch['images'].to(device)
             imu = batch['imu'].to(device)
-            
-            # Always use raw IMU to match training
-            # No gravity removal - model was trained with raw IMU
-            
+            # NOTE: Commenting out gravity removal to match training preprocessing
+            # imu = remove_gravity(imu)
             gt_poses = batch['gt_poses'].to(device)
             
             # Get predictions
-            predictions = model({'images': images, 'imu': imu, 'gt_poses': gt_poses})  # {'poses': [B, 20, 7]}
-            pred_poses_batch = predictions['poses']  # [B, 20, 7]
+            predictions = model({'images': images, 'imu': imu})  # {'poses': [B, 10, 7]}
+            pred_poses_batch = predictions['poses']  # [B, 10, 7]
             
             # Process each sample in batch
             batch_size = pred_poses_batch.shape[0]
             for i in range(batch_size):
-                # For multi-step prediction, we predict all 20 transitions
-                pred_poses = pred_poses_batch[i].cpu().numpy()  # [20, 7]
-                gt_poses_sample = gt_poses[i].cpu().numpy()  # [20, 7]
-                
-                # Apply global scale correction factor (model outputs are ~2.5x over-scaled)
-                pred_poses[:, :3] *= scale_correction
-                
-                # No coordinate swap needed - coordinates match between Aria and expected convention
-                # Only Y sign flip is applied to IMU data during training
-                
-                # Frame convention debug (only for first batch)
-                if batch_idx == 0 and i == 0:
-                    print("\n" + "="*50)
-                    print("FRAME CONVENTION MICRO-EXPERIMENT")
-                    print("="*50)
-                    
-                    # Test different axis transformations
-                    transforms = {
-                        'Original': np.eye(3),
-                        'Flip X': np.diag([-1, 1, 1]),
-                        'Flip Y': np.diag([1, -1, 1]),
-                        'Flip Z': np.diag([1, 1, -1]),
-                        'Swap XY': np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]]),
-                        'Swap XZ': np.array([[0, 0, 1], [0, 1, 0], [1, 0, 0]]),
-                        'Swap YZ': np.array([[1, 0, 0], [0, 0, 1], [0, 1, 0]]),
-                    }
-                    
-                    for name, T in transforms.items():
-                        angles = []
-                        for j in range(20):
-                            pred_t = pred_poses[j, :3].copy()
-                            gt_t = gt_poses_sample[j, :3]
-                            
-                            # Apply transform
-                            pred_t_transformed = T @ pred_t
-                            
-                            pred_norm = np.linalg.norm(pred_t_transformed)
-                            gt_norm = np.linalg.norm(gt_t)
-                            
-                            if pred_norm > 1e-6 and gt_norm > 1e-6:
-                                cos_angle = np.dot(pred_t_transformed, gt_t) / (pred_norm * gt_norm)
-                                angle = np.arccos(np.clip(cos_angle, -1, 1)) * 180 / np.pi
-                                angles.append(angle)
-                        
-                        mean_angle = np.mean(angles)
-                        print(f"{name:10s}: mean angle = {mean_angle:6.1f}°")
-                    
-                    print("="*50 + "\n")
-                
-                # Ensure quaternion sign continuity for predictions to avoid 180° jumps
-                for k in range(1, len(pred_poses)):
-                    if np.dot(pred_poses[k, 3:], pred_poses[k-1, 3:]) < 0:
-                        pred_poses[k, 3:] *= -1
-                
-                # Apply Sim(3) alignment if requested
-                if use_sim3_alignment:
-                    # Extract translations
-                    pred_trans = pred_poses[:, :3]
-                    gt_trans = gt_poses_sample[:, :3]
-                    
-                    # Find optimal scale
-                    scale, aligned_trans = sim3_alignment(pred_trans, gt_trans)
-                    
-                    # Apply scale to predictions
-                    pred_poses[:, :3] = aligned_trans
-                else:
-                    # No scale clamping - let the model's learned scale show through
-                    pass
-                
-                # Initialize or update cumulative scale tracking
-                seq_id = batch['seq_name'][i]
-                if seq_id not in window_counters:
-                    window_counters[seq_id] = 0
-                
-                window_idx = window_counters[seq_id]
-                
-                # ─────────────────────────────────────────────────────────────
-                # QUICK VISUAL / CSV CHECK (always on – no debug flag needed)
-                # ─────────────────────────────────────────────────────────────
-                # 1) print the 20 raw relative translations (m) for this window
-                # Commented out to reduce output during evaluation
-                # if window_idx < 5:  # Only print first 5 windows per sequence
-                #     np.set_printoptions(precision=4, suppress=True)
-                #     print(f"\n[Δt window {window_idx:03d} | Seq {seq_id}] "
-                #           f"pred (m):\n{pred_poses[:, :3]}")
-                #     print(f"[Δt window {window_idx:03d} | Seq {seq_id}] "
-                #           f"gt   (m):\n{gt_poses_sample[:, :3]}\n")
-                
-                # 2) dump the first 5 s of relative motion once per sequence
-                #    (20 Hz → 100 steps; include *all* 7-D pose rows)
-                if window_idx == 0:                         # only first window of the seq
-                    first_5s = min(100, pred_poses.shape[0])
-                    csv_path = os.path.join(
-                        output_dir, f"rel_pose_first5s_seq{seq_id}.csv")
-                    pd.DataFrame(
-                        np.hstack([pred_poses[:first_5s],
-                                   gt_poses_sample[:first_5s]]),
-                        columns=[
-                            'pred_x','pred_y','pred_z','pred_qx','pred_qy','pred_qz','pred_qw',
-                            'gt_x',  'gt_y',  'gt_z',  'gt_qx', 'gt_qy', 'gt_qz', 'gt_qw'
-                        ]).to_csv(csv_path, index=False)
-                    print(f"[INFO] wrote first-5-s relative poses to {csv_path}")
-                # ─────────────────────────────────────────────────────────────
+                # For multi-step prediction, we predict all 10 transitions
+                pred_poses = pred_poses_batch[i].cpu().numpy()  # [10, 7]
+                gt_poses_sample = gt_poses[i].cpu().numpy()  # [10, 7]
                 
                 # Compute errors for all transitions
                 trans_errors = []
                 rot_errors = []
                 
-                # Track accumulated rotation for world frame conversion
-                # Start with identity since predictions are relative to first frame
-                accumulated_rotation = R.from_quat([0, 0, 0, 1])
-                
-                for j in range(20):
-                    # Get translation vectors
-                    pred_t = pred_poses[j, :3]
-                    gt_t = gt_poses_sample[j, :3]
-                    
-                    # Debug prints disabled for cleaner output
-                    # Uncomment the following block if you need detailed debugging:
-                    # if window_idx < 30 and j == 0:
-                    #     print(f"[DBG] Seq {seq_id} win {window_idx:03d}  Δt_pred={pred_t}  Δt_gt={gt_t}")
-                    #     ...
-                    pass
-                    
-                    # Both pred and gt translations are in body frame - compare directly
-                    trans_error = np.linalg.norm(pred_t - gt_t)
+                for j in range(10):
+                    # Translation error
+                    trans_error = np.linalg.norm(pred_poses[j, :3] - gt_poses_sample[j, :3])
                     trans_errors.append(trans_error)
-                    
-                    # Update accumulated rotation for next step using PREDICTED quaternion
-                    # This ensures frame consistency - we should use pred_poses for integration
-                    accumulated_rotation = accumulated_rotation * R.from_quat(pred_poses[j, 3:])
                     
                     # Rotation error
                     pred_q = pred_poses[j, 3:]
@@ -467,25 +305,11 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                 # Compute scale drift
                 scale_errors = compute_scale_drift(pred_poses, gt_poses_sample)
                 
-                # Calculate mean translation distances for this window
-                pred_dist = np.mean(np.linalg.norm(pred_poses[:, :3], axis=1)) * 100  # to cm
-                gt_dist = np.mean(np.linalg.norm(gt_poses_sample[:, :3], axis=1)) * 100  # to cm
-                scale_factor = pred_dist / (gt_dist + 1e-8)
-                
-                # Track scale history for analysis
-                if seq_id in scale_history:
-                    scale_history[seq_id].append(scale_factor)
-                
-                window_counters[seq_id] += 1
-                
-                # Remove verbose window prints - they clutter the output
-                # Statistics are already captured in scale_history and final summaries
-                
                 result = {
-                    'pred_poses': pred_poses,  # [20, 7]
-                    'gt_poses': gt_poses_sample,  # [20, 7]
-                    'trans_errors': np.array(trans_errors),  # [20]
-                    'rot_errors': np.array(rot_errors),  # [20]
+                    'pred_poses': pred_poses,  # [10, 7]
+                    'gt_poses': gt_poses_sample,  # [10, 7]
+                    'trans_errors': np.array(trans_errors),  # [10]
+                    'rot_errors': np.array(rot_errors),  # [10]
                     'scale_errors': scale_errors,  # Scale drift percentages
                     'seq_name': batch['seq_name'][i],
                     'start_idx': batch['start_idx'][i].item()
@@ -496,87 +320,11 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                 seq_id = batch['seq_name'][i]
                 if seq_id in sequence_results:
                     sequence_results[seq_id].append(result)
-                    
-                # Store predictions by frame index for averaging
-                start_idx = batch['start_idx'][i].item()
-                
-                # Ensure sequence is in sequence_predictions dictionary
-                if seq_id not in sequence_predictions:
-                    sequence_predictions[seq_id] = {}
-                    print(f"Note: Found new sequence {seq_id} during evaluation")
-                
-                for j in range(20):  # 20 transitions in each window
-                    frame_idx = start_idx + j
-                    if frame_idx not in sequence_predictions[seq_id]:
-                        sequence_predictions[seq_id][frame_idx] = []
-                    sequence_predictions[seq_id][frame_idx].append({
-                        'pred_pose': pred_poses[j],  # [7]
-                        'gt_pose': gt_poses_sample[j]  # [7]
-                    })
     
-    # Average overlapping predictions
-    print("\n📊 Averaging overlapping predictions...")
-    averaged_sequence_results = {}
-    
-    for seq_id in test_sequences:
-        if seq_id not in sequence_predictions or not sequence_predictions[seq_id]:
-            continue
-            
-        # Sort frame indices
-        frame_indices = sorted(sequence_predictions[seq_id].keys())
-        
-        averaged_predictions = []
-        averaged_gt = []
-        
-        for frame_idx in frame_indices:
-            predictions_at_frame = sequence_predictions[seq_id][frame_idx]
-            
-            # Average predictions at this frame
-            pred_poses = np.array([p['pred_pose'] for p in predictions_at_frame])  # [N, 7]
-            gt_poses = np.array([p['gt_pose'] for p in predictions_at_frame])  # [N, 7]
-            
-            # Average translations
-            avg_trans = np.mean(pred_poses[:, :3], axis=0)
-            
-            # Average quaternions (using quaternion averaging)
-            # First ensure all quaternions have the same sign
-            quats = pred_poses[:, 3:].copy()
-            for i in range(1, len(quats)):
-                if np.dot(quats[i], quats[0]) < 0:
-                    quats[i] *= -1
-            
-            # Simple quaternion averaging (works well for small variations)
-            avg_quat = np.mean(quats, axis=0)
-            avg_quat = avg_quat / (np.linalg.norm(avg_quat) + 1e-8)
-            
-            # Combine averaged pose
-            avg_pose = np.concatenate([avg_trans, avg_quat])
-            averaged_predictions.append(avg_pose)
-            
-            # Ground truth should be the same for all overlapping windows
-            averaged_gt.append(gt_poses[0])  # All GT should be identical
-        
-        averaged_sequence_results[seq_id] = {
-            'pred_poses': np.array(averaged_predictions),  # [N_frames, 7]
-            'gt_poses': np.array(averaged_gt),  # [N_frames, 7]
-            'frame_indices': frame_indices
-        }
-        
-        print(f"  Sequence {seq_id}: {len(averaged_predictions)} averaged predictions from {len(frame_indices)} frames")
-    
-    # Compute overall statistics (using original non-averaged results for consistency)
+    # Compute overall statistics
     all_trans_errors = np.concatenate([r['trans_errors'] for r in all_results])
     all_rot_errors = np.concatenate([r['rot_errors'] for r in all_results])
     all_scale_errors = np.concatenate([r['scale_errors'] for r in all_results if len(r['scale_errors']) > 0])
-    
-    # ---------- GLOBAL DIAGNOSTICS ----------
-    total_gt_len = sum(np.linalg.norm(r['gt_poses'][:, :3], axis=1).sum()
-                       for r in all_results)
-    total_pred_len = sum(np.linalg.norm(r['pred_poses'][:, :3], axis=1).sum()
-                         for r in all_results)
-    print(f"\n🛣️  Path-length ratio (pred / GT): {total_pred_len/(total_gt_len+1e-8):.3f}")
-    print(f"🔍 Global scale-drift  mean={np.mean(all_scale_errors):.2f}%  "
-          f"max={np.max(all_scale_errors):.2f}%")
     
     print("\n" + "="*50)
     print("📊 EVALUATION RESULTS")
@@ -611,98 +359,75 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
     fps = 20  # Aria dataset is 20 FPS
     
     for seq_id in test_sequences:
-        if seq_id not in averaged_sequence_results:
-            print(f"\nSequence {seq_id}: Not found in averaged results")
+        if seq_id not in sequence_results or not sequence_results[seq_id]:
             continue
         
-        avg_results = averaged_sequence_results[seq_id]
-        pred_poses_avg = avg_results['pred_poses']  # [N_frames, 7]
-        gt_poses_avg = avg_results['gt_poses']  # [N_frames, 7]
-        frame_indices = avg_results['frame_indices']
+        # Sort by start index to maintain chronological order
+        seq_results = sorted(sequence_results[seq_id], key=lambda x: x['start_idx'])
         
         print(f"\nSequence {seq_id}:")
-        print(f"  Total averaged predictions: {len(pred_poses_avg)}")
-        print(f"  Frame range: {frame_indices[0]} to {frame_indices[-1]}")
+        print(f"  Total windows: {len(seq_results)}")
+        
+        # No need to sample since we already use stride=10 in the dataset
+        seq_results_sampled = seq_results
+        print(f"  Non-overlapping windows: {len(seq_results_sampled)}")
         
         # Load raw ground truth poses from file
         seq_dir = test_loader.dataset.data_dir / seq_id
         with open(seq_dir / 'poses_quaternion.json', 'r') as f:
             raw_poses = json.load(f)
         
-        # Get ground truth absolute poses for all frames in the sequence
-        num_frames = len(raw_poses)
-        gt_positions_all = np.array([pose['translation'] for pose in raw_poses])
-        gt_quaternions_all = np.array([pose['quaternion'] for pose in raw_poses])
+        # Get ground truth absolute poses for the frames we're evaluating
+        # We need to track which frames are covered by our predictions
+        all_frame_indices = []
+        for r in seq_results_sampled:
+            start_idx = r['start_idx']
+            # Each window covers 11 frames (10 transitions)
+            frame_indices = list(range(start_idx, start_idx + 11))
+            all_frame_indices.extend(frame_indices)
         
-        # Make ground truth quaternion stream sign-continuous
-        for k in range(1, len(gt_quaternions_all)):
-            if np.dot(gt_quaternions_all[k], gt_quaternions_all[k-1]) < 0:
-                gt_quaternions_all[k] *= -1
+        # Remove duplicates and sort
+        all_frame_indices = sorted(list(set(all_frame_indices)))
         
-        # Initial pose from ground truth (first frame with predictions)
-        initial_frame_idx = frame_indices[0]
-        initial_pose = np.concatenate([
-            raw_poses[initial_frame_idx]['translation'],
-            raw_poses[initial_frame_idx]['quaternion']
-        ])
+        # Extract ground truth absolute poses
+        gt_positions_full = np.array([raw_poses[i]['translation'] for i in all_frame_indices])
+        gt_quaternions = np.array([raw_poses[i]['quaternion'] for i in all_frame_indices])
         
-        # Make averaged predictions quaternion stream sign-continuous
-        for k in range(1, len(pred_poses_avg)):
-            if np.dot(pred_poses_avg[k, 3:], pred_poses_avg[k-1, 3:]) < 0:
-                pred_poses_avg[k, 3:] *= -1
+        # Concatenate predictions
+        all_pred = np.concatenate([r['pred_poses'] for r in seq_results_sampled], axis=0)
         
-        # Integrate averaged predictions
-        pred_positions_full, pred_rotations_full = integrate_trajectory(pred_poses_avg, initial_pose)
+        # Integrate predictions starting from first ground truth pose
+        initial_pose = np.concatenate([gt_positions_full[0], gt_quaternions[0]])
+        pred_positions_full, pred_rotations_full = integrate_trajectory(all_pred, initial_pose)
         
-        # Get corresponding ground truth for the predicted frames
-        # +1 because we include the initial pose
-        gt_frame_indices = [initial_frame_idx] + [initial_frame_idx + i + 1 for i in range(len(pred_poses_avg))]
-        gt_positions_full = gt_positions_all[gt_frame_indices]
-        gt_rotations_full = gt_quaternions_all[gt_frame_indices]
-        
-        # Ensure arrays have matching shapes for APE computation
-        min_len = min(len(pred_positions_full), len(gt_positions_full))
-        pred_positions_aligned = pred_positions_full[:min_len]
-        gt_positions_aligned = gt_positions_full[:min_len]
+        # For ground truth rotations, use the raw quaternions
+        gt_rotations_full = gt_quaternions
         
         # Compute APE for this sequence
-        ape_stats = compute_ape(pred_positions_aligned, gt_positions_aligned)
+        ape_stats = compute_ape(pred_positions_full[1:], gt_positions_full[:len(pred_positions_full)-1])
         print(f"  APE - Mean: {ape_stats['mean']*100:.2f}cm, RMSE: {ape_stats['rmse']*100:.2f}cm")
         
-        # Compute RPE for this sequence using averaged predictions
-        rpe_stats = compute_rpe(pred_poses_avg, gt_poses_avg)
+        # Compute RPE for this sequence
+        rpe_stats = compute_rpe(all_pred, np.concatenate([r['gt_poses'] for r in seq_results_sampled], axis=0))
         print(f"  RPE - Trans: {rpe_stats['trans']['mean']*100:.2f}cm, Rot: {rpe_stats['rot']['mean']:.2f}°")
         
-        # Sequence-level path length diagnostic
-        seq_gt_len = np.sum(np.linalg.norm(np.diff(gt_positions_full, axis=0), axis=1))
-        seq_pred_len = np.sum(np.linalg.norm(np.diff(pred_positions_full, axis=0), axis=1))
-        # Compute scale errors for averaged predictions
-        seq_scale_errors = compute_scale_drift(pred_poses_avg, gt_poses_avg)
-        print(f"  🛤️  Path-length ratio: {seq_pred_len/(seq_gt_len+1e-8):.3f}")
-        print(f"  📏 Seq scale-drift  mean={np.mean(seq_scale_errors):.2f}%  "
-              f"max={np.max(seq_scale_errors):.2f}%")
-        
         # Save trajectories to CSV with global frame indices
-        save_trajectory_csv(pred_positions_aligned, gt_positions_aligned, 
-                           pred_rotations_full[:min_len], gt_rotations_full[:min_len],
-                           seq_id, output_dir, frame_offset=initial_frame_idx)
-        
-        # Save all relative poses for the entire sequence
-        save_relative_poses_csv(pred_poses_avg, gt_poses_avg,
-                               seq_id, output_dir)
+        save_trajectory_csv(pred_positions_full, gt_positions_full, 
+                           pred_rotations_full, gt_rotations_full,
+                           seq_id, output_dir, frame_offset=all_frame_indices[0])
         
         # Plot full trajectory
         plot_trajectory_3d(
-            pred_positions_aligned,
-            gt_positions_aligned,
+            pred_positions_full,
+            gt_positions_full,
             seq_id,
             os.path.join(output_dir, f'trajectory_3d_{seq_id}.png')
         )
         
         # Create interactive HTML plot
         create_interactive_html_plot(
-            pred_positions_aligned,
-            gt_positions_aligned,
+            pred_positions_full,
+            gt_positions_full,
             seq_id,
             os.path.join(output_dir, f'trajectory_3d_{seq_id}_interactive.html')
         )
@@ -716,10 +441,10 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
         )
         
         # Generate 1-second plots
-        frames_1s = min(fps, len(pred_poses_avg))
+        frames_1s = min(fps, len(all_pred))
         if frames_1s > 0:
             # For predictions, integrate only the first second
-            pred_positions_1s, pred_rotations_1s = integrate_trajectory(pred_poses_avg[:frames_1s], initial_pose)
+            pred_positions_1s, pred_rotations_1s = integrate_trajectory(all_pred[:frames_1s], initial_pose)
             
             # For ground truth, use raw poses for first second
             gt_positions_1s = gt_positions_full[:frames_1s + 1]  # +1 because we need initial pose too
@@ -742,10 +467,10 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
             )
         
         # Generate 5-second plots
-        frames_5s = min(5 * fps, len(pred_poses_avg))
+        frames_5s = min(5 * fps, len(all_pred))
         if frames_5s > 0:
             # For predictions, integrate only the first 5 seconds
-            pred_positions_5s, pred_rotations_5s = integrate_trajectory(pred_poses_avg[:frames_5s], initial_pose)
+            pred_positions_5s, pred_rotations_5s = integrate_trajectory(all_pred[:frames_5s], initial_pose)
             
             # For ground truth, use raw poses for first 5 seconds
             gt_positions_5s = gt_positions_full[:frames_5s + 1]  # +1 because we need initial pose too
@@ -767,73 +492,8 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
                 time_window='5s'
             )
     
-    # Print summary of averaging benefit
-    print("\n" + "="*50)
-    print("📊 AVERAGING SUMMARY")
-    print("="*50)
-    total_predictions = sum(len(avg_results['pred_poses']) for avg_results in averaged_sequence_results.values())
-    total_windows = len(all_results)
-    print(f"Total windows processed: {total_windows}")
-    print(f"Total unique predictions after averaging: {total_predictions}")
-    print(f"Average overlap per prediction: {total_windows * 20 / total_predictions:.1f}x")
-    print("="*50)
-    
     # Save numerical results
     save_evaluation_metrics(all_trans_errors, all_rot_errors, all_scale_errors, output_dir)
-    
-    # Plot scale convergence
-    if scale_history and any(len(scales) > 0 for scales in scale_history.values()):
-        plot_scale_convergence(scale_history, output_dir)
-    
-    # Perform sanity checks
-    print("\n" + "="*50)
-    print("📋 SANITY CHECKS")
-    print("="*50)
-    
-    # Check 1: Scale convergence
-    scale_ratio = total_pred_len / (total_gt_len + 1e-8)
-    print(f"\n✓ Scale Check:")
-    print(f"  Total pred/gt length ratio: {scale_ratio:.3f}")
-    if 0.95 <= scale_ratio <= 1.05:
-        print("  ✅ PASS: Scale within 5% of ground truth")
-    else:
-        print(f"  ❌ FAIL: Scale off by {abs(1.0 - scale_ratio)*100:.1f}%")
-    
-    # Check 2: Mean translation angle
-    if batch_idx > 0:  # Only if we have data
-        print(f"\n✓ Coordinate Frame Check:")
-        print(f"  Mean angle between pred and gt: <printed above>")
-        print(f"  ✅ PASS if < 5° (after Y/Z swap fix)")
-    
-    # Check 3: First 5s median error
-    first_5s_errors = all_trans_errors[:100] if len(all_trans_errors) > 100 else all_trans_errors
-    median_5s_error = np.median(first_5s_errors) * 100
-    print(f"\n✓ First 5s Accuracy Check:")
-    print(f"  Median translation error: {median_5s_error:.2f} cm")
-    if median_5s_error < 3.0:
-        print("  ✅ PASS: Median error < 3 cm")
-    else:
-        print(f"  ❌ FAIL: Median error too high")
-    
-    # Note: Uncertainty weights check would require passing checkpoint data
-    # For now, this check is informational only
-    
-    # Scale analysis summary
-    print("\n" + "="*50)
-    print("📊 SCALE ANALYSIS BY SEQUENCE")
-    print("="*50)
-    for seq_id in test_sequences:
-        if seq_id in scale_history and scale_history[seq_id]:
-            scales = scale_history[seq_id]
-            print(f"\nSequence {seq_id}:")
-            print(f"  Windows analyzed: {len(scales)}")
-            print(f"  Mean scale: {np.mean(scales):.3f}")
-            print(f"  Std scale: {np.std(scales):.3f}")
-            print(f"  Range: [{np.min(scales):.3f}, {np.max(scales):.3f}]")
-            
-            # Check if problematic
-            if np.mean(scales) > 1.15 or np.mean(scales) < 0.85:
-                print(f"  ⚠️  SCALE DRIFT DETECTED - Mean significantly off from 1.0")
     
     print(f"\n📊 Generated outputs:")
     for seq_id in test_sequences:
@@ -843,8 +503,6 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences, use_s
             print(f"   - trajectory_{seq_id}_pred.csv (predictions with errors)")
             print(f"   - trajectory_3d_{seq_id}.png, trajectory_3d_{seq_id}_1s.png, trajectory_3d_{seq_id}_5s.png")
             print(f"   - rotation_3d_{seq_id}.png, rotation_3d_{seq_id}_1s.png, rotation_3d_{seq_id}_5s.png")
-            print(f"   - relative_poses_{seq_id}_gt.csv (ground truth relative poses)")
-            print(f"   - relative_poses_{seq_id}_pred.csv (predicted relative poses with errors)")
             if PLOTLY_AVAILABLE:
                 print(f"   - trajectory_3d_{seq_id}_interactive.html (interactive 3D plot)")
     
@@ -1189,133 +847,6 @@ def plot_sample_trajectories(results, output_dir):
     print(f"\n📊 Plots saved to: {plot_dir}/")
 
 
-def plot_scale_convergence(scale_history, output_dir):
-    """Plot scale convergence over windows for each sequence"""
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    axes = axes.flatten()
-    
-    for idx, (seq_id, scales) in enumerate(scale_history.items()):
-        if idx >= 4:  # Only plot first 4 sequences
-            break
-        
-        ax = axes[idx]
-        windows = np.arange(len(scales))
-        
-        # Plot scale evolution
-        ax.plot(windows, scales, 'b-', linewidth=2)
-        ax.axhline(y=1.0, color='r', linestyle='--', label='Target (1.0)')
-        ax.axhline(y=0.95, color='g', linestyle=':', alpha=0.5)
-        ax.axhline(y=1.05, color='g', linestyle=':', alpha=0.5, label='±5% bounds')
-        
-        # Add statistics
-        mean_scale = np.mean(scales)
-        ax.axhline(y=mean_scale, color='orange', linestyle='-', alpha=0.7, label=f'Mean: {mean_scale:.3f}')
-        
-        ax.set_xlabel('Window Index')
-        ax.set_ylabel('Scale (pred/gt)')
-        ax.set_title(f'Sequence {seq_id}')
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=8)
-        ax.set_ylim([0.7, 1.3])
-    
-    plt.suptitle('Scale Convergence Analysis', fontsize=16)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'scale_convergence.png'), dpi=150)
-    plt.close()
-    print(f"\n📊 Scale convergence plot saved to: {output_dir}/scale_convergence.png")
-
-
-def save_relative_poses_csv(pred_rel_poses, gt_rel_poses, seq_id, output_dir):
-    """Save relative poses to separate CSV files for ground truth and predictions
-    
-    Args:
-        pred_rel_poses: Predicted relative poses [N, 7] where each pose is [x,y,z,qx,qy,qz,qw]
-        gt_rel_poses: Ground truth relative poses [N, 7]
-        seq_id: Sequence identifier
-        output_dir: Output directory
-    """
-    # Ensure same length
-    min_len = min(len(pred_rel_poses), len(gt_rel_poses))
-    pred_rel_poses = pred_rel_poses[:min_len]
-    gt_rel_poses = gt_rel_poses[:min_len]
-    
-    # Save ground truth relative poses
-    gt_data = []
-    for i in range(min_len):
-        row = {
-            'step': i,
-            'x': gt_rel_poses[i, 0],
-            'y': gt_rel_poses[i, 1],
-            'z': gt_rel_poses[i, 2],
-            'qx': gt_rel_poses[i, 3],
-            'qy': gt_rel_poses[i, 4],
-            'qz': gt_rel_poses[i, 5],
-            'qw': gt_rel_poses[i, 6],
-            'trans_norm': np.linalg.norm(gt_rel_poses[i, :3])
-        }
-        gt_data.append(row)
-    
-    gt_df = pd.DataFrame(gt_data)
-    gt_csv_path = os.path.join(output_dir, f'relative_poses_{seq_id}_gt.csv')
-    gt_df.to_csv(gt_csv_path, index=False)
-    print(f"Saved ground truth relative poses to {gt_csv_path}")
-    
-    # Save predicted relative poses with errors
-    pred_data = []
-    for i in range(min_len):
-        row = {
-            'step': i,
-            'x': pred_rel_poses[i, 0],
-            'y': pred_rel_poses[i, 1],
-            'z': pred_rel_poses[i, 2],
-            'qx': pred_rel_poses[i, 3],
-            'qy': pred_rel_poses[i, 4],
-            'qz': pred_rel_poses[i, 5],
-            'qw': pred_rel_poses[i, 6],
-            'trans_norm': np.linalg.norm(pred_rel_poses[i, :3])
-        }
-        
-        # Add errors compared to ground truth
-        row['trans_error'] = np.linalg.norm(pred_rel_poses[i, :3] - gt_rel_poses[i, :3])
-        row['scale_ratio'] = np.linalg.norm(pred_rel_poses[i, :3]) / (np.linalg.norm(gt_rel_poses[i, :3]) + 1e-8)
-        
-        # Rotation error
-        pred_q = pred_rel_poses[i, 3:] / (np.linalg.norm(pred_rel_poses[i, 3:]) + 1e-8)
-        gt_q = gt_rel_poses[i, 3:] / (np.linalg.norm(gt_rel_poses[i, 3:]) + 1e-8)
-        dot = np.clip(np.dot(pred_q, gt_q), -1.0, 1.0)
-        rot_error_deg = np.rad2deg(2 * np.arccos(np.abs(dot)))
-        row['rot_error_deg'] = rot_error_deg
-        
-        # Angle between translation vectors (direction error)
-        pred_t = pred_rel_poses[i, :3]
-        gt_t = gt_rel_poses[i, :3]
-        pred_norm = np.linalg.norm(pred_t)
-        gt_norm = np.linalg.norm(gt_t)
-        if pred_norm > 1e-6 and gt_norm > 1e-6:
-            cos_angle = np.dot(pred_t, gt_t) / (pred_norm * gt_norm)
-            angle_deg = np.arccos(np.clip(cos_angle, -1, 1)) * 180 / np.pi
-            row['direction_angle_deg'] = angle_deg
-        else:
-            row['direction_angle_deg'] = np.nan
-        
-        pred_data.append(row)
-    
-    pred_df = pd.DataFrame(pred_data)
-    pred_csv_path = os.path.join(output_dir, f'relative_poses_{seq_id}_pred.csv')
-    pred_df.to_csv(pred_csv_path, index=False)
-    print(f"Saved predicted relative poses to {pred_csv_path}")
-    
-    # Print summary statistics
-    print(f"  Relative poses summary for sequence {seq_id}:")
-    print(f"    Total steps: {len(pred_df)}")
-    print(f"    Mean translation error: {pred_df['trans_error'].mean()*100:.2f} cm")
-    print(f"    Mean rotation error: {pred_df['rot_error_deg'].mean():.2f}°")
-    print(f"    Mean scale ratio: {pred_df['scale_ratio'].mean():.3f}")
-    valid_angles = pred_df['direction_angle_deg'].dropna()
-    if len(valid_angles) > 0:
-        print(f"    Mean direction angle: {valid_angles.mean():.1f}°")
-
-
 def save_evaluation_metrics(trans_errors, rot_errors, scale_errors, output_dir):
     """Save evaluation metrics to file"""
     results_file = os.path.join(output_dir, 'evaluation_metrics.txt')
@@ -1360,11 +891,6 @@ def main():
                         help='Device to use')
     parser.add_argument('--num-workers', type=int, default=4,
                         help='Number of data loading workers')
-    parser.add_argument('--sim3', action='store_true',
-                        help='Apply Sim(3) alignment to correct scale drift')
-    # Removed --remove-gravity flag to maintain train/test consistency
-    parser.add_argument('--scale-correction', type=float, default=1.0,
-                        help='Global scale correction factor (default: 1.0, no correction)')
     
     args = parser.parse_args()
     
@@ -1383,27 +909,18 @@ def main():
     # Load model
     model = load_checkpoint(args.checkpoint, device)
     
-    # Define test directory first
+    # Test sequences
+    test_sequences = ['016', '017', '018', '019']
+    print(f"\n📁 Test sequences: {test_sequences}")
+    
+    # Create test dataset
     test_dir = Path(args.data_dir) / 'test'
     if not test_dir.exists():
         print(f"\n❌ Test directory not found: {test_dir}")
         print("Please ensure test sequences are in the test directory")
         return
     
-    # Derive test sequences automatically from dataset
-    temp_dataset = AriaRawDataset(test_dir, sequence_length=21, stride=1)
-    test_sequences = sorted({sample['seq_name'] for sample in temp_dataset.samples})
-    print(f"\nFound {len(test_sequences)} test sequences: {test_sequences[:5]}..." if len(test_sequences) > 5 else f"\nFound test sequences: {test_sequences}")
-    
-    # If user wants specific sequences, filter here
-    # For now, use first 11 sequences as requested
-    if len(test_sequences) > 11:
-        test_sequences = test_sequences[:11]
-        print(f"Using first 11 sequences for evaluation: {test_sequences}")
-    print(f"\n📁 Test sequences: {test_sequences}")
-    
-    # Use stride=1 to match training configuration
-    test_dataset = AriaRawDataset(test_dir, sequence_length=21, stride=1)
+    test_dataset = AriaRawDataset(test_dir, sequence_length=11, stride=10)  # Use stride=10 to match training
     test_loader = DataLoader(
         test_dataset,
         batch_size=args.batch_size,
@@ -1415,9 +932,7 @@ def main():
     print(f"📁 Test dataset loaded: {len(test_dataset)} samples")
     
     # Evaluate
-    results = evaluate_model(model, test_loader, device, str(output_dir), test_sequences, 
-                           use_sim3_alignment=args.sim3,
-                           scale_correction=args.scale_correction)
+    results = evaluate_model(model, test_loader, device, str(output_dir), test_sequences)
     
     print("\n✅ Evaluation complete!")
     print(f"📂 Results saved to: {output_dir}")
