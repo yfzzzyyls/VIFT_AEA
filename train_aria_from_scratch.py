@@ -157,7 +157,7 @@ class VIFTFromScratch(nn.Module):
         }
 
 
-def compute_loss(predictions, batch, alpha=1.0, beta=5.0):
+def compute_loss(predictions, batch, alpha=1.0, beta=20.0):
     """Compute loss with quaternion representation for multi-step prediction
     
     Args:
@@ -201,7 +201,7 @@ def compute_loss(predictions, batch, alpha=1.0, beta=5.0):
     }
 
 
-def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=None, global_step=0):
+def train_epoch(model, dataloader, optimizer, device, epoch, scale_loss_weight=20.0, warmup_scheduler=None, global_step=0):
     """Train one epoch."""
     model.train()
     total_loss = 0
@@ -221,7 +221,7 @@ def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=No
         predictions = model(batch)
         
         # Compute loss
-        loss_dict = compute_loss(predictions, batch)
+        loss_dict = compute_loss(predictions, batch, beta=scale_loss_weight)
         
         if loss_dict is None:
             print(f"NaN loss detected at batch {batch_idx}, skipping...")
@@ -270,7 +270,7 @@ def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=No
     return total_loss / num_batches if num_batches > 0 else float('inf'), step
 
 
-def validate(model, dataloader, device):
+def validate(model, dataloader, device, scale_loss_weight=20.0):
     """Validate model."""
     model.eval()
     total_loss = 0
@@ -291,7 +291,7 @@ def validate(model, dataloader, device):
             predictions = model(batch)
             
             # Compute loss
-            loss_dict = compute_loss(predictions, batch)
+            loss_dict = compute_loss(predictions, batch, beta=scale_loss_weight)
             
             if loss_dict is None:
                 continue
@@ -380,6 +380,8 @@ def main():
                         help='Directory to save checkpoints')
     parser.add_argument('--num-workers', type=int, default=4,
                         help='Number of data loading workers')
+    parser.add_argument('--scale-loss-weight', type=float, default=20.0,
+                        help='Weight for scale consistency loss (default: 20.0)')
     
     # Distributed training arguments
     parser.add_argument('--distributed', action='store_true',
@@ -424,6 +426,7 @@ def main():
         print(f"- Batch size per GPU: {args.batch_size}")
         print(f"- Total batch size: {args.batch_size * world_size}")
         print(f"- Learning rate: {args.lr}")
+        print(f"- Scale loss weight: {args.scale_loss_weight}")
         print(f"- Window stride: 1 (overlapping windows with causal masking)")
         print("="*60 + "\n")
     
@@ -550,11 +553,12 @@ def main():
         # Train
         train_loss, global_step = train_epoch(
             model, train_loader, optimizer, device, epoch, 
+            scale_loss_weight=args.scale_loss_weight,
             warmup_scheduler=warmup_scheduler_to_use, global_step=global_step
         )
         
         # Validate
-        val_metrics = validate(model, val_loader, device)
+        val_metrics = validate(model, val_loader, device, scale_loss_weight=args.scale_loss_weight)
         
         # Step cosine scheduler after warmup phase (per epoch)
         if global_step >= warmup_steps:

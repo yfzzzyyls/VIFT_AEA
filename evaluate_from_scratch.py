@@ -30,6 +30,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from train_aria_from_scratch import VIFTFromScratch
 from src.data.components.aria_raw_dataset import AriaRawDataset
+from umeyama_alignment import align_trajectory, compute_ate
 
 
 def remove_gravity(imu_window: torch.Tensor) -> torch.Tensor:
@@ -407,6 +408,21 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
         ape_stats = compute_ape(pred_positions_full[1:], gt_positions_full[:len(pred_positions_full)-1])
         print(f"  APE - Mean: {ape_stats['mean']*100:.2f}cm, RMSE: {ape_stats['rmse']*100:.2f}cm")
         
+        # Compute aligned trajectory using Umeyama alignment
+        # Align predicted positions to ground truth to remove drift
+        pred_positions_aligned, R_align, t_align, s_align = align_trajectory(
+            pred_positions_full[1:], 
+            gt_positions_full[:len(pred_positions_full)-1],
+            with_scale=True
+        )
+        
+        # Compute ATE after alignment
+        ate_aligned, _, _ = compute_ate(
+            pred_positions_full[1:],
+            gt_positions_full[:len(pred_positions_full)-1]
+        )
+        print(f"  ATE after alignment: {ate_aligned*100:.2f}cm (scale: {s_align:.3f})")
+        
         # Compute RPE for this sequence
         rpe_stats = compute_rpe(all_pred, np.concatenate([r['gt_poses'] for r in seq_results_sampled], axis=0))
         print(f"  RPE - Trans: {rpe_stats['trans']['mean']*100:.2f}cm, Rot: {rpe_stats['rot']['mean']:.2f}°")
@@ -416,12 +432,23 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
                            pred_rotations_full, gt_rotations_full,
                            seq_id, output_dir, frame_offset=all_frame_indices[0])
         
-        # Plot full trajectory
+        # Plot full trajectory (raw)
         plot_trajectory_3d(
             pred_positions_full,
             gt_positions_full,
             seq_id,
             os.path.join(output_dir, f'trajectory_3d_{seq_id}.png')
+        )
+        
+        # Plot aligned trajectory
+        # Need to add back the initial position since we aligned positions[1:]
+        pred_positions_aligned_full = np.vstack([gt_positions_full[0], pred_positions_aligned])
+        plot_trajectory_3d(
+            pred_positions_aligned_full,
+            gt_positions_full[:len(pred_positions_aligned_full)],
+            seq_id,
+            os.path.join(output_dir, f'trajectory_3d_{seq_id}_aligned.png'),
+            title_suffix=' (Aligned)'
         )
         
         # Create interactive HTML plot
@@ -458,6 +485,23 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
                 time_window='1s'
             )
             
+            # Aligned 1s plot
+            if len(pred_positions_1s) > 1:
+                pred_positions_1s_aligned, _, _, _ = align_trajectory(
+                    pred_positions_1s[1:], 
+                    gt_positions_1s[1:len(pred_positions_1s)],
+                    with_scale=True
+                )
+                pred_positions_1s_aligned_full = np.vstack([gt_positions_1s[0], pred_positions_1s_aligned])
+                plot_trajectory_3d(
+                    pred_positions_1s_aligned_full,
+                    gt_positions_1s[:len(pred_positions_1s_aligned_full)],
+                    seq_id,
+                    os.path.join(output_dir, f'trajectory_3d_{seq_id}_1s_aligned.png'),
+                    time_window='1s',
+                    title_suffix=' (Aligned)'
+                )
+            
             plot_rotation_3d(
                 pred_rotations_1s[1:],
                 gt_rotations_1s[1:],
@@ -484,6 +528,23 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
                 time_window='5s'
             )
             
+            # Aligned 5s plot
+            if len(pred_positions_5s) > 1:
+                pred_positions_5s_aligned, _, _, _ = align_trajectory(
+                    pred_positions_5s[1:], 
+                    gt_positions_5s[1:len(pred_positions_5s)],
+                    with_scale=True
+                )
+                pred_positions_5s_aligned_full = np.vstack([gt_positions_5s[0], pred_positions_5s_aligned])
+                plot_trajectory_3d(
+                    pred_positions_5s_aligned_full,
+                    gt_positions_5s[:len(pred_positions_5s_aligned_full)],
+                    seq_id,
+                    os.path.join(output_dir, f'trajectory_3d_{seq_id}_5s_aligned.png'),
+                    time_window='5s',
+                    title_suffix=' (Aligned)'
+                )
+            
             plot_rotation_3d(
                 pred_rotations_5s[1:],
                 gt_rotations_5s[1:],
@@ -502,6 +563,7 @@ def evaluate_model(model, test_loader, device, output_dir, test_sequences):
             print(f"   - trajectory_{seq_id}_gt.csv (ground truth)")
             print(f"   - trajectory_{seq_id}_pred.csv (predictions with errors)")
             print(f"   - trajectory_3d_{seq_id}.png, trajectory_3d_{seq_id}_1s.png, trajectory_3d_{seq_id}_5s.png")
+            print(f"   - trajectory_3d_{seq_id}_aligned.png, trajectory_3d_{seq_id}_1s_aligned.png, trajectory_3d_{seq_id}_5s_aligned.png")
             print(f"   - rotation_3d_{seq_id}.png, rotation_3d_{seq_id}_1s.png, rotation_3d_{seq_id}_5s.png")
             if PLOTLY_AVAILABLE:
                 print(f"   - trajectory_3d_{seq_id}_interactive.html (interactive 3D plot)")
@@ -671,7 +733,7 @@ def create_interactive_html_plot(pred_positions, gt_positions, sequence_name, ou
     print(f"Saved interactive plot to {output_path}")
 
 
-def plot_trajectory_3d(pred_positions, gt_positions, sequence_name, output_path, time_window=None):
+def plot_trajectory_3d(pred_positions, gt_positions, sequence_name, output_path, time_window=None, title_suffix=''):
     """Create 3D trajectory plot"""
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
@@ -706,9 +768,9 @@ def plot_trajectory_3d(pred_positions, gt_positions, sequence_name, output_path,
         pass
     
     if time_window:
-        ax.set_title(f'Sequence {sequence_name} - First {time_window}\nGT Length: {gt_length:.1f}cm, Pred Length: {pred_length:.1f}cm')
+        ax.set_title(f'Sequence {sequence_name} - First {time_window}{title_suffix}\nGT Length: {gt_length:.1f}cm, Pred Length: {pred_length:.1f}cm')
     else:
-        ax.set_title(f'Sequence {sequence_name} - Full Trajectory\nGT Length: {gt_length:.1f}cm, Pred Length: {pred_length:.1f}cm')
+        ax.set_title(f'Sequence {sequence_name} - Full Trajectory{title_suffix}\nGT Length: {gt_length:.1f}cm, Pred Length: {pred_length:.1f}cm')
     
     ax.legend()
     
