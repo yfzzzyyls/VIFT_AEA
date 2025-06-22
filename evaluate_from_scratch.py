@@ -65,7 +65,12 @@ def load_checkpoint(checkpoint_path, device):
     """Load model from checkpoint"""
     checkpoint = torch.load(checkpoint_path, map_location=device)
     
-    model = VIFTFromScratch().to(device)
+    # Check if encoder_type is stored in checkpoint config
+    encoder_type = 'flownet'  # Default to FlowNet-C
+    if 'config' in checkpoint and hasattr(checkpoint['config'], 'encoder_type'):
+        encoder_type = checkpoint['config'].encoder_type
+    
+    model = VIFTFromScratch(encoder_type=encoder_type).to(device)
     
     # Handle DataParallel state dict
     state_dict = checkpoint['model_state_dict']

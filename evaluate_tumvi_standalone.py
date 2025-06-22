@@ -547,9 +547,15 @@ def main():
     
     # Load model
     print("Loading model...")
-    model = VIFTFromScratch()
-    
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
+    
+    # Check if encoder_type is stored in checkpoint config
+    encoder_type = 'flownet'  # Default to FlowNet-C
+    if 'config' in checkpoint and hasattr(checkpoint['config'], 'encoder_type'):
+        encoder_type = checkpoint['config'].encoder_type
+    
+    model = VIFTFromScratch(encoder_type=encoder_type)
+    
     if 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'])
     else:

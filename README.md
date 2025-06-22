@@ -167,21 +167,12 @@ python prepare_aria_splits.py --source-dir aria_processed
 
 # 4. Train all components from scratch (improved loss weighting)
 
-# Single GPU training
-python train_aria_from_scratch.py \
-    --data-dir aria_processed \
-    --epochs 50 \
-    --batch-size 16 \
-    --lr 1e-4 \
-    --checkpoint-dir checkpoints_from_scratch \
-    --num-workers 4
-
 # Multi-GPU training with distributed data parallel
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
     --data-dir aria_processed \
     --epochs 50 \
-    --batch-size 16 \
-    --checkpoint-dir checkpoints_distributed \
+    --batch-size 20 \
+    --checkpoint-dir checkpoints_from_scratch \
     --distributed
 
 # 5. Monitor training progress
@@ -194,6 +185,104 @@ python evaluate_from_scratch.py \
     --output-dir evaluation_from_scratch \
     --batch-size 16 \
     --num-workers 4
+```
+
+### Workflow 5: Train and Test on TUM VI Dataset
+
+```bash
+# 1. Setup environment
+source venv/bin/activate
+
+# 2. Ensure all sequences are extracted (including corridors)
+# If not already done:
+./extract_corridor_datasets.sh
+
+# 3. Train on TUM VI (uses FlowNet-C by default, includes all corridor sequences)
+python train_on_tumvi.py \
+    --data-dir /mnt/ssd_ext/incSeg-data/tumvi \
+    --epochs 30 \
+    --batch-size 4 \
+    --lr 1e-4 \
+    --checkpoint-dir checkpoints_tumvi \
+    --num-workers 4
+
+# 4. Monitor training
+tail -f checkpoints_tumvi/train.log
+
+# 5. Evaluate on specific sequence
+python evaluate_tumvi_standalone.py \
+    --checkpoint checkpoints_tumvi/best_model.pt \
+    --sequence-dir /mnt/ssd_ext/incSeg-data/tumvi/dataset-room6_512_16 \
+    --output-dir evaluation_tumvi
+
+# 6. Evaluate on multiple sequences
+for seq in room6 corridor5; do
+    python evaluate_tumvi_standalone.py \
+        --checkpoint checkpoints_tumvi/best_model.pt \
+        --sequence-dir /mnt/ssd_ext/incSeg-data/tumvi/dataset-${seq}_512_16 \
+        --output-dir evaluation_tumvi/${seq}
+done
+```
+
+## Evaluation Scripts
+
+### For Aria Dataset
+
+```bash
+# Evaluate model trained from scratch
+python evaluate_from_scratch.py \
+    --checkpoint checkpoints_from_scratch/best_model.pt \
+    --data-dir aria_processed \
+    --output-dir evaluation_aria \
+    --batch-size 16 \
+    --num-workers 4
+
+# The evaluation script will:
+# - Compute translation and rotation errors
+# - Generate trajectory plots (saved in output directory)
+# - Calculate Absolute Pose Error (APE) and Relative Pose Error (RPE)
+# - Save predicted and ground truth trajectories as CSV files
+# - Create interactive 3D HTML visualizations using Plotly
+```
+
+### For TUM VI Dataset
+
+```bash
+# Evaluate on single sequence
+python evaluate_tumvi_standalone.py \
+    --checkpoint checkpoints_tumvi/best_model.pt \
+    --sequence-dir /mnt/ssd_ext/incSeg-data/tumvi/dataset-room6_512_16 \
+    --output-dir evaluation_tumvi \
+    --device cuda
+
+# Batch evaluation on all test sequences
+python evaluate_tumvi_standalone.py \
+    --checkpoint checkpoints_tumvi/best_model.pt \
+    --sequence-dir /mnt/ssd_ext/incSeg-data/tumvi/dataset-room6_512_16 \
+    --output-dir evaluation_tumvi/room6
+
+python evaluate_tumvi_standalone.py \
+    --checkpoint checkpoints_tumvi/best_model.pt \
+    --sequence-dir /mnt/ssd_ext/incSeg-data/tumvi/dataset-corridor5_512_16 \
+    --output-dir evaluation_tumvi/corridor5
+
+# Note: The evaluation script generates trajectory plots and metrics automatically
+```
+
+### Cross-Dataset Evaluation
+
+```bash
+# Test Aria model on TUM VI
+python evaluate_tumvi_standalone.py \
+    --checkpoint checkpoints_from_scratch/best_model.pt \
+    --sequence /mnt/ssd_ext/incSeg-data/tumvi/dataset-room6_512_16 \
+    --output-dir cross_eval/aria_on_tumvi
+
+# Test TUM VI model on Aria (requires data format conversion)
+python evaluate_from_scratch.py \
+    --checkpoint checkpoints_tumvi/best_model.pt \
+    --data-dir aria_processed \
+    --output-dir cross_eval/tumvi_on_aria
 ```
 
 ## Important: IMU Data Format
@@ -216,11 +305,44 @@ This repository includes a critical fix for IMU temporal alignment:
 
 VIFT consists of three main components:
 
-1. **Visual Encoder**: 6-layer CNN processing consecutive image pairs
+1. **Visual Encoder**: 
+   - **FlowNet-C** (default): FlowNet-C with correlation layer for optical flow-based motion estimation
+   - **CNN** (optional): 6-layer CNN processing consecutive image pairs
 2. **IMU Encoder**: 3-layer 1D CNN processing IMU measurements
 3. **Pose Transformer**: 4-layer transformer with 8 attention heads
 
 The model predicts relative poses (3D translation + 3D rotation) between consecutive frames.
+
+### Encoder Selection
+
+FlowNet-C is now the default encoder due to its superior motion estimation capabilities:
+
+```bash
+# For Aria training (uses FlowNet-C by default)
+python train_aria_from_scratch.py \
+    --data-dir aria_processed \
+    --epochs 50 \
+    --batch-size 16
+
+# For TUM VI training (uses FlowNet-C by default)
+python train_on_tumvi.py \
+    --data-dir /path/to/tumvi \
+    --epochs 30 \
+    --batch-size 4
+
+# To use the CNN encoder instead (optional)
+python train_aria_from_scratch.py \
+    --encoder-type cnn \
+    --data-dir aria_processed \
+    --epochs 50 \
+    --batch-size 16
+```
+
+FlowNet-C advantages:
+- Explicit correlation computation between consecutive frames
+- Better suited for optical flow and motion estimation
+- More parameter efficient (~12M fewer parameters than CNN)
+- Designed specifically for estimating pixel correspondences
 
 ## Key Improvements in This Implementation
 

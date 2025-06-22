@@ -73,7 +73,7 @@ def robust_geodesic_loss_stable(pred_quat, gt_quat):
 class VIFTFromScratch(nn.Module):
     """VIFT model for training from scratch with quaternion output."""
     
-    def __init__(self):
+    def __init__(self, encoder_type='cnn'):
         super().__init__()
         
         # Model configuration
@@ -106,6 +106,8 @@ class VIFTFromScratch(nn.Module):
             fuse_method = 'cat'
         
         self.config = Config()
+        # Add encoder type after creating config
+        self.config.encoder_type = encoder_type
         self.backbone = TransformerVIO(self.config)
         
         # Replace output layer for quaternion output (7 values instead of 6)
@@ -382,6 +384,8 @@ def main():
                         help='Number of data loading workers')
     parser.add_argument('--scale-loss-weight', type=float, default=20.0,
                         help='Weight for scale consistency loss (default: 20.0)')
+    parser.add_argument('--encoder-type', type=str, default='flownet', choices=['cnn', 'flownet'],
+                        help='Type of visual encoder to use (default: flownet)')
     
     # Distributed training arguments
     parser.add_argument('--distributed', action='store_true',
@@ -415,7 +419,8 @@ def main():
         print("Training VIFT from Scratch on Aria Data")
         print("="*60)
         print("Training all components:")
-        print("- Image Encoder (6-layer CNN)")
+        encoder_desc = "FlowNet-C with correlation layer" if args.encoder_type == 'flownet' else "6-layer CNN"
+        print(f"- Image Encoder: {encoder_desc}")
         print("- IMU Encoder (3-layer 1D CNN)")
         print("- Pose Transformer (4 layers, 8 heads)")
         print("- Quaternion output (3 trans + 4 quat)")
@@ -491,7 +496,7 @@ def main():
         print(f"Val samples: {len(val_dataset)}")
     
     # Create model
-    model = VIFTFromScratch()
+    model = VIFTFromScratch(encoder_type=args.encoder_type)
     model = model.to(device)
     
     # Wrap with DDP if distributed

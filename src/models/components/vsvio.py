@@ -6,6 +6,7 @@ import numpy as np
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs
 import torch.nn.functional as F
 import math
+from .flownet_encoder import FlowNetCEncoder
 
 def conv(batchNorm, in_planes, out_planes, kernel_size=3, stride=1, dropout=0.0):
     if batchNorm:
@@ -342,7 +343,14 @@ class TransformerVIO(nn.Module):
     def __init__(self, opt):
         super(TransformerVIO, self).__init__()
         self.window_size = opt.seq_len
-        self.Feature_net = Encoder(opt)
+        
+        # Choose encoder based on configuration
+        encoder_type = getattr(opt, 'encoder_type', 'cnn')  # Default to CNN for backward compatibility
+        if encoder_type == 'flownet':
+            self.Feature_net = FlowNetCEncoder(opt)
+        else:
+            self.Feature_net = Encoder(opt)
+            
         self.Pose_net = PoseTransformer(opt)
         initialization(self)
 

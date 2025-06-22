@@ -248,6 +248,8 @@ def main():
                         help='Number of data loading workers')
     parser.add_argument('--scale-loss-weight', type=float, default=20.0,
                         help='Weight for scale consistency loss')
+    parser.add_argument('--encoder-type', type=str, default='flownet', choices=['cnn', 'flownet'],
+                        help='Type of visual encoder to use (default: flownet)')
     parser.add_argument('--resume', type=str, default=None,
                         help='Path to checkpoint to resume from')
     
@@ -264,6 +266,7 @@ def main():
     print(f"Batch size: {args.batch_size}")
     print(f"Learning rate: {args.lr}")
     print(f"Scale loss weight: {args.scale_loss_weight}")
+    print(f"Encoder type: {args.encoder_type}")
     print("="*60 + "\n")
     
     # Create data loaders
@@ -275,7 +278,7 @@ def main():
     
     # Create model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = VIFTFromScratch().to(device)
+    model = VIFTFromScratch(encoder_type=args.encoder_type).to(device)
     
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
