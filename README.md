@@ -228,6 +228,7 @@ source venv/bin/activate
 # 3. Train on TUM VI (uses FlowNet-C by default, includes all corridor sequences)
 
 # IMPORTANT: First preprocess images for 10x faster training!
+# This keeps original 512x512 resolution (no cropping/resizing)
 python preprocess_tumvi_images.py --num-workers 32
 
 # Option A: Efficient architecture (Recommended - 2x faster, minimal accuracy loss)

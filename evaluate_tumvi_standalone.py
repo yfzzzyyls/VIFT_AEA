@@ -229,8 +229,13 @@ class TUMVIDatasetDirect(Dataset):
         # Load image
         img = Image.open(img_path)
         
-        # TUM VI images are 512x512, we need 512x256
-        img = img.resize((512, 256), Image.LANCZOS)
+        # Keep original resolution for 512x512
+        if img.size == (1024, 1024):
+            # Use 2x2 binning for 1024x1024 images (exact 2x downsampling)
+            img_array = np.array(img)
+            img_array = img_array.reshape(512, 2, 512, 2).mean(axis=(1, 3))
+            img = Image.fromarray(img_array.astype(np.uint8))
+        # else: keep 512x512 as is
         
         # Convert to RGB if grayscale
         if img.mode != 'RGB':
@@ -285,7 +290,7 @@ class VIFTFromScratch(torch.nn.Module):
             
             # Image parameters
             img_w = 512
-            img_h = 256
+            img_h = 512  # Updated to support square images
             
             # Feature dimensions
             v_f_len = 512  # Visual feature dimension

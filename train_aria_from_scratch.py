@@ -84,7 +84,7 @@ class VIFTFromScratch(nn.Module):
             
             # Image parameters
             img_w = 512
-            img_h = 256
+            img_h = 512  # Updated to support square images
             
             # Feature dimensions
             v_f_len = 512  # Visual feature dimension

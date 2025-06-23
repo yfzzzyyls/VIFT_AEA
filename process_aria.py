@@ -454,8 +454,8 @@ class AriaProcessor:
             original_width = config.image_width
             original_height = config.image_height
             
-            # Target roughly 336x188 area but maintain aspect ratio
-            target_area = 336 * 188
+            # Target 512x512 area to match model input (maintain aspect ratio)
+            target_area = 512 * 512
             aspect_ratio = original_width / original_height
             
             # Calculate dimensions that maintain aspect ratio
@@ -489,8 +489,19 @@ class AriaProcessor:
                     # Get the first image if multiple
                     img_array = image_data[0].to_numpy_array()
                     
-                    # Resize to target resolution with INTER_AREA for better quality
-                    img_resized = cv2.resize(img_array, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                    # For 1408x1408 to 512x512: first do 2x2 binning, then resize
+                    if img_array.shape[0] == 1408 and img_array.shape[1] == 1408:
+                        # Step 1: 2x2 binning to 704x704
+                        if len(img_array.shape) == 3:  # Color image
+                            img_binned = img_array.reshape(704, 2, 704, 2, 3).mean(axis=(1, 3))
+                        else:  # Grayscale
+                            img_binned = img_array.reshape(704, 2, 704, 2).mean(axis=(1, 3))
+                        img_binned = img_binned.astype(np.uint8)
+                        # Step 2: Resize to 512x512 using INTER_AREA
+                        img_resized = cv2.resize(img_binned, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                    else:
+                        # For other sizes, use INTER_AREA directly
+                        img_resized = cv2.resize(img_array, (target_width, target_height), interpolation=cv2.INTER_AREA)
                     
                     # Keep as uint8 to save memory, convert to float later if needed
                     # This follows PyTorch's recommendation for preprocessing pipelines
