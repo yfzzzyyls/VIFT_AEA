@@ -233,15 +233,17 @@ class TUMVIDataset(Dataset):
         # Handle both 512x512 and 1024x1024 images
         if img.size == (1024, 1024):
             # For 1024x1024 images (corridor sequences)
-            # Direct resize to 512x256 maintaining more of the image content
-            img = img.resize((512, 256), Image.LANCZOS)
+            # Convert to numpy for 2x2 binning (better than resize for exact 2x downsampling)
+            img_array = np.array(img)
+            img_array = img_array.reshape(512, 2, 512, 2).mean(axis=(1, 3))
+            img = Image.fromarray(img_array.astype(np.uint8))
         elif img.size == (512, 512):
             # For 512x512 images (room sequences)
-            # Resize to target 512x256
-            img = img.resize((512, 256), Image.LANCZOS)
+            # Keep original resolution
+            pass  # No resizing needed
         else:
             # Handle any other sizes
-            img = img.resize((512, 256), Image.LANCZOS)
+            img = img.resize((512, 512), Image.LANCZOS)
         
         # Convert to RGB if grayscale
         if img.mode != 'RGB':
