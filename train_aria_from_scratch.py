@@ -73,7 +73,8 @@ def robust_geodesic_loss_stable(pred_quat, gt_quat):
 class VIFTFromScratch(nn.Module):
     """VIFT model for training from scratch with quaternion output."""
     
-    def __init__(self, encoder_type='cnn'):
+    def __init__(self, encoder_type='cnn', transformer_layers=8, transformer_heads=16, 
+                 transformer_dim_feedforward=4096, transformer_dropout=0.1):
         super().__init__()
         
         # Model configuration
@@ -94,10 +95,10 @@ class VIFTFromScratch(nn.Module):
             
             # Transformer parameters
             embedding_dim = 768  # v_f_len + i_f_len
-            num_layers = 4
-            nhead = 8
-            dim_feedforward = 2048
-            dropout = 0.1
+            num_layers = transformer_layers
+            nhead = transformer_heads
+            dim_feedforward = transformer_dim_feedforward
+            dropout = transformer_dropout
             
             # For compatibility
             rnn_hidden_size = 512
@@ -387,6 +388,16 @@ def main():
     parser.add_argument('--encoder-type', type=str, default='flownet', choices=['cnn', 'flownet'],
                         help='Type of visual encoder to use (default: flownet)')
     
+    # Transformer architecture arguments
+    parser.add_argument('--transformer-layers', type=int, default=8,
+                        help='Number of transformer encoder layers (default: 8)')
+    parser.add_argument('--transformer-heads', type=int, default=16,
+                        help='Number of attention heads (default: 16)')
+    parser.add_argument('--transformer-dim-feedforward', type=int, default=4096,
+                        help='Dimension of feedforward network (default: 4096)')
+    parser.add_argument('--transformer-dropout', type=float, default=0.1,
+                        help='Dropout rate in transformer (default: 0.1)')
+    
     # Distributed training arguments
     parser.add_argument('--distributed', action='store_true',
                         help='Use distributed training with DDP')
@@ -422,7 +433,7 @@ def main():
         encoder_desc = "FlowNet-C with correlation layer" if args.encoder_type == 'flownet' else "6-layer CNN"
         print(f"- Image Encoder: {encoder_desc}")
         print("- IMU Encoder (3-layer 1D CNN)")
-        print("- Pose Transformer (4 layers, 8 heads)")
+        print(f"- Pose Transformer ({args.transformer_layers} layers, {args.transformer_heads} heads, FFN: {args.transformer_dim_feedforward})")
         print("- Quaternion output (3 trans + 4 quat)")
         print("- Multi-step prediction (all 10 transitions)")
         print(f"\nTraining Configuration:")
@@ -496,7 +507,13 @@ def main():
         print(f"Val samples: {len(val_dataset)}")
     
     # Create model
-    model = VIFTFromScratch(encoder_type=args.encoder_type)
+    model = VIFTFromScratch(
+        encoder_type=args.encoder_type,
+        transformer_layers=args.transformer_layers,
+        transformer_heads=args.transformer_heads,
+        transformer_dim_feedforward=args.transformer_dim_feedforward,
+        transformer_dropout=args.transformer_dropout
+    )
     model = model.to(device)
     
     # Wrap with DDP if distributed

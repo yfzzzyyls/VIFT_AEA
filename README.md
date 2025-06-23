@@ -167,16 +167,37 @@ python prepare_aria_splits.py --source-dir aria_processed
 
 # 4. Train all components from scratch (improved loss weighting)
 
-# Multi-GPU training with distributed data parallel
+# Multi-GPU training with distributed data parallel (default: 8 layers, 16 heads)
+# With 4x A6000 GPUs (48GB each), we can use large batch sizes
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
     --data-dir aria_processed \
     --epochs 50 \
-    --batch-size 20 \
+    --batch-size 64 \
     --checkpoint-dir checkpoints_from_scratch \
     --distributed
 
-# 5. Monitor training progress
-tail -f train.log
+# For smaller transformer to save memory (6 layers, 12 heads)
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --data-dir aria_processed \
+    --epochs 50 \
+    --batch-size 96 \
+    --checkpoint-dir checkpoints_medium_transformer \
+    --transformer-layers 6 \
+    --transformer-heads 12 \
+    --transformer-dim-feedforward 3072 \
+    --distributed
+
+# For minimal transformer configuration (4 layers, 8 heads)
+# Can use even larger batch sizes with smaller model
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --data-dir aria_processed \
+    --epochs 50 \
+    --batch-size 128 \
+    --checkpoint-dir checkpoints_small_transformer \
+    --transformer-layers 4 \
+    --transformer-heads 8 \
+    --transformer-dim-feedforward 2048 \
+    --distributed
 
 # 6. Evaluate trained model
 python evaluate_from_scratch.py \
@@ -198,13 +219,48 @@ source venv/bin/activate
 ./extract_corridor_datasets.sh
 
 # 3. Train on TUM VI (uses FlowNet-C by default, includes all corridor sequences)
+# With A6000 GPU (48GB), we can use larger batch sizes
 python train_on_tumvi.py \
     --data-dir /mnt/ssd_ext/incSeg-data/tumvi \
     --epochs 30 \
-    --batch-size 4 \
+    --batch-size 32 \
     --lr 1e-4 \
     --checkpoint-dir checkpoints_tumvi \
+    --num-workers 8
+
+# For distributed training on TUM VI with 4 GPUs (recommended for A6000s)
+torchrun --nproc_per_node=4 train_on_tumvi.py \
+    --data-dir /mnt/ssd_ext/incSeg-data/tumvi \
+    --epochs 30 \
+    --batch-size 24 \
+    --lr 1e-4 \
+    --checkpoint-dir checkpoints_tumvi_distributed \
+    --distributed \
     --num-workers 4
+
+# Medium transformer (6 layers, 12 heads)
+python train_on_tumvi.py \
+    --data-dir /mnt/ssd_ext/incSeg-data/tumvi \
+    --epochs 30 \
+    --batch-size 48 \
+    --lr 1e-4 \
+    --checkpoint-dir checkpoints_tumvi_medium \
+    --transformer-layers 6 \
+    --transformer-heads 12 \
+    --transformer-dim-feedforward 3072 \
+    --num-workers 8
+
+# Small transformer (4 layers, 8 heads) - can handle very large batches
+python train_on_tumvi.py \
+    --data-dir /mnt/ssd_ext/incSeg-data/tumvi \
+    --epochs 30 \
+    --batch-size 64 \
+    --lr 1e-4 \
+    --checkpoint-dir checkpoints_tumvi_small \
+    --transformer-layers 4 \
+    --transformer-heads 8 \
+    --transformer-dim-feedforward 2048 \
+    --num-workers 8
 
 # 4. Monitor training
 tail -f checkpoints_tumvi/train.log
@@ -309,7 +365,7 @@ VIFT consists of three main components:
    - **FlowNet-C** (default): FlowNet-C with correlation layer for optical flow-based motion estimation
    - **CNN** (optional): 6-layer CNN processing consecutive image pairs
 2. **IMU Encoder**: 3-layer 1D CNN processing IMU measurements
-3. **Pose Transformer**: 4-layer transformer with 8 attention heads
+3. **Pose Transformer**: 8-layer transformer with 16 attention heads (default, configurable)
 
 The model predicts relative poses (3D translation + 3D rotation) between consecutive frames.
 
@@ -413,3 +469,13 @@ If you use this code, please cite:
 ## License
 
 This project is licensed under the MIT License.
+
+## For AI Assistants
+
+Key implementation details:
+- Default visual encoder: FlowNet-C (correlation-based optical flow)
+- Default transformer: 8 layers, 16 heads, 4096 FFN dimension
+- Hardware: 4x NVIDIA A6000 GPUs (48GB each)
+- Both Aria and TUM VI support distributed training with `torchrun`
+- Output format: Quaternion (3 trans + 4 rot) with multi-step prediction
+- See CLAUDE.md for detailed context

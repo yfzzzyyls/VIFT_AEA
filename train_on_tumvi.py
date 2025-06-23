@@ -13,6 +13,9 @@ from pathlib import Path
 from tqdm import tqdm
 import argparse
 from torch.utils.data import Dataset, ConcatDataset, DataLoader
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -22,7 +25,44 @@ from src.data.components.tumvi_dataset import TUMVIDataset
 from train_aria_from_scratch import VIFTFromScratch, compute_loss, robust_geodesic_loss_stable
 
 
-def create_tumvi_data_loaders(data_root, batch_size, num_workers=4):
+def setup_distributed(args):
+    """Initialize distributed training if requested."""
+    if args.distributed:
+        # Get local rank from environment if not set
+        if args.local_rank == -1:
+            args.local_rank = int(os.environ.get('LOCAL_RANK', 0))
+        
+        # Set CUDA device before initializing process group
+        torch.cuda.set_device(args.local_rank)
+        device = torch.device('cuda', args.local_rank)
+        
+        # Initialize the process group
+        dist.init_process_group(
+            backend=args.backend,
+            init_method=args.init_method,
+            world_size=int(os.environ.get('WORLD_SIZE', 1)),
+            rank=int(os.environ.get('RANK', 0))
+        )
+        
+        # Get rank and world size
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        
+        print(f"[Rank {rank}/{world_size}] Distributed training initialized on GPU {args.local_rank}")
+        return device, rank, world_size
+    else:
+        # Non-distributed setup
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        return device, 0, 1
+
+
+def cleanup_distributed():
+    """Clean up distributed training."""
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def create_tumvi_data_loaders(data_root, batch_size, num_workers=4, distributed=False, world_size=1, rank=0):
     """Create TUM VI data loaders with proper directory structure."""
     data_root = Path(data_root)
     
@@ -96,11 +136,32 @@ def create_tumvi_data_loaders(data_root, batch_size, num_workers=4):
             train_dataset, [train_size, val_size]
         )
     
+    # Create samplers for distributed training
+    if distributed:
+        train_sampler = DistributedSampler(
+            train_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+            drop_last=True
+        )
+        val_sampler = DistributedSampler(
+            val_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=False,
+            drop_last=False
+        )
+    else:
+        train_sampler = None
+        val_sampler = None
+    
     # Create data loaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=(train_sampler is None),
+        sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=True,
         drop_last=True
@@ -110,11 +171,12 @@ def create_tumvi_data_loaders(data_root, batch_size, num_workers=4):
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
+        sampler=val_sampler,
         num_workers=num_workers,
         pin_memory=True
     )
     
-    return train_loader, val_loader
+    return train_loader, val_loader, train_sampler
 
 
 def train_epoch(model, dataloader, optimizer, device, epoch, scale_loss_weight=20.0):
@@ -250,42 +312,93 @@ def main():
                         help='Weight for scale consistency loss')
     parser.add_argument('--encoder-type', type=str, default='flownet', choices=['cnn', 'flownet'],
                         help='Type of visual encoder to use (default: flownet)')
+    
+    # Transformer architecture arguments
+    parser.add_argument('--transformer-layers', type=int, default=8,
+                        help='Number of transformer encoder layers (default: 8)')
+    parser.add_argument('--transformer-heads', type=int, default=16,
+                        help='Number of attention heads (default: 16)')
+    parser.add_argument('--transformer-dim-feedforward', type=int, default=4096,
+                        help='Dimension of feedforward network (default: 4096)')
+    parser.add_argument('--transformer-dropout', type=float, default=0.1,
+                        help='Dropout rate in transformer (default: 0.1)')
+    
     parser.add_argument('--resume', type=str, default=None,
                         help='Path to checkpoint to resume from')
     
+    # Distributed training arguments
+    parser.add_argument('--distributed', action='store_true',
+                        help='Use distributed training with DDP')
+    parser.add_argument('--local-rank', type=int, default=-1,
+                        help='Local rank for distributed training (set automatically by torchrun)')
+    parser.add_argument('--backend', type=str, default='nccl',
+                        help='Distributed backend to use (nccl, gloo)')
+    parser.add_argument('--init-method', type=str, default='env://',
+                        help='URL to set up distributed training')
+    
     args = parser.parse_args()
+    
+    # Setup distributed training
+    device, rank, world_size = setup_distributed(args)
+    is_main_process = rank == 0
     
     # Create checkpoint directory
     checkpoint_dir = Path(args.checkpoint_dir)
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    if is_main_process:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
     
-    print("\n" + "="*60)
-    print("Training VIFT on TUM VI Dataset")
-    print("="*60)
-    print(f"Data directory: {args.data_dir}")
-    print(f"Batch size: {args.batch_size}")
-    print(f"Learning rate: {args.lr}")
-    print(f"Scale loss weight: {args.scale_loss_weight}")
-    print(f"Encoder type: {args.encoder_type}")
-    print("="*60 + "\n")
+    if is_main_process:
+        print("\n" + "="*60)
+        print("Training VIFT on TUM VI Dataset")
+        print("="*60)
+        print(f"Data directory: {args.data_dir}")
+        print(f"Batch size per GPU: {args.batch_size}")
+        print(f"Total batch size: {args.batch_size * world_size}")
+        print(f"Learning rate: {args.lr}")
+        print(f"Scale loss weight: {args.scale_loss_weight}")
+        print(f"Encoder type: {args.encoder_type}")
+        print(f"Distributed: {'Yes' if args.distributed else 'No'}")
+        print(f"World size: {world_size}")
+        print("="*60 + "\n")
     
     # Create data loaders
-    train_loader, val_loader = create_tumvi_data_loaders(
+    train_loader, val_loader, train_sampler = create_tumvi_data_loaders(
         args.data_dir,
         args.batch_size,
-        args.num_workers
+        args.num_workers,
+        distributed=args.distributed,
+        world_size=world_size,
+        rank=rank
     )
     
     # Create model
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = VIFTFromScratch(encoder_type=args.encoder_type).to(device)
+    model = VIFTFromScratch(
+        encoder_type=args.encoder_type,
+        transformer_layers=args.transformer_layers,
+        transformer_heads=args.transformer_heads,
+        transformer_dim_feedforward=args.transformer_dim_feedforward,
+        transformer_dropout=args.transformer_dropout
+    ).to(device)
     
-    # Count parameters
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"\nModel Parameters:")
-    print(f"  Total: {total_params:,}")
-    print(f"  Trainable: {trainable_params:,}")
+    # Wrap with DDP if distributed
+    if args.distributed:
+        model = DDP(
+            model,
+            device_ids=[args.local_rank],
+            output_device=args.local_rank,
+            find_unused_parameters=True
+        )
+        if is_main_process:
+            print(f"Using DistributedDataParallel with {world_size} GPUs")
+    
+    # Count parameters (only on main process)
+    if is_main_process:
+        base_model = model.module if hasattr(model, 'module') else model
+        total_params = sum(p.numel() for p in base_model.parameters())
+        trainable_params = sum(p.numel() for p in base_model.parameters() if p.requires_grad)
+        print(f"\nModel Parameters:")
+        print(f"  Total: {total_params:,}")
+        print(f"  Trainable: {trainable_params:,}")
     
     # Create optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -311,10 +424,15 @@ def main():
     
     # Training loop
     for epoch in range(start_epoch, args.epochs + 1):
-        print(f"\n{'='*60}")
-        print(f"Epoch {epoch}/{args.epochs}")
-        print(f"Learning rate: {optimizer.param_groups[0]['lr']:.2e}")
-        print(f"{'='*60}")
+        # Set epoch for distributed sampler
+        if args.distributed and train_sampler is not None:
+            train_sampler.set_epoch(epoch)
+        
+        if is_main_process:
+            print(f"\n{'='*60}")
+            print(f"Epoch {epoch}/{args.epochs}")
+            print(f"Learning rate: {optimizer.param_groups[0]['lr']:.2e}")
+            print(f"{'='*60}")
         
         # Train
         train_loss = train_epoch(
@@ -329,21 +447,28 @@ def main():
         # Step scheduler
         scheduler.step()
         
-        print(f"\nEpoch {epoch} Summary:")
-        print(f"  Train Loss: {train_loss:.6f}")
-        print(f"  Val Loss: {val_metrics['loss']:.6f}")
-        print(f"  Val Trans Error: {val_metrics['trans_error']*100:.2f} cm")
-        print(f"  Val Rot Error: {val_metrics['rot_error']:.2f}°")
+        # Only print and save on main process
+        if is_main_process:
+            print(f"\nEpoch {epoch} Summary:")
+            print(f"  Train Loss: {train_loss:.6f}")
+            print(f"  Val Loss: {val_metrics['loss']:.6f}")
+            print(f"  Val Trans Error: {val_metrics['trans_error']*100:.2f} cm")
+            print(f"  Val Rot Error: {val_metrics['rot_error']:.2f}°")
         
-        # Save checkpoint
-        checkpoint = {
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'scheduler_state_dict': scheduler.state_dict(),
-            'train_loss': train_loss,
-            'val_metrics': val_metrics,
-            'config': model.config.__dict__,
+        # Save checkpoints only on main process
+        if is_main_process:
+            # Get model state dict (unwrap DDP if needed)
+            model_state = model.module.state_dict() if hasattr(model, 'module') else model.state_dict()
+            base_model = model.module if hasattr(model, 'module') else model
+            
+            checkpoint = {
+                'epoch': epoch,
+                'model_state_dict': model_state,
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'train_loss': train_loss,
+                'val_metrics': val_metrics,
+                'config': base_model.config.__dict__,
             'best_val_loss': best_val_loss
         }
         
@@ -353,15 +478,19 @@ def main():
             torch.save(checkpoint, checkpoint_dir / 'best_model.pt')
             print("  ✓ New best model saved")
         
-        # Save latest model
-        torch.save(checkpoint, checkpoint_dir / 'latest_model.pt')
-        
-        # Save periodic checkpoints
-        if epoch % 5 == 0:
-            torch.save(checkpoint, checkpoint_dir / f'checkpoint_epoch_{epoch}.pt')
+            # Save latest model
+            torch.save(checkpoint, checkpoint_dir / 'latest_model.pt')
+            
+            # Save periodic checkpoints
+            if epoch % 5 == 0:
+                torch.save(checkpoint, checkpoint_dir / f'checkpoint_epoch_{epoch}.pt')
     
-    print(f"\nTraining complete! Best val loss: {best_val_loss:.6f}")
-    print(f"Checkpoints saved to: {checkpoint_dir}")
+    if is_main_process:
+        print(f"\nTraining complete! Best val loss: {best_val_loss:.6f}")
+        print(f"Checkpoints saved to: {checkpoint_dir}")
+    
+    # Clean up distributed training
+    cleanup_distributed()
 
 
 if __name__ == "__main__":
