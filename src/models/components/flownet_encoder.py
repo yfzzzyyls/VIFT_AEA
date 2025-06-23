@@ -198,9 +198,50 @@ class FlowNetCEncoder(nn.Module):
         v = self.visual_head(v)  # [B*seq_len, v_f_len]
         v = v.view(batch_size, seq_len, -1)  # [B, seq_len, v_f_len]
         
-        # Process IMU (same as original)
-        imu = torch.cat([imu[:, i * 10:i * 10 + 11, :].unsqueeze(1) 
-                        for i in range(seq_len)], dim=1)
+        # Process IMU data
+        # The original encoder expects different IMU spacing, but we'll adapt to what's provided
+        # Check the total IMU samples to determine the correct processing
+        total_imu_samples = imu.shape[1]
+        
+        if total_imu_samples == seq_len * 11:
+            # TUM VI style: 11 samples per transition, no overlap (110 samples for 10 transitions)
+            imu_list = []
+            for i in range(seq_len):
+                start_idx = i * 11
+                end_idx = start_idx + 11
+                if end_idx <= imu.shape[1]:
+                    imu_list.append(imu[:, start_idx:end_idx, :].unsqueeze(1))
+        elif total_imu_samples == seq_len * 10 + 1:
+            # Original VIFT style: 10 spacing + 11 samples (101 samples for 10 transitions)
+            imu_list = []
+            for i in range(seq_len):
+                start_idx = i * 10
+                end_idx = start_idx + 11
+                if end_idx <= imu.shape[1]:
+                    imu_list.append(imu[:, start_idx:end_idx, :].unsqueeze(1))
+        else:
+            # Fallback: try to extract what we can with 11 samples per transition
+            imu_list = []
+            for i in range(seq_len):
+                start_idx = i * 11
+                end_idx = min(start_idx + 11, imu.shape[1])
+                if start_idx < imu.shape[1]:
+                    segment = imu[:, start_idx:end_idx, :]
+                    # Pad if necessary
+                    if segment.shape[1] < 11:
+                        padding = torch.zeros(segment.shape[0], 11 - segment.shape[1], segment.shape[2], 
+                                            device=segment.device, dtype=segment.dtype)
+                        segment = torch.cat([segment, padding], dim=1)
+                    imu_list.append(segment.unsqueeze(1))
+            
+            # Ensure we have the right number of segments
+            while len(imu_list) < seq_len:
+                # Add zero-padded segments if needed
+                zeros = torch.zeros(imu.shape[0], 1, 11, imu.shape[2], 
+                                  device=imu.device, dtype=imu.dtype)
+                imu_list.append(zeros)
+        
+        imu = torch.cat(imu_list[:seq_len], dim=1)  # Ensure exactly seq_len segments
         imu = self.inertial_encoder(imu)
         
         return v, imu
