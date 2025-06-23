@@ -17,6 +17,12 @@ from torch.utils.data import Dataset
 from PIL import Image
 import pandas as pd
 from scipy import interpolate
+try:
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    print("Warning: Plotly not available. Interactive 3D plots will be disabled.")
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -268,7 +274,8 @@ class TUMVIDatasetDirect(Dataset):
 class VIFTFromScratch(torch.nn.Module):
     """VIFT model wrapper for evaluation."""
     
-    def __init__(self):
+    def __init__(self, encoder_type='flownet', transformer_layers=8, transformer_heads=16, 
+                 transformer_dim_feedforward=4096, transformer_dropout=0.1):
         super().__init__()
         
         # Model configuration (must match training)
@@ -289,10 +296,10 @@ class VIFTFromScratch(torch.nn.Module):
             
             # Transformer parameters
             embedding_dim = 768  # v_f_len + i_f_len
-            num_layers = 4
-            nhead = 8
-            dim_feedforward = 2048
-            dropout = 0.1
+            num_layers = transformer_layers
+            nhead = transformer_heads
+            dim_feedforward = transformer_dim_feedforward
+            dropout = transformer_dropout
             
             # For compatibility
             rnn_hidden_size = 512
@@ -301,6 +308,8 @@ class VIFTFromScratch(torch.nn.Module):
             fuse_method = 'cat'
         
         self.config = Config()
+        # Add encoder type after creating config
+        self.config.encoder_type = encoder_type
         self.backbone = TransformerVIO(self.config)
         
         # Replace output layer for quaternion output
@@ -357,11 +366,15 @@ def integrate_poses(relative_poses):
     """Integrate relative poses to get absolute trajectory."""
     positions = [np.zeros(3)]
     rotations = [np.eye(3)]
+    quaternions = [np.array([0, 0, 0, 1])]  # Identity quaternion
     
     for rel_pose in relative_poses:
         # Extract translation and rotation
         trans = rel_pose[:3]
         quat = rel_pose[3:]
+        
+        # Normalize quaternion
+        quat = quat / np.linalg.norm(quat)
         
         # Convert quaternion to rotation matrix
         R_rel = quaternion_to_rotation_matrix(quat)
@@ -370,10 +383,83 @@ def integrate_poses(relative_poses):
         R_abs = rotations[-1] @ R_rel
         t_abs = positions[-1] + rotations[-1] @ trans
         
+        # Convert absolute rotation back to quaternion
+        r_abs = R.from_matrix(R_abs)
+        q_abs = r_abs.as_quat()  # Returns [qx, qy, qz, qw]
+        
         positions.append(t_abs)
         rotations.append(R_abs)
+        quaternions.append(q_abs)
     
-    return np.array(positions), rotations
+    return np.array(positions), np.array(quaternions)
+
+
+def save_trajectory_csv(pred_positions, pred_rotations, gt_positions, gt_rotations, 
+                       sequence_name, output_dir):
+    """Save trajectory data to CSV files."""
+    import pandas as pd
+    
+    # Save ground truth CSV
+    gt_data = []
+    for i in range(len(gt_positions)):
+        row = {
+            'frame': i,
+            'x': gt_positions[i, 0],
+            'y': gt_positions[i, 1],
+            'z': gt_positions[i, 2]
+        }
+        if i < len(gt_rotations):
+            # Store quaternions
+            row.update({
+                'qx': gt_rotations[i][0],
+                'qy': gt_rotations[i][1],
+                'qz': gt_rotations[i][2],
+                'qw': gt_rotations[i][3]
+            })
+        gt_data.append(row)
+    
+    gt_df = pd.DataFrame(gt_data)
+    gt_csv_path = output_dir / f'trajectory_{sequence_name}_gt.csv'
+    gt_df.to_csv(gt_csv_path, index=False)
+    print(f"Saved ground truth to {gt_csv_path}")
+    
+    # Save prediction CSV with errors
+    pred_data = []
+    for i in range(len(pred_positions)):
+        row = {
+            'frame': i,
+            'x': pred_positions[i, 0],
+            'y': pred_positions[i, 1],
+            'z': pred_positions[i, 2]
+        }
+        
+        if i < len(pred_rotations):
+            # Store quaternions
+            row.update({
+                'qx': pred_rotations[i][0],
+                'qy': pred_rotations[i][1],
+                'qz': pred_rotations[i][2],
+                'qw': pred_rotations[i][3]
+            })
+        
+        # Add errors compared to ground truth
+        if i < len(gt_positions):
+            row['trans_error'] = np.linalg.norm(pred_positions[i] - gt_positions[i])
+            
+            if i < len(gt_rotations) and i < len(pred_rotations):
+                # Compute rotation error
+                gt_rot = R.from_quat(gt_rotations[i])
+                pred_rot = R.from_quat(pred_rotations[i])
+                rel_rot = gt_rot.inv() * pred_rot
+                rot_error = np.abs(rel_rot.magnitude() * 180 / np.pi)
+                row['rot_error_deg'] = rot_error
+        
+        pred_data.append(row)
+    
+    pred_df = pd.DataFrame(pred_data)
+    pred_csv_path = output_dir / f'trajectory_{sequence_name}_pred.csv'
+    pred_df.to_csv(pred_csv_path, index=False)
+    print(f"Saved predictions to {pred_csv_path}")
 
 
 def evaluate_sequence(model, dataset, device, sequence_name):
@@ -443,7 +529,7 @@ def evaluate_sequence(model, dataset, device, sequence_name):
     
     # Compute ATE on integrated trajectory
     # compute_ate returns (ate, aligned_trajectory, (R, t, s))
-    ate_raw, _, _ = compute_ate(pred_positions, gt_positions)
+    ate_raw, aligned_pred = compute_ate(pred_positions, gt_positions)
     
     # Align trajectories using Umeyama
     pred_aligned, R_align, t_align, s_align = align_trajectory(
@@ -451,7 +537,7 @@ def evaluate_sequence(model, dataset, device, sequence_name):
         gt_positions[:len(pred_positions)-1],
         with_scale=True
     )
-    ate_aligned, _, _ = compute_ate(pred_aligned, gt_positions[:len(pred_aligned)])
+    ate_aligned, _ = compute_ate(pred_aligned, gt_positions[:len(pred_aligned)])
     
     metrics = {
         'sequence': sequence_name,
@@ -463,7 +549,151 @@ def evaluate_sequence(model, dataset, device, sequence_name):
         'scale': s_align
     }
     
-    return metrics, pred_positions, gt_positions, pred_aligned
+    return metrics, pred_positions, gt_positions, pred_aligned, pred_rotations, gt_rotations
+
+
+def create_interactive_3d_plot(pred_positions, gt_positions, pred_aligned, sequence_name, output_path):
+    """Create interactive 3D trajectory plot using Plotly"""
+    if not PLOTLY_AVAILABLE:
+        return
+    
+    # Convert to centimeters
+    pred_positions_cm = pred_positions * 100
+    gt_positions_cm = gt_positions * 100
+    pred_aligned_cm = pred_aligned * 100
+    
+    # Create figure
+    fig = go.Figure()
+    
+    # Add ground truth trajectory
+    fig.add_trace(go.Scatter3d(
+        x=gt_positions_cm[:, 0],
+        y=gt_positions_cm[:, 1],
+        z=gt_positions_cm[:, 2],
+        mode='lines',
+        name='Ground Truth',
+        line=dict(color='green', width=4),
+        hovertemplate='GT<br>X: %{x:.2f}cm<br>Y: %{y:.2f}cm<br>Z: %{z:.2f}cm<extra></extra>'
+    ))
+    
+    # Add predicted trajectory
+    fig.add_trace(go.Scatter3d(
+        x=pred_positions_cm[:, 0],
+        y=pred_positions_cm[:, 1],
+        z=pred_positions_cm[:, 2],
+        mode='lines',
+        name='Prediction (Raw)',
+        line=dict(color='blue', width=4),
+        hovertemplate='Pred<br>X: %{x:.2f}cm<br>Y: %{y:.2f}cm<br>Z: %{z:.2f}cm<extra></extra>'
+    ))
+    
+    # Add aligned predicted trajectory
+    fig.add_trace(go.Scatter3d(
+        x=pred_aligned_cm[:, 0],
+        y=pred_aligned_cm[:, 1],
+        z=pred_aligned_cm[:, 2],
+        mode='lines',
+        name='Prediction (Aligned)',
+        line=dict(color='red', width=4, dash='dash'),
+        hovertemplate='Aligned<br>X: %{x:.2f}cm<br>Y: %{y:.2f}cm<br>Z: %{z:.2f}cm<extra></extra>'
+    ))
+    
+    # Add start and end markers
+    fig.add_trace(go.Scatter3d(
+        x=[gt_positions_cm[0, 0]],
+        y=[gt_positions_cm[0, 1]],
+        z=[gt_positions_cm[0, 2]],
+        mode='markers',
+        name='Start',
+        marker=dict(color='green', size=10, symbol='circle'),
+        showlegend=True
+    ))
+    
+    fig.add_trace(go.Scatter3d(
+        x=[gt_positions_cm[-1, 0]],
+        y=[gt_positions_cm[-1, 1]],
+        z=[gt_positions_cm[-1, 2]],
+        mode='markers',
+        name='End',
+        marker=dict(color='red', size=10, symbol='x'),
+        showlegend=True
+    ))
+    
+    # Calculate path lengths and errors
+    gt_length = np.sum(np.linalg.norm(np.diff(gt_positions, axis=0), axis=1)) * 100
+    pred_length = np.sum(np.linalg.norm(np.diff(pred_positions, axis=0), axis=1)) * 100
+    ape_mean = np.mean(np.linalg.norm(pred_positions - gt_positions[:len(pred_positions)], axis=1)) * 100
+    
+    # Update layout
+    fig.update_layout(
+        title=dict(
+            text=f'TUM VI - {sequence_name} - Interactive 3D Trajectory<br>' +
+                 f'GT Length: {gt_length:.1f}cm, Pred Length: {pred_length:.1f}cm, APE: {ape_mean:.2f}cm',
+            font=dict(size=20)
+        ),
+        scene=dict(
+            xaxis_title='X (cm)',
+            yaxis_title='Y (cm)',
+            zaxis_title='Z (cm)',
+            aspectmode='data',
+            camera=dict(
+                eye=dict(x=1.5, y=1.5, z=1.5)
+            )
+        ),
+        width=1200,
+        height=800,
+        hovermode='closest'
+    )
+    
+    # Save HTML
+    fig.write_html(output_path, include_plotlyjs='cdn')
+    print(f"Saved interactive 3D plot to {output_path}")
+
+
+def plot_trajectory_3d_static(pred_positions, gt_positions, pred_aligned, sequence_name, output_path):
+    """Create static 3D trajectory plot with matplotlib"""
+    fig = plt.figure(figsize=(12, 10))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Convert to centimeters for display
+    pred_positions_cm = pred_positions * 100
+    gt_positions_cm = gt_positions * 100
+    pred_aligned_cm = pred_aligned * 100
+    
+    # Plot trajectories
+    ax.plot(gt_positions_cm[:, 0], gt_positions_cm[:, 1], gt_positions_cm[:, 2], 
+            'g-', linewidth=2, label='Ground Truth')
+    ax.plot(pred_positions_cm[:, 0], pred_positions_cm[:, 1], pred_positions_cm[:, 2], 
+            'b-', linewidth=2, label='Prediction (Raw)', alpha=0.8)
+    ax.plot(pred_aligned_cm[:, 0], pred_aligned_cm[:, 1], pred_aligned_cm[:, 2], 
+            'r--', linewidth=2, label='Prediction (Aligned)', alpha=0.8)
+    
+    # Mark start and end
+    ax.scatter(*gt_positions_cm[0], color='green', s=100, marker='o', label='Start')
+    ax.scatter(*gt_positions_cm[-1], color='red', s=100, marker='x', label='End')
+    
+    # Calculate path lengths
+    gt_length = np.sum(np.linalg.norm(np.diff(gt_positions, axis=0), axis=1)) * 100
+    pred_length = np.sum(np.linalg.norm(np.diff(pred_positions, axis=0), axis=1)) * 100
+    
+    ax.set_xlabel('X (cm)')
+    ax.set_ylabel('Y (cm)')
+    ax.set_zlabel('Z (cm)')
+    
+    # Set equal aspect ratio for all axes
+    try:
+        ax.set_box_aspect([1, 1, 1])  # Available in matplotlib >= 3.4
+    except AttributeError:
+        # Fallback for older matplotlib versions
+        pass
+    
+    ax.set_title(f'TUM VI - {sequence_name} - 3D Trajectory\nGT Length: {gt_length:.1f}cm, Pred Length: {pred_length:.1f}cm')
+    ax.legend()
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    print(f"Saved static 3D plot to {output_path}")
 
 
 def plot_trajectory(pred_positions, gt_positions, pred_aligned, sequence_name, output_dir):
@@ -549,12 +779,34 @@ def main():
     print("Loading model...")
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
     
-    # Check if encoder_type is stored in checkpoint config
-    encoder_type = 'flownet'  # Default to FlowNet-C
-    if 'config' in checkpoint and hasattr(checkpoint['config'], 'encoder_type'):
-        encoder_type = checkpoint['config'].encoder_type
+    # Extract model configuration from checkpoint
+    # Default to older model configuration for backward compatibility
+    encoder_type = 'cnn'  # Default to CNN for old checkpoints
+    transformer_layers = 4
+    transformer_heads = 8
+    transformer_dim_feedforward = 2048
+    transformer_dropout = 0.1
     
-    model = VIFTFromScratch(encoder_type=encoder_type)
+    if 'config' in checkpoint:
+        config = checkpoint['config']
+        if hasattr(config, 'encoder_type'):
+            encoder_type = config.encoder_type
+        if hasattr(config, 'num_layers'):
+            transformer_layers = config.num_layers
+        if hasattr(config, 'nhead'):
+            transformer_heads = config.nhead
+        if hasattr(config, 'dim_feedforward'):
+            transformer_dim_feedforward = config.dim_feedforward
+        if hasattr(config, 'dropout'):
+            transformer_dropout = config.dropout
+    
+    model = VIFTFromScratch(
+        encoder_type=encoder_type,
+        transformer_layers=transformer_layers,
+        transformer_heads=transformer_heads,
+        transformer_dim_feedforward=transformer_dim_feedforward,
+        transformer_dropout=transformer_dropout
+    )
     
     if 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -576,7 +828,7 @@ def main():
     )
     
     # Evaluate
-    metrics, pred_pos, gt_pos, pred_aligned = evaluate_sequence(
+    metrics, pred_pos, gt_pos, pred_aligned, pred_rot, gt_rot = evaluate_sequence(
         model, dataset, device, sequence_name
     )
     
@@ -591,6 +843,17 @@ def main():
     
     # Plot trajectory
     plot_trajectory(pred_pos, gt_pos, pred_aligned, sequence_name, output_dir)
+    
+    # Create static 3D plot
+    plot_trajectory_3d_static(pred_pos, gt_pos, pred_aligned, sequence_name, 
+                              output_dir / f"{sequence_name}_trajectory_3d.png")
+    
+    # Create interactive 3D plot
+    create_interactive_3d_plot(pred_pos, gt_pos, pred_aligned, sequence_name,
+                               output_dir / f"{sequence_name}_trajectory_3d_interactive.html")
+    
+    # Save trajectory CSV files
+    save_trajectory_csv(pred_pos, pred_rot, gt_pos, gt_rot, sequence_name, output_dir)
     
     # Save summary
     summary_path = output_dir / f"{sequence_name}_evaluation_summary.txt"

@@ -22,6 +22,10 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from src.models.components.vsvio import TransformerVIO
 from src.data.components.tumvi_dataset import TUMVIDataset
+try:
+    from src.data.components.tumvi_fast_dataset import TUMVIFastDataset
+except ImportError:
+    TUMVIFastDataset = None
 from train_aria_from_scratch import VIFTFromScratch, compute_loss, robust_geodesic_loss_stable
 
 
@@ -62,7 +66,7 @@ def cleanup_distributed():
         dist.destroy_process_group()
 
 
-def create_tumvi_data_loaders(data_root, batch_size, num_workers=4, distributed=False, world_size=1, rank=0):
+def create_tumvi_data_loaders(data_root, batch_size, num_workers=4, stride=10, distributed=False, world_size=1, rank=0):
     """Create TUM VI data loaders with proper directory structure."""
     data_root = Path(data_root)
     
@@ -85,12 +89,31 @@ def create_tumvi_data_loaders(data_root, batch_size, num_workers=4, distributed=
         for seq_path in seq_paths:
             if seq_path.exists() and (seq_path / 'mav0').exists():
                 print(f"Found training sequence at: {seq_path}")
-                dataset = TUMVIDataset(
-                    root_dir=seq_path.parent,
-                    sequence=seq_path.name,
-                    sequence_length=11,
-                    stride=1  # Dense sampling for training
-                )
+                
+                # Check if preprocessed data exists
+                use_fast = False
+                if TUMVIFastDataset and (seq_path / 'mav0' / 'cam0' / 'data').exists():
+                    # Check for .npy files
+                    npy_files = list((seq_path / 'mav0' / 'cam0' / 'data').glob('*.npy'))
+                    if len(npy_files) > 0:
+                        use_fast = True
+                        print(f"  Using preprocessed data (found {len(npy_files)} .npy files)")
+                
+                if use_fast:
+                    dataset = TUMVIFastDataset(
+                        root_dir=seq_path.parent,
+                        sequence=seq_path.name,
+                        sequence_length=11,
+                        stride=stride,
+                        use_preprocessed=True
+                    )
+                else:
+                    dataset = TUMVIDataset(
+                        root_dir=seq_path.parent,
+                        sequence=seq_path.name,
+                        sequence_length=11,
+                        stride=stride
+                    )
                 train_datasets.append(dataset)
                 break
         else:
@@ -113,12 +136,31 @@ def create_tumvi_data_loaders(data_root, batch_size, num_workers=4, distributed=
         for seq_path in seq_paths:
             if seq_path.exists() and (seq_path / 'mav0').exists():
                 print(f"Found validation sequence at: {seq_path}")
-                dataset = TUMVIDataset(
-                    root_dir=seq_path.parent,
-                    sequence=seq_path.name,
-                    sequence_length=11,
-                    stride=10  # Sparse sampling for validation
-                )
+                
+                # Check if preprocessed data exists
+                use_fast = False
+                if TUMVIFastDataset and (seq_path / 'mav0' / 'cam0' / 'data').exists():
+                    # Check for .npy files
+                    npy_files = list((seq_path / 'mav0' / 'cam0' / 'data').glob('*.npy'))
+                    if len(npy_files) > 0:
+                        use_fast = True
+                        print(f"  Using preprocessed data (found {len(npy_files)} .npy files)")
+                
+                if use_fast:
+                    dataset = TUMVIFastDataset(
+                        root_dir=seq_path.parent,
+                        sequence=seq_path.name,
+                        sequence_length=11,
+                        stride=max(stride, 10),
+                        use_preprocessed=True
+                    )
+                else:
+                    dataset = TUMVIDataset(
+                        root_dir=seq_path.parent,
+                        sequence=seq_path.name,
+                        sequence_length=11,
+                        stride=max(stride, 10)  # At least stride 10 for validation
+                    )
                 val_datasets.append(dataset)
                 break
         else:
@@ -310,6 +352,8 @@ def main():
                         help='Number of data loading workers')
     parser.add_argument('--scale-loss-weight', type=float, default=20.0,
                         help='Weight for scale consistency loss')
+    parser.add_argument('--stride', type=int, default=10,
+                        help='Stride for creating training sequences (default: 10, use 1 for dense sampling)')
     parser.add_argument('--encoder-type', type=str, default='flownet', choices=['cnn', 'flownet'],
                         help='Type of visual encoder to use (default: flownet)')
     
@@ -357,6 +401,7 @@ def main():
         print(f"Learning rate: {args.lr}")
         print(f"Scale loss weight: {args.scale_loss_weight}")
         print(f"Encoder type: {args.encoder_type}")
+        print(f"Stride: {args.stride}")
         print(f"Distributed: {'Yes' if args.distributed else 'No'}")
         print(f"World size: {world_size}")
         print("="*60 + "\n")
@@ -366,6 +411,7 @@ def main():
         args.data_dir,
         args.batch_size,
         args.num_workers,
+        stride=args.stride,
         distributed=args.distributed,
         world_size=world_size,
         rank=rank
@@ -469,15 +515,15 @@ def main():
                 'train_loss': train_loss,
                 'val_metrics': val_metrics,
                 'config': base_model.config.__dict__,
-            'best_val_loss': best_val_loss
-        }
-        
-        # Save best model
-        if val_metrics['loss'] < best_val_loss:
-            best_val_loss = val_metrics['loss']
-            torch.save(checkpoint, checkpoint_dir / 'best_model.pt')
-            print("  ✓ New best model saved")
-        
+                'best_val_loss': best_val_loss
+            }
+            
+            # Save best model
+            if val_metrics['loss'] < best_val_loss:
+                best_val_loss = val_metrics['loss']
+                torch.save(checkpoint, checkpoint_dir / 'best_model.pt')
+                print("  ✓ New best model saved")
+            
             # Save latest model
             torch.save(checkpoint, checkpoint_dir / 'latest_model.pt')
             

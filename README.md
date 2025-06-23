@@ -172,7 +172,7 @@ python prepare_aria_splits.py --source-dir aria_processed
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
     --data-dir aria_processed \
     --epochs 50 \
-    --batch-size 64 \
+    --batch-size 32 \
     --checkpoint-dir checkpoints_from_scratch \
     --distributed
 
@@ -180,7 +180,7 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py \
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
     --data-dir aria_processed \
     --epochs 50 \
-    --batch-size 96 \
+    --batch-size 48 \
     --checkpoint-dir checkpoints_medium_transformer \
     --transformer-layers 6 \
     --transformer-heads 12 \
@@ -192,7 +192,7 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py \
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
     --data-dir aria_processed \
     --epochs 50 \
-    --batch-size 128 \
+    --batch-size 64 \
     --checkpoint-dir checkpoints_small_transformer \
     --transformer-layers 4 \
     --transformer-heads 8 \
@@ -206,6 +206,13 @@ python evaluate_from_scratch.py \
     --output-dir evaluation_from_scratch \
     --batch-size 16 \
     --num-workers 4
+
+# The evaluation will automatically:
+# - Compute translation and rotation errors
+# - Generate trajectory plots (saved in output directory)
+# - Calculate Absolute Pose Error (APE) and Relative Pose Error (RPE)
+# - Save predicted and ground truth trajectories as CSV files
+# - Create interactive 3D HTML visualizations using Plotly
 ```
 
 ### Workflow 5: Train and Test on TUM VI Dataset
@@ -219,126 +226,54 @@ source venv/bin/activate
 ./extract_corridor_datasets.sh
 
 # 3. Train on TUM VI (uses FlowNet-C by default, includes all corridor sequences)
-# With A6000 GPU (48GB), we can use larger batch sizes
-python train_on_tumvi.py \
-    --data-dir /mnt/ssd_ext/incSeg-data/tumvi \
+
+# IMPORTANT: First preprocess images for 10x faster training!
+python preprocess_tumvi_images.py --num-workers 32
+
+# Option A: Efficient architecture (Recommended - 2x faster, minimal accuracy loss)
+torchrun --nproc_per_node=4 train_on_tumvi.py \
+    --data-dir /mnt/ssd_ext/incSeg-data/tumvi_preprocessed \
     --epochs 30 \
     --batch-size 32 \
     --lr 1e-4 \
     --checkpoint-dir checkpoints_tumvi \
-    --num-workers 8
+    --transformer-layers 3 \
+    --transformer-heads 8 \
+    --transformer-dim-feedforward 2048 \
+    --distributed \
+    --stride 5 \
+    --num-workers 4
 
-# For distributed training on TUM VI with 4 GPUs (recommended for A6000s)
+# Option B: Full architecture (if maximum accuracy needed)
 torchrun --nproc_per_node=4 train_on_tumvi.py \
-    --data-dir /mnt/ssd_ext/incSeg-data/tumvi \
+    --data-dir /mnt/ssd_ext/incSeg-data/tumvi_preprocessed \
     --epochs 30 \
     --batch-size 24 \
     --lr 1e-4 \
-    --checkpoint-dir checkpoints_tumvi_distributed \
+    --checkpoint-dir checkpoints_tumvi_full \
     --distributed \
+    --stride 5 \
     --num-workers 4
-
-# Medium transformer (6 layers, 12 heads)
-python train_on_tumvi.py \
-    --data-dir /mnt/ssd_ext/incSeg-data/tumvi \
-    --epochs 30 \
-    --batch-size 48 \
-    --lr 1e-4 \
-    --checkpoint-dir checkpoints_tumvi_medium \
-    --transformer-layers 6 \
-    --transformer-heads 12 \
-    --transformer-dim-feedforward 3072 \
-    --num-workers 8
-
-# Small transformer (4 layers, 8 heads) - can handle very large batches
-python train_on_tumvi.py \
-    --data-dir /mnt/ssd_ext/incSeg-data/tumvi \
-    --epochs 30 \
-    --batch-size 64 \
-    --lr 1e-4 \
-    --checkpoint-dir checkpoints_tumvi_small \
-    --transformer-layers 4 \
-    --transformer-heads 8 \
-    --transformer-dim-feedforward 2048 \
-    --num-workers 8
 
 # 4. Monitor training
 tail -f checkpoints_tumvi/train.log
 
-# 5. Evaluate on specific sequence
-python evaluate_tumvi_standalone.py \
-    --checkpoint checkpoints_tumvi/best_model.pt \
-    --sequence-dir /mnt/ssd_ext/incSeg-data/tumvi/dataset-room6_512_16 \
-    --output-dir evaluation_tumvi
-
-# 6. Evaluate on multiple sequences
+# 5. Evaluate on test set (room6 + corridor5)
+# Evaluate each test sequence separately
 for seq in room6 corridor5; do
     python evaluate_tumvi_standalone.py \
         --checkpoint checkpoints_tumvi/best_model.pt \
         --sequence-dir /mnt/ssd_ext/incSeg-data/tumvi/dataset-${seq}_512_16 \
         --output-dir evaluation_tumvi/${seq}
 done
-```
 
-## Evaluation Scripts
-
-### For Aria Dataset
-
-```bash
-# Evaluate model trained from scratch
-python evaluate_from_scratch.py \
-    --checkpoint checkpoints_from_scratch/best_model.pt \
-    --data-dir aria_processed \
-    --output-dir evaluation_aria \
-    --batch-size 16 \
-    --num-workers 4
-
-# The evaluation script will:
-# - Compute translation and rotation errors
-# - Generate trajectory plots (saved in output directory)
-# - Calculate Absolute Pose Error (APE) and Relative Pose Error (RPE)
-# - Save predicted and ground truth trajectories as CSV files
-# - Create interactive 3D HTML visualizations using Plotly
-```
-
-### For TUM VI Dataset
-
-```bash
-# Evaluate on single sequence
-python evaluate_tumvi_standalone.py \
-    --checkpoint checkpoints_tumvi/best_model.pt \
-    --sequence-dir /mnt/ssd_ext/incSeg-data/tumvi/dataset-room6_512_16 \
-    --output-dir evaluation_tumvi \
-    --device cuda
-
-# Batch evaluation on all test sequences
-python evaluate_tumvi_standalone.py \
-    --checkpoint checkpoints_tumvi/best_model.pt \
-    --sequence-dir /mnt/ssd_ext/incSeg-data/tumvi/dataset-room6_512_16 \
-    --output-dir evaluation_tumvi/room6
-
-python evaluate_tumvi_standalone.py \
-    --checkpoint checkpoints_tumvi/best_model.pt \
-    --sequence-dir /mnt/ssd_ext/incSeg-data/tumvi/dataset-corridor5_512_16 \
-    --output-dir evaluation_tumvi/corridor5
-
-# Note: The evaluation script generates trajectory plots and metrics automatically
-```
-
-### Cross-Dataset Evaluation
-
-```bash
-# Test Aria model on TUM VI
-python evaluate_tumvi_standalone.py \
-    --checkpoint checkpoints_from_scratch/best_model.pt \
-    --sequence /mnt/ssd_ext/incSeg-data/tumvi/dataset-room6_512_16 \
-    --output-dir cross_eval/aria_on_tumvi
-
-# Test TUM VI model on Aria (requires data format conversion)
-python evaluate_from_scratch.py \
-    --checkpoint checkpoints_tumvi/best_model.pt \
-    --data-dir aria_processed \
-    --output-dir cross_eval/tumvi_on_aria
+# Optional: Evaluate on validation sequences (room5 + corridor4)
+for seq in room5 corridor4; do
+    python evaluate_tumvi_standalone.py \
+        --checkpoint checkpoints_tumvi/best_model.pt \
+        --sequence-dir /mnt/ssd_ext/incSeg-data/tumvi/dataset-${seq}_512_16 \
+        --output-dir evaluation_tumvi/val_${seq}
+done
 ```
 
 ## Important: IMU Data Format
