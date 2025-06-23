@@ -232,18 +232,19 @@ source venv/bin/activate
 python preprocess_tumvi_images.py --num-workers 32
 
 # Option A: Efficient architecture (Recommended - 2x faster, minimal accuracy loss)
-torchrun --nproc_per_node=4 train_on_tumvi.py \
-    --data-dir /mnt/ssd_ext/incSeg-data/tumvi_preprocessed \
-    --epochs 30 \
-    --batch-size 32 \
-    --lr 1e-4 \
-    --checkpoint-dir checkpoints_tumvi \
-    --transformer-layers 3 \
-    --transformer-heads 8 \
-    --transformer-dim-feedforward 2048 \
-    --distributed \
-    --stride 5 \
-    --num-workers 4
+ torchrun --nproc_per_node=4 train_on_tumvi.py \
+      --data-dir /mnt/ssd_ext/incSeg-data/tumvi_preprocessed \
+      --epochs 30 \
+      --batch-size 8 \
+      --gradient-accumulation-steps 4 \
+      --lr 1e-4 \
+      --checkpoint-dir checkpoints_tumvi \
+      --transformer-layers 3 \
+      --transformer-heads 8 \
+      --transformer-dim-feedforward 2048 \
+      --distributed \
+      --stride 5 \
+      --num-workers 4
 
 # Option B: Full architecture (if maximum accuracy needed)
 torchrun --nproc_per_node=4 train_on_tumvi.py \

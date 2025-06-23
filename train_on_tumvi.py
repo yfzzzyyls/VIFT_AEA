@@ -221,11 +221,12 @@ def create_tumvi_data_loaders(data_root, batch_size, num_workers=4, stride=10, d
     return train_loader, val_loader, train_sampler
 
 
-def train_epoch(model, dataloader, optimizer, device, epoch, scale_loss_weight=20.0):
-    """Train one epoch."""
+def train_epoch(model, dataloader, optimizer, device, epoch, scale_loss_weight=20.0, gradient_accumulation_steps=1):
+    """Train one epoch with gradient accumulation support."""
     model.train()
     total_loss = 0
     num_batches = 0
+    optimizer.zero_grad()
     
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}")
     for batch_idx, batch in enumerate(progress_bar):
@@ -248,30 +249,37 @@ def train_epoch(model, dataloader, optimizer, device, epoch, scale_loss_weight=2
         
         loss = loss_dict['total_loss']
         
+        # Scale loss by gradient accumulation steps
+        loss = loss / gradient_accumulation_steps
+        
         # Check for NaN
         if torch.isnan(loss):
             print(f"NaN loss detected at batch {batch_idx}, skipping...")
             continue
         
         # Backward pass
-        optimizer.zero_grad()
         loss.backward()
         
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        # Gradient clipping and optimizer step only after accumulation
+        if (batch_idx + 1) % gradient_accumulation_steps == 0 or (batch_idx + 1) == len(dataloader):
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
+            # Optimizer step
+            optimizer.step()
+            optimizer.zero_grad()
         
-        optimizer.step()
-        
-        # Update metrics
-        total_loss += loss.item()
+        # Update metrics (unscale loss for accurate reporting)
+        total_loss += loss.item() * gradient_accumulation_steps
         num_batches += 1
         
         # Update progress bar
         progress_bar.set_postfix({
-            'loss': f"{loss.item():.4f}",
+            'loss': f"{loss.item() * gradient_accumulation_steps:.4f}",
             'trans': f"{loss_dict['trans_loss'].item():.4f}",
             'rot': f"{loss_dict['rot_loss'].item():.4f}",
-            'scale': f"{loss_dict['scale_loss'].item():.4f}"
+            'scale': f"{loss_dict['scale_loss'].item():.4f}",
+            'acc_step': f"{(batch_idx % gradient_accumulation_steps) + 1}/{gradient_accumulation_steps}"
         })
     
     return total_loss / num_batches if num_batches > 0 else float('inf')
@@ -329,6 +337,9 @@ def validate(model, dataloader, device, scale_loss_weight=20.0):
             total_rot_error += rot_error.item()
             num_batches += 1
     
+    # Clear GPU cache to free memory
+    torch.cuda.empty_cache()
+    
     return {
         'loss': total_loss / num_batches if num_batches > 0 else float('inf'),
         'trans_error': total_trans_error / num_batches if num_batches > 0 else float('inf'),
@@ -356,6 +367,8 @@ def main():
                         help='Stride for creating training sequences (default: 10, use 1 for dense sampling)')
     parser.add_argument('--encoder-type', type=str, default='flownet', choices=['cnn', 'flownet'],
                         help='Type of visual encoder to use (default: flownet)')
+    parser.add_argument('--gradient-accumulation-steps', type=int, default=1,
+                        help='Number of gradient accumulation steps (default: 1)')
     
     # Transformer architecture arguments
     parser.add_argument('--transformer-layers', type=int, default=8,
@@ -397,7 +410,9 @@ def main():
         print("="*60)
         print(f"Data directory: {args.data_dir}")
         print(f"Batch size per GPU: {args.batch_size}")
-        print(f"Total batch size: {args.batch_size * world_size}")
+        print(f"Gradient accumulation steps: {args.gradient_accumulation_steps}")
+        print(f"Effective batch size per GPU: {args.batch_size * args.gradient_accumulation_steps}")
+        print(f"Total effective batch size: {args.batch_size * args.gradient_accumulation_steps * world_size}")
         print(f"Learning rate: {args.lr}")
         print(f"Scale loss weight: {args.scale_loss_weight}")
         print(f"Encoder type: {args.encoder_type}")
@@ -483,7 +498,8 @@ def main():
         # Train
         train_loss = train_epoch(
             model, train_loader, optimizer, device, epoch,
-            scale_loss_weight=args.scale_loss_weight
+            scale_loss_weight=args.scale_loss_weight,
+            gradient_accumulation_steps=args.gradient_accumulation_steps
         )
         
         # Validate
