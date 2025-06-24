@@ -23,10 +23,28 @@ class FlowNetLSTMTransformer(nn.Module):
         super().__init__()
         self.config = config
         
-        # Visual encoder: FlowNet for motion extraction
-        self.visual_encoder = FlowNetMotionEncoder(
-            output_dim=config.visual_feature_dim
-        )
+        # Visual encoder: Choose between FlowNet and ResNet18
+        if hasattr(config, 'encoder_type'):
+            encoder_type = config.encoder_type
+        else:
+            encoder_type = 'flownet'  # Default to FlowNet for backward compatibility
+            
+        if encoder_type == 'resnet18':
+            from .resnet_motion_encoder import ResNet18MotionEncoder
+            self.visual_encoder = ResNet18MotionEncoder(
+                output_dim=config.visual_feature_dim,
+                pretrained=getattr(config, 'pretrained', True)
+            )
+        elif encoder_type == 'resnet18_diff':
+            from .resnet_motion_encoder import ResNet18DifferenceEncoder
+            self.visual_encoder = ResNet18DifferenceEncoder(
+                output_dim=config.visual_feature_dim,
+                pretrained=getattr(config, 'pretrained', True)
+            )
+        else:  # Default to FlowNet
+            self.visual_encoder = FlowNetMotionEncoder(
+                output_dim=config.visual_feature_dim
+            )
         
         # IMU encoder: LSTM for temporal processing
         self.imu_encoder = IMULSTMEncoder(

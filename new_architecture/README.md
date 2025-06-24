@@ -44,26 +44,26 @@ python process_aria.py \
 cd /home/external/VIFT_AEA/new_architecture
 
 # Default training with 704×704 images (best quality/speed tradeoff)
-./train_distributed.sh
+./run_training_final.sh
 
 # OR manually:
-torchrun --nproc_per_node=4 train_flownet_lstm_transformer_preload.py \
+torchrun --nproc_per_node=4 train_flownet_lstm_transformer_optimized.py \
     --distributed \
     --use-amp \
     --variable-length \
     --data-dir ../aria_processed \
-    --batch-size 16 \
-    --num-workers 4 \
-    --learning-rate 8e-4 \
+    --batch-size 8 \
+    --num-workers 2 \
+    --learning-rate 1.2e-3 \
     --num-epochs 100 \
-    --min-seq-len 10 \
-    --max-seq-len 50 \
+    --min-seq-len 11 \
+    --max-seq-len 41 \
     --curriculum-step 10 \
-    --curriculum-increment 5 \
+    --curriculum-increment 4 \
     --stride 5 \
     --use-curriculum \
-    --checkpoint-dir checkpoints/exp_704_4gpu_bs16_1k \
-    --experiment-name flownet_lstm_704_bs16_1k
+    --checkpoint-dir checkpoints/exp_final_4gpu \
+    --experiment-name flownet_lstm_final
 ```
 
 #### Alternative: 512×512 Resolution (1.9× faster, slightly lower quality)
@@ -113,13 +113,14 @@ tail -f checkpoints/exp_512_4gpu/train.log
 ## Key Training Arguments
 
 - `--data-dir`: Path to processed Aria data (use `../aria_processed` from new_architecture)
-- `--image-height/width`: Resolution (512 or 704 recommended)
-- `--batch-size`: Batch size per GPU (4 for 704×704, 8 for 512×512)
-- `--num-workers`: DataLoader workers per GPU (4 recommended for maximum GPU utilization)
-- `--learning-rate`: Base LR (scale by num_gpus, e.g., 4e-4 for 4 GPUs)
-- `--min-seq-len`: Starting sequence length (default: 10 frames = 0.5s)
+- `--image-height/width`: Resolution (704×704 default, no resizing needed)
+- `--batch-size`: Batch size per GPU (8 for 704×704 with 4x A6000)
+- `--num-workers`: DataLoader workers per GPU (2 recommended to reduce memory overhead)
+- `--learning-rate`: Base LR (1.2e-3 for batch size 32 total)
+- `--min-seq-len`: Starting sequence length (default: 11 frames = 0.55s)
+- `--max-seq-len`: Maximum sequence length (default: 41 frames = 2.05s)
 - `--curriculum-step`: Epochs between sequence length increases (default: 10)
-- `--curriculum-increment`: Frames to add each step (default: 5)
+- `--curriculum-increment`: Frames to add each step (default: 4)
 - `--stride`: Sliding window stride (default: 5)
 
 ## Model Configuration
@@ -210,8 +211,8 @@ outputs = model(images, imu_sequences)
 | Resolution | Memory/GPU | Training Speed | Quality | Recommendation |
 |------------|------------|----------------|---------|----------------|
 | 512×512    | ~28GB      | 1.9× faster    | Good    | ✅ For experiments |
-| 704×704    | ~38GB      | 1.0× (baseline)| Better  | ✅ **Default** |
-| 1408×1408  | ~45GB+     | 7.5× slower    | Best    | ❌ Too slow |
+| 704×704    | ~45GB      | 1.0× (baseline)| Better  | ✅ **Default** |
+| 1408×1408  | OOM        | N/A            | Best    | ❌ Too large |
 
 **Why 704×704 as default?**
 - Aria's native resolution is 1408×1408
@@ -222,15 +223,15 @@ outputs = model(images, imu_sequences)
 ## Curriculum Learning Schedule
 
 ```
-Epochs   1-10:  10 frames (0.50s)  ← Start simple
+Epochs   1-10:  11 frames (0.55s)  ← Start (matches original VIFT)
 Epochs  11-20:  15 frames (0.75s)
-Epochs  21-30:  20 frames (1.00s)
-Epochs  31-40:  25 frames (1.25s)
-Epochs  41-50:  30 frames (1.50s)  ← AR/VR typical
-Epochs  51-60:  35 frames (1.75s)
-Epochs  61-70:  40 frames (2.00s)
-Epochs  71-80:  45 frames (2.25s)
-Epochs  81-90:  50 frames (2.50s)  ← Maximum
+Epochs  21-30:  19 frames (0.95s)
+Epochs  31-40:  23 frames (1.15s)
+Epochs  41-50:  27 frames (1.35s)  ← AR/VR typical
+Epochs  51-60:  31 frames (1.55s)
+Epochs  61-70:  35 frames (1.75s)
+Epochs  71-80:  39 frames (1.95s)
+Epochs  81-90:  41 frames (2.05s)  ← Maximum
 ```
 
 ## Evaluation
@@ -238,9 +239,9 @@ Epochs  81-90:  50 frames (2.50s)  ← Maximum
 ```bash
 # Evaluate on test set (704×704 model)
 python evaluate_flownet_lstm_transformer.py \
-    --checkpoint checkpoints/exp_704_4gpu/best_model.pt \
-    --data-dir aria_processed \
-    --output-dir evaluation/exp_704_4gpu \
+    --checkpoint checkpoints/exp_final_4gpu/best_model.pt \
+    --data-dir ../aria_processed \
+    --output-dir evaluation/exp_final_4gpu \
     --batch-size 6 \
     --sequence-length 31 \
     --image-height 704 \
@@ -263,12 +264,13 @@ python evaluate_flownet_lstm_transformer.py \
    
 2. **Batch Size Tuning**:
    - 512×512: batch_size=8-12 per GPU
-   - 704×704: batch_size=6 per GPU (default)
+   - 704×704: batch_size=8 per GPU (with optimized memory usage)
    - Use gradient accumulation if needed
 
 3. **Learning Rate**:
-   - Scale linearly with GPUs: 1e-4 × num_gpus
-   - Use warmup for first 5 epochs
+   - Scale with total batch size: base_lr × (total_batch_size / 8)
+   - Current: 1.2e-3 for batch size 32 (8 per GPU × 4 GPUs)
+   - Use warmup for first 2 epochs if unstable
 
 4. **Monitoring**:
    - Watch GPU memory usage in first epoch
@@ -313,19 +315,19 @@ python process_aria.py \
 cd /home/external/VIFT_AEA/new_architecture
 
 # 2.2 Start distributed training with 4 GPUs
-./train_distributed.sh
+./run_training_final.sh
 
 # Monitor training progress
 # Terminal 1: Watch GPU usage
 watch -n 1 nvidia-smi
 
 # Terminal 2: Monitor training logs
-tail -f checkpoints/exp_704_4gpu/train.log
+tail -f checkpoints/exp_final_4gpu/train.log
 
 # Training will save:
-# - Best model: checkpoints/exp_704_4gpu/best_model.pt
+# - Best model: checkpoints/exp_final_4gpu/best_model.pt
 # - Periodic checkpoints: checkpoint_epoch_5.pt, epoch_10.pt, etc.
-# - Training metrics: checkpoints/exp_704_4gpu/metrics.json
+# - Training metrics: checkpoints/exp_final_4gpu/metrics.json
 ```
 
 ### Step 3: Evaluation
@@ -333,17 +335,17 @@ tail -f checkpoints/exp_704_4gpu/train.log
 ```bash
 # 3.1 Evaluate on test set
 python evaluate_flownet_lstm_transformer.py \
-    --checkpoint checkpoints/exp_704_4gpu/best_model.pt \
+    --checkpoint checkpoints/exp_final_4gpu/best_model.pt \
     --data-dir ../aria_processed \
-    --output-dir evaluation/exp_704_4gpu \
+    --output-dir evaluation/exp_final_4gpu \
     --split test \
     --batch-size 6 \
     --sequence-length 31
 
 # Outputs:
-# - evaluation/exp_704_4gpu/metrics.json        # Quantitative metrics
-# - evaluation/exp_704_4gpu/visualizations/     # Trajectory plots
-# - evaluation/exp_704_4gpu/detailed_results.npz # Raw predictions
+# - evaluation/exp_final_4gpu/metrics.json        # Quantitative metrics
+# - evaluation/exp_final_4gpu/visualizations/     # Trajectory plots
+# - evaluation/exp_final_4gpu/detailed_results.npz # Raw predictions
 ```
 
 ### Step 4: Inference
@@ -360,7 +362,7 @@ from torch.utils.data import DataLoader
 # Load model
 config = ModelConfig()
 model = FlowNetLSTMTransformer(config)
-checkpoint = torch.load('checkpoints/exp_704_4gpu/best_model.pt')
+checkpoint = torch.load('checkpoints/exp_final_4gpu/best_model.pt')
 model.load_state_dict(checkpoint['model_state_dict'])
 model.eval()
 model.cuda()
@@ -445,7 +447,7 @@ class RealTimeVIO:
             return outputs['poses'].cpu().numpy()
 
 # Usage
-vio = RealTimeVIO('checkpoints/exp_704_4gpu/best_model.pt')
+vio = RealTimeVIO('checkpoints/exp_final_4gpu/best_model.pt')
 
 # Process incoming frames
 for frame, imu in data_stream:
@@ -459,8 +461,8 @@ for frame, imu in data_stream:
 
 ```bash
 # 5.1 Fine-tune on specific sequences or scenarios
-python train_flownet_lstm_transformer.py \
-    --checkpoint checkpoints/exp_704_4gpu/best_model.pt \
+python train_flownet_lstm_transformer_optimized.py \
+    --checkpoint checkpoints/exp_final_4gpu/best_model.pt \
     --data-dir ../aria_processed_custom \
     --learning-rate 1e-5 \
     --num-epochs 20 \
@@ -475,7 +477,7 @@ python train_flownet_lstm_transformer.py \
    ```bash
    # Convert to TorchScript for faster inference
    python export_model.py \
-       --checkpoint checkpoints/exp_704_4gpu/best_model.pt \
+       --checkpoint checkpoints/exp_final_4gpu/best_model.pt \
        --output model.pt
    ```
 

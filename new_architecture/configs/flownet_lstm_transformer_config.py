@@ -10,7 +10,9 @@ from typing import Optional
 @dataclass
 class ModelConfig:
     """Model architecture configuration."""
-    # Visual encoder (FlowNet)
+    # Visual encoder
+    encoder_type: str = 'resnet18'  # Options: 'flownet', 'resnet18', 'resnet18_diff'
+    pretrained: bool = True  # Use pretrained weights for ResNet
     visual_feature_dim: int = 256
     
     # IMU encoder (LSTM)
@@ -109,6 +111,8 @@ class Config:
     def from_args(cls, args: argparse.Namespace) -> "Config":
         """Create config from command line arguments."""
         model_config = ModelConfig(
+            encoder_type=args.encoder_type,
+            pretrained=args.pretrained,
             visual_feature_dim=args.visual_feature_dim,
             imu_hidden_dim=args.imu_hidden_dim,
             imu_lstm_layers=args.imu_lstm_layers,
@@ -172,6 +176,11 @@ def get_parser() -> argparse.ArgumentParser:
     
     # Model arguments
     model_group = parser.add_argument_group("Model")
+    model_group.add_argument("--encoder-type", type=str, default='resnet18',
+                            choices=['flownet', 'resnet18', 'resnet18_diff'],
+                            help="Visual encoder type")
+    model_group.add_argument("--pretrained", action="store_true", default=True,
+                            help="Use pretrained weights for ResNet")
     model_group.add_argument("--visual-feature-dim", type=int, default=256,
                             help="Visual encoder output dimension")
     model_group.add_argument("--imu-hidden-dim", type=int, default=128,
