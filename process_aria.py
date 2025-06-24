@@ -515,8 +515,8 @@ def main():
                        help='Path to raw AriaEveryday dataset')
     parser.add_argument('--output-dir', type=str, default='./aria_processed',
                        help='Output directory')
-    parser.add_argument('--max-frames', type=int, default=-1,
-                       help='Max frames per sequence (default: -1 = all frames, no subsampling)')
+    parser.add_argument('--max-frames', type=int, default=2000,
+                       help='Max frames per sequence (default: 2000 frames = 100 seconds)')
     parser.add_argument('--num-workers', type=int, default=4,
                        help='Number of parallel workers')
     

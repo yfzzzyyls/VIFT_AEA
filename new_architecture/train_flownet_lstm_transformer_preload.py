@@ -1,15 +1,7 @@
 #!/usr/bin/env python3
 """
 Training script for FlowNet-LSTM-Transformer architecture on Aria dataset.
-Supports variable-length sequences and all IMU data (~50 samples per frame interval).
-
-Usage:
-    # Single GPU training
-    python train_flownet_lstm_transformer.py --use-amp --variable-length
-    
-    # Multi-GPU training with DDP
-    torchrun --nproc_per_node=4 train_flownet_lstm_transformer.py \
-        --distributed --use-amp --variable-length
+Uses preloaded dataset for better performance with workers.
 """
 
 import os
@@ -35,7 +27,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from models.flownet_lstm_transformer import FlowNetLSTMTransformer
-from data.aria_variable_imu_dataset import AriaVariableIMUDataset, collate_variable_imu
+from data.aria_variable_imu_dataset_preload import AriaVariableIMUDataset, collate_variable_imu
 from configs.flownet_lstm_transformer_config import get_config, Config
 from utils.losses import compute_pose_loss, quaternion_geodesic_loss
 from utils.metrics import compute_trajectory_metrics
@@ -109,7 +101,10 @@ def create_model(config: Config, device: torch.device) -> nn.Module:
 
 def create_dataloaders(config: Config, rank: int, world_size: int):
     """Create training and validation dataloaders."""
-    # Training dataset
+    # Training dataset - only create once on main process first to avoid multiple loads
+    if rank == 0:
+        print("Main process loading training dataset...")
+    
     train_dataset = AriaVariableIMUDataset(
         data_dir=config.data.data_dir,
         split='train',
@@ -149,7 +144,7 @@ def create_dataloaders(config: Config, rank: int, world_size: int):
         shuffle=(train_sampler is None),
         sampler=train_sampler,
         num_workers=config.data.num_workers,
-        pin_memory=True,  # Always use pin_memory=True like the working script
+        pin_memory=True,
         drop_last=True,
         collate_fn=collate_variable_imu
     )
@@ -160,7 +155,7 @@ def create_dataloaders(config: Config, rank: int, world_size: int):
         shuffle=False,
         sampler=val_sampler,
         num_workers=config.data.num_workers,
-        pin_memory=True,  # Always use pin_memory=True like the working script
+        pin_memory=True,
         drop_last=False,
         collate_fn=collate_variable_imu
     )
@@ -379,7 +374,7 @@ def main():
     # Print configuration
     if is_main_process:
         print("\n" + "="*80)
-        print("FlowNet-LSTM-Transformer Training")
+        print("FlowNet-LSTM-Transformer Training (Preloaded Dataset)")
         print("="*80)
         print(f"Experiment: {config.experiment_name}")
         print(f"Device: {device}")

@@ -291,14 +291,16 @@ class IMULSTMEncoder(nn.Module):
             imu_features: [B, T-1, output_dim] - Encoded IMU features
         """
         B = len(imu_sequences)
-        T_minus_1 = len(imu_sequences[0])
-        device = imu_sequences[0][0].device
+        # Find the maximum sequence length in the batch for padding
+        max_T_minus_1 = max(len(seq) for seq in imu_sequences)
+        device = imu_sequences[0][0].device if len(imu_sequences[0]) > 0 else torch.device('cuda')
         
         all_features = []
         
         # Process each batch element
         for b in range(B):
             sequence_features = []
+            T_minus_1 = len(imu_sequences[b])
             
             # Process each IMU segment between consecutive frames
             for t in range(T_minus_1):
@@ -329,12 +331,16 @@ class IMULSTMEncoder(nn.Module):
                 
                 sequence_features.append(features)
             
+            # Pad sequence if needed to match max length
+            while len(sequence_features) < max_T_minus_1:
+                sequence_features.append(torch.zeros(self.output_dim, device=device))
+            
             # Stack features for this batch element
-            sequence_features = torch.stack(sequence_features)  # [T-1, output_dim]
+            sequence_features = torch.stack(sequence_features)  # [max_T-1, output_dim]
             all_features.append(sequence_features)
         
         # Stack all batch elements
-        return torch.stack(all_features)  # [B, T-1, output_dim]
+        return torch.stack(all_features)  # [B, max_T-1, output_dim]
 
 
 class PoseTransformer(nn.Module):

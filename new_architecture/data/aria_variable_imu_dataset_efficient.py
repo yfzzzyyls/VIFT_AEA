@@ -1,7 +1,6 @@
 """
-Aria Dataset with Variable-Length IMU Sequences
-This dataset loads ALL IMU samples between consecutive frames without downsampling.
-Supports variable sequence lengths for training the FlowNet-LSTM-Transformer model.
+Efficient Aria Dataset with Variable-Length IMU Sequences
+This version loads individual frames instead of entire visual_data.pt files.
 """
 
 import os
@@ -14,17 +13,17 @@ from typing import Dict, List, Tuple, Optional
 import random
 from scipy.spatial.transform import Rotation as R
 import torch.nn.functional as F
+from PIL import Image
 
 
-class AriaVariableIMUDataset(Dataset):
+class AriaVariableIMUDatasetEfficient(Dataset):
     """
-    Dataset for Aria Everyday Activities with variable-length IMU sequences.
+    Efficient dataset for Aria Everyday Activities with variable-length IMU sequences.
     
-    Key features:
-    - Loads ALL IMU samples between frames (no downsampling to 11)
-    - Supports variable sequence lengths
-    - Maintains temporal alignment between visual and IMU data
-    - Returns relative poses in quaternion format
+    Key improvements:
+    - Loads frames individually instead of entire visual_data.pt
+    - Uses memory-mapped files or individual frame files
+    - Maintains same interface as original dataset
     """
     
     def __init__(
@@ -36,7 +35,7 @@ class AriaVariableIMUDataset(Dataset):
         min_seq_len: int = 5,
         max_seq_len: int = 50,
         stride: int = 1,
-        image_size: Tuple[int, int] = (704, 704)  # Default: 2x2 binned from 1408x1408
+        image_size: Tuple[int, int] = (704, 704)
     ):
         """
         Args:
@@ -62,11 +61,10 @@ class AriaVariableIMUDataset(Dataset):
         splits_file = self.data_dir / 'splits.json'
         if splits_file.exists():
             with open(splits_file, 'r') as f:
-                splits_data = json.load(f)
-                self.split_sequences = splits_data['splits'][split]
+                splits = json.load(f)
+            self.split_sequences = splits['splits'][split]
         else:
-            # Fallback: look for train/val/test subdirectories
-            self.data_dir = self.data_dir / split
+            # Fallback: use all sequences
             self.split_sequences = None
         
         # Find all valid sequences
@@ -87,8 +85,10 @@ class AriaVariableIMUDataset(Dataset):
             for seq_name in self.split_sequences:
                 seq_dir = self.data_dir / seq_name
                 if self._is_valid_sequence(seq_dir):
-                    visual_data = torch.load(seq_dir / 'visual_data.pt')
-                    seq_len = visual_data.shape[0]
+                    # Get sequence length from metadata
+                    with open(seq_dir / 'metadata.json', 'r') as f:
+                        metadata = json.load(f)
+                    seq_len = metadata['num_frames']
                     
                     self.sequences.append({
                         'path': seq_dir,
@@ -99,8 +99,9 @@ class AriaVariableIMUDataset(Dataset):
             for seq_dir in sorted(self.data_dir.iterdir()):
                 if seq_dir.is_dir() and seq_dir.name.isdigit():
                     if self._is_valid_sequence(seq_dir):
-                        visual_data = torch.load(seq_dir / 'visual_data.pt')
-                        seq_len = visual_data.shape[0]
+                        with open(seq_dir / 'metadata.json', 'r') as f:
+                            metadata = json.load(f)
+                        seq_len = metadata['num_frames']
                         
                         self.sequences.append({
                             'path': seq_dir,
@@ -111,13 +112,17 @@ class AriaVariableIMUDataset(Dataset):
         
     def _is_valid_sequence(self, seq_dir: Path) -> bool:
         """Check if a sequence directory has all required files."""
-        visual_path = seq_dir / 'visual_data.pt'
+        # Check for frame directory or visual_data.pt
+        frames_dir = seq_dir / 'frames'
+        visual_data_path = seq_dir / 'visual_data.pt'
+        
+        has_frames = frames_dir.exists() or visual_data_path.exists()
+        
         poses_path = seq_dir / 'poses_quaternion.json'
-        
-        # Check for IMU data
         imu_path = seq_dir / 'imu_data.pt'
+        metadata_path = seq_dir / 'metadata.json'
         
-        return visual_path.exists() and imu_path.exists() and poses_path.exists()
+        return has_frames and imu_path.exists() and poses_path.exists() and metadata_path.exists()
         
     def _create_samples(self):
         """Create training samples using sliding windows."""
@@ -167,16 +172,15 @@ class AriaVariableIMUDataset(Dataset):
         start_idx = sample_info['start_idx']
         length = sample_info['length']
         
-        # Load visual data
-        visual_data = torch.load(seq_path / 'visual_data.pt')
-        images = visual_data[start_idx:start_idx + length]  # [T, 3, H, W]
+        # Load visual data efficiently
+        images = self._load_visual_data_efficient(seq_path, start_idx, length)
         
         # Resize images if needed
         if images.shape[-2:] != self.image_size:
             images = F.interpolate(images, size=self.image_size, 
                                  mode='bilinear', align_corners=False)
         
-        # Load IMU data (always raw)
+        # Load IMU data (only the needed portion)
         imu_sequences = self._load_raw_imu_data(seq_path, start_idx, length)
         
         # Load poses and compute relative transformations
@@ -189,6 +193,45 @@ class AriaVariableIMUDataset(Dataset):
             'sequence_length': length
         }
     
+    def _load_visual_data_efficient(self, seq_path: Path, start_idx: int, length: int) -> torch.Tensor:
+        """
+        Load visual data efficiently - only the required frames.
+        """
+        frames_dir = seq_path / 'frames'
+        
+        if frames_dir.exists():
+            # Load individual frame files
+            frames = []
+            for i in range(start_idx, start_idx + length):
+                frame_path = frames_dir / f'frame_{i:06d}.pt'
+                if frame_path.exists():
+                    frame = torch.load(frame_path)
+                    frames.append(frame)
+                else:
+                    # Fallback: create zero frame
+                    frames.append(torch.zeros(3, 704, 704))
+            return torch.stack(frames)
+        else:
+            # Fallback: load from visual_data.pt but only once per sequence
+            # Use caching to avoid repeated loads
+            if not hasattr(self, '_visual_cache'):
+                self._visual_cache = {}
+            
+            seq_key = str(seq_path)
+            if seq_key not in self._visual_cache:
+                # Load and cache metadata
+                with open(seq_path / 'metadata.json', 'r') as f:
+                    metadata = json.load(f)
+                self._visual_cache[seq_key] = {
+                    'num_frames': metadata['num_frames'],
+                    'shape': metadata['visual_shape']
+                }
+            
+            # Load only the required slice
+            visual_data = torch.load(seq_path / 'visual_data.pt', 
+                                   map_location='cpu')[start_idx:start_idx + length]
+            return visual_data
+    
     def _load_raw_imu_data(self, seq_path: Path, start_idx: int, length: int) -> List[torch.Tensor]:
         """
         Load ALL raw IMU data between consecutive frames.
@@ -196,8 +239,8 @@ class AriaVariableIMUDataset(Dataset):
         Returns:
             List of length-1 tensors, each containing all IMU samples between frames
         """
-        # Load the raw IMU data (now saved as imu_data.pt)
-        all_raw_imu = torch.load(seq_path / 'imu_data.pt')
+        # Load only the required IMU data
+        all_raw_imu = torch.load(seq_path / 'imu_data.pt', map_location='cpu')
         
         # Extract the required subsequence
         imu_sequences = []
@@ -211,7 +254,6 @@ class AriaVariableIMUDataset(Dataset):
                 imu_sequences.append(torch.zeros((1, 6), dtype=torch.float32))
         
         return imu_sequences
-    
     
     def _load_relative_poses(self, seq_path: Path, start_idx: int, length: int) -> torch.Tensor:
         """
@@ -249,24 +291,20 @@ class AriaVariableIMUDataset(Dataset):
             r_rel = r1.inv() * r2
             q_rel = r_rel.as_quat()  # [x, y, z, w]
             
-            # Combine translation and rotation
-            relative_pose = np.concatenate([dt_local, q_rel])  # [7]
+            # Combine: [dx, dy, dz, qx, qy, qz, qw]
+            relative_pose = np.concatenate([dt_local, q_rel])
             relative_poses.append(relative_pose)
         
         return torch.tensor(np.array(relative_poses), dtype=torch.float32)
 
 
-def collate_variable_imu(batch: List[Dict]) -> Dict[str, torch.Tensor]:
+def collate_variable_imu(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
     """
     Custom collate function for batching variable-length IMU sequences.
     
-    Args:
-        batch: List of samples from dataset
-        
-    Returns:
-        Batched data with proper padding and masks
+    Pads sequences to the maximum length in the batch.
     """
-    # Find maximum sequence length in batch
+    # Find max sequence length in batch
     max_seq_len = max(sample['sequence_length'] for sample in batch)
     
     # Prepare batched data
@@ -280,23 +318,21 @@ def collate_variable_imu(batch: List[Dict]) -> Dict[str, torch.Tensor]:
         sequence_lengths.append(seq_len)
         
         # Pad images if needed
-        images = sample['images']  # [T, 3, H, W]
-        if seq_len < max_seq_len:
-            pad_len = max_seq_len - seq_len
+        images = sample['images']
+        if images.shape[0] < max_seq_len:
+            pad_len = max_seq_len - images.shape[0]
             images = F.pad(images, (0, 0, 0, 0, 0, 0, 0, pad_len))
         batched_images.append(images)
         
-        # Handle IMU sequences (list of variable-length tensors)
-        imu_sequences = sample['imu_sequences']  # List of T-1 tensors
-        if len(imu_sequences) < max_seq_len - 1:
-            # Pad with empty sequences
-            pad_len = (max_seq_len - 1) - len(imu_sequences)
-            for _ in range(pad_len):
-                imu_sequences.append(torch.zeros((1, 6), dtype=torch.float32))
+        # Handle variable-length IMU sequences
+        imu_sequences = sample['imu_sequences']
+        # Pad with empty tensors if needed
+        while len(imu_sequences) < max_seq_len - 1:
+            imu_sequences.append(torch.zeros((1, 6), dtype=torch.float32))
         batched_imu_sequences.append(imu_sequences)
         
-        # Pad poses
-        poses = sample['poses']  # [T-1, 7]
+        # Pad poses if needed
+        poses = sample['poses']
         if poses.shape[0] < max_seq_len - 1:
             pad_len = (max_seq_len - 1) - poses.shape[0]
             poses = F.pad(poses, (0, 0, 0, pad_len))

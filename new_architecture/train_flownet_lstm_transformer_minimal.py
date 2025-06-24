@@ -35,7 +35,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from models.flownet_lstm_transformer import FlowNetLSTMTransformer
-from data.aria_variable_imu_dataset import AriaVariableIMUDataset, collate_variable_imu
+from data.aria_variable_imu_dataset_minimal import AriaVariableIMUDataset, collate_variable_imu
 from configs.flownet_lstm_transformer_config import get_config, Config
 from utils.losses import compute_pose_loss, quaternion_geodesic_loss
 from utils.metrics import compute_trajectory_metrics

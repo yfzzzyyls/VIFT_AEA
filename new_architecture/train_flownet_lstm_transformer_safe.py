@@ -1,15 +1,7 @@
 #!/usr/bin/env python3
 """
 Training script for FlowNet-LSTM-Transformer architecture on Aria dataset.
-Supports variable-length sequences and all IMU data (~50 samples per frame interval).
-
-Usage:
-    # Single GPU training
-    python train_flownet_lstm_transformer.py --use-amp --variable-length
-    
-    # Multi-GPU training with DDP
-    torchrun --nproc_per_node=4 train_flownet_lstm_transformer.py \
-        --distributed --use-amp --variable-length
+Safe version with multiprocessing fixes.
 """
 
 import os
@@ -35,7 +27,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from models.flownet_lstm_transformer import FlowNetLSTMTransformer
-from data.aria_variable_imu_dataset import AriaVariableIMUDataset, collate_variable_imu
+from data.aria_variable_imu_dataset_mmap import AriaVariableIMUDataset, collate_variable_imu
 from configs.flownet_lstm_transformer_config import get_config, Config
 from utils.losses import compute_pose_loss, quaternion_geodesic_loss
 from utils.metrics import compute_trajectory_metrics
@@ -107,6 +99,12 @@ def create_model(config: Config, device: torch.device) -> nn.Module:
     return model
 
 
+def worker_init_fn(worker_id):
+    """Initialize each worker process with a unique random seed."""
+    np.random.seed(np.random.get_state()[1][0] + worker_id)
+    torch.manual_seed(torch.initial_seed() + worker_id)
+
+
 def create_dataloaders(config: Config, rank: int, world_size: int):
     """Create training and validation dataloaders."""
     # Training dataset
@@ -142,16 +140,18 @@ def create_dataloaders(config: Config, rank: int, world_size: int):
         train_sampler = None
         val_sampler = None
     
-    # Create dataloaders with stable settings
+    # Create dataloaders with safe settings
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.data.batch_size,
         shuffle=(train_sampler is None),
         sampler=train_sampler,
-        num_workers=config.data.num_workers,
-        pin_memory=True,  # Always use pin_memory=True like the working script
+        num_workers=min(config.data.num_workers, 2),  # Limit workers to avoid memory issues
+        pin_memory=True,
         drop_last=True,
-        collate_fn=collate_variable_imu
+        collate_fn=collate_variable_imu,
+        worker_init_fn=worker_init_fn,
+        persistent_workers=True if config.data.num_workers > 0 else False
     )
     
     val_loader = DataLoader(
@@ -159,10 +159,12 @@ def create_dataloaders(config: Config, rank: int, world_size: int):
         batch_size=config.data.batch_size,
         shuffle=False,
         sampler=val_sampler,
-        num_workers=config.data.num_workers,
-        pin_memory=True,  # Always use pin_memory=True like the working script
+        num_workers=min(config.data.num_workers, 2),
+        pin_memory=True,
         drop_last=False,
-        collate_fn=collate_variable_imu
+        collate_fn=collate_variable_imu,
+        worker_init_fn=worker_init_fn,
+        persistent_workers=True if config.data.num_workers > 0 else False
     )
     
     return train_loader, val_loader, train_sampler
@@ -194,23 +196,35 @@ def train_epoch(
         pbar = dataloader
     
     for batch_idx, batch in enumerate(pbar):
-        # Move data to device
-        images = batch['images'].to(device)
-        poses_gt = batch['poses'].to(device)
-        sequence_lengths = batch['sequence_lengths'].to(device)
-        
-        # Move IMU sequences to device
-        imu_sequences = batch['imu_sequences']
-        for b in range(len(imu_sequences)):
-            for t in range(len(imu_sequences[b])):
-                imu_sequences[b][t] = imu_sequences[b][t].to(device)
-        
-        # Zero gradients
-        optimizer.zero_grad()
-        
-        # Forward pass with mixed precision
-        if config.training.use_amp and scaler is not None:
-            with autocast('cuda'):
+        try:
+            # Move data to device
+            images = batch['images'].to(device)
+            poses_gt = batch['poses'].to(device)
+            sequence_lengths = batch['sequence_lengths'].to(device)
+            
+            # Move IMU sequences to device
+            imu_sequences = batch['imu_sequences']
+            for b in range(len(imu_sequences)):
+                for t in range(len(imu_sequences[b])):
+                    imu_sequences[b][t] = imu_sequences[b][t].to(device)
+            
+            # Zero gradients
+            optimizer.zero_grad()
+            
+            # Forward pass with mixed precision
+            if config.training.use_amp and scaler is not None:
+                with autocast('cuda'):
+                    outputs = model(images, imu_sequences)
+                    loss_dict = compute_pose_loss(
+                        outputs['poses'],
+                        poses_gt,
+                        sequence_lengths,
+                        translation_weight=config.training.translation_weight,
+                        rotation_weight=config.training.rotation_weight,
+                        scale_weight=config.training.scale_weight
+                    )
+                    loss = loss_dict['total_loss']
+            else:
                 outputs = model(images, imu_sequences)
                 loss_dict = compute_pose_loss(
                     outputs['poses'],
@@ -221,57 +235,49 @@ def train_epoch(
                     scale_weight=config.training.scale_weight
                 )
                 loss = loss_dict['total_loss']
-        else:
-            outputs = model(images, imu_sequences)
-            loss_dict = compute_pose_loss(
-                outputs['poses'],
-                poses_gt,
-                sequence_lengths,
-                translation_weight=config.training.translation_weight,
-                rotation_weight=config.training.rotation_weight,
-                scale_weight=config.training.scale_weight
-            )
-            loss = loss_dict['total_loss']
-        
-        # Check for NaN
-        if torch.isnan(loss):
-            print(f"NaN loss detected at batch {batch_idx}, skipping...")
+            
+            # Check for NaN
+            if torch.isnan(loss):
+                print(f"NaN loss detected at batch {batch_idx}, skipping...")
+                continue
+            
+            # Backward pass
+            if config.training.use_amp and scaler is not None:
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config.training.max_grad_norm)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config.training.max_grad_norm)
+                optimizer.step()
+            
+            # Update statistics
+            total_loss += loss.item()
+            trans_loss_sum += loss_dict['translation_loss'].item()
+            rot_loss_sum += loss_dict['rotation_loss'].item()
+            scale_loss_sum += loss_dict['scale_loss'].item()
+            num_batches += 1
+            
+            # Update progress bar
+            if rank == 0 and batch_idx % config.training.log_every == 0:
+                pbar.set_postfix({
+                    'loss': f"{loss.item():.4f}",
+                    'trans': f"{loss_dict['translation_loss'].item():.4f}",
+                    'rot': f"{loss_dict['rotation_loss'].item():.4f}",
+                    'scale': f"{loss_dict['scale_loss'].item():.4f}"
+                })
+        except Exception as e:
+            print(f"Error in batch {batch_idx}: {str(e)}")
             continue
-        
-        # Backward pass
-        if config.training.use_amp and scaler is not None:
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.training.max_grad_norm)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.training.max_grad_norm)
-            optimizer.step()
-        
-        # Update statistics
-        total_loss += loss.item()
-        trans_loss_sum += loss_dict['translation_loss'].item()
-        rot_loss_sum += loss_dict['rotation_loss'].item()
-        scale_loss_sum += loss_dict['scale_loss'].item()
-        num_batches += 1
-        
-        # Update progress bar
-        if rank == 0 and batch_idx % config.training.log_every == 0:
-            pbar.set_postfix({
-                'loss': f"{loss.item():.4f}",
-                'trans': f"{loss_dict['translation_loss'].item():.4f}",
-                'rot': f"{loss_dict['rotation_loss'].item():.4f}",
-                'scale': f"{loss_dict['scale_loss'].item():.4f}"
-            })
     
     # Average losses
     avg_losses = {
-        'total_loss': total_loss / num_batches,
-        'translation_loss': trans_loss_sum / num_batches,
-        'rotation_loss': rot_loss_sum / num_batches,
-        'scale_loss': scale_loss_sum / num_batches
+        'total_loss': total_loss / num_batches if num_batches > 0 else float('inf'),
+        'translation_loss': trans_loss_sum / num_batches if num_batches > 0 else float('inf'),
+        'rotation_loss': rot_loss_sum / num_batches if num_batches > 0 else float('inf'),
+        'scale_loss': scale_loss_sum / num_batches if num_batches > 0 else float('inf')
     }
     
     return avg_losses
@@ -299,45 +305,49 @@ def validate(
     
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Validation", disable=(rank != 0)):
-            # Move data to device
-            images = batch['images'].to(device)
-            poses_gt = batch['poses'].to(device)
-            sequence_lengths = batch['sequence_lengths'].to(device)
-            
-            # Move IMU sequences to device
-            imu_sequences = batch['imu_sequences']
-            for b in range(len(imu_sequences)):
-                for t in range(len(imu_sequences[b])):
-                    imu_sequences[b][t] = imu_sequences[b][t].to(device)
-            
-            # Forward pass
-            outputs = model(images, imu_sequences)
-            loss_dict = compute_pose_loss(
-                outputs['poses'],
-                poses_gt,
-                sequence_lengths,
-                translation_weight=config.training.translation_weight,
-                rotation_weight=config.training.rotation_weight,
-                scale_weight=config.training.scale_weight
-            )
-            
-            # Update statistics
-            total_loss += loss_dict['total_loss'].item()
-            trans_loss_sum += loss_dict['translation_loss'].item()
-            rot_loss_sum += loss_dict['rotation_loss'].item()
-            scale_loss_sum += loss_dict['scale_loss'].item()
-            num_batches += 1
-            
-            # Store predictions for trajectory metrics
-            all_predictions.append(outputs['poses'].cpu())
-            all_ground_truth.append(poses_gt.cpu())
+            try:
+                # Move data to device
+                images = batch['images'].to(device)
+                poses_gt = batch['poses'].to(device)
+                sequence_lengths = batch['sequence_lengths'].to(device)
+                
+                # Move IMU sequences to device
+                imu_sequences = batch['imu_sequences']
+                for b in range(len(imu_sequences)):
+                    for t in range(len(imu_sequences[b])):
+                        imu_sequences[b][t] = imu_sequences[b][t].to(device)
+                
+                # Forward pass
+                outputs = model(images, imu_sequences)
+                loss_dict = compute_pose_loss(
+                    outputs['poses'],
+                    poses_gt,
+                    sequence_lengths,
+                    translation_weight=config.training.translation_weight,
+                    rotation_weight=config.training.rotation_weight,
+                    scale_weight=config.training.scale_weight
+                )
+                
+                # Update statistics
+                total_loss += loss_dict['total_loss'].item()
+                trans_loss_sum += loss_dict['translation_loss'].item()
+                rot_loss_sum += loss_dict['rotation_loss'].item()
+                scale_loss_sum += loss_dict['scale_loss'].item()
+                num_batches += 1
+                
+                # Store predictions for trajectory metrics
+                all_predictions.append(outputs['poses'].cpu())
+                all_ground_truth.append(poses_gt.cpu())
+            except Exception as e:
+                print(f"Error in validation batch: {str(e)}")
+                continue
     
     # Average losses
     avg_losses = {
-        'total_loss': total_loss / num_batches,
-        'translation_loss': trans_loss_sum / num_batches,
-        'rotation_loss': rot_loss_sum / num_batches,
-        'scale_loss': scale_loss_sum / num_batches
+        'total_loss': total_loss / num_batches if num_batches > 0 else float('inf'),
+        'translation_loss': trans_loss_sum / num_batches if num_batches > 0 else float('inf'),
+        'rotation_loss': rot_loss_sum / num_batches if num_batches > 0 else float('inf'),
+        'scale_loss': scale_loss_sum / num_batches if num_batches > 0 else float('inf')
     }
     
     # Compute trajectory metrics if on main process
@@ -379,7 +389,7 @@ def main():
     # Print configuration
     if is_main_process:
         print("\n" + "="*80)
-        print("FlowNet-LSTM-Transformer Training")
+        print("FlowNet-LSTM-Transformer Training (Safe Version)")
         print("="*80)
         print(f"Experiment: {config.experiment_name}")
         print(f"Device: {device}")

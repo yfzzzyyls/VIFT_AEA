@@ -1,15 +1,7 @@
 #!/usr/bin/env python3
 """
 Training script for FlowNet-LSTM-Transformer architecture on Aria dataset.
-Supports variable-length sequences and all IMU data (~50 samples per frame interval).
-
-Usage:
-    # Single GPU training
-    python train_flownet_lstm_transformer.py --use-amp --variable-length
-    
-    # Multi-GPU training with DDP
-    torchrun --nproc_per_node=4 train_flownet_lstm_transformer.py \
-        --distributed --use-amp --variable-length
+Fixed version with proper multiprocessing handling.
 """
 
 import os
@@ -25,10 +17,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torch.amp import autocast, GradScaler
+from torch.cuda.amp import autocast, GradScaler
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
+
+# Set multiprocessing start method
+import torch.multiprocessing as mp
+mp.set_start_method('spawn', force=True)
 
 # Add project paths
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -142,16 +138,18 @@ def create_dataloaders(config: Config, rank: int, world_size: int):
         train_sampler = None
         val_sampler = None
     
-    # Create dataloaders with stable settings
+    # Create dataloaders with fixes
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.data.batch_size,
         shuffle=(train_sampler is None),
         sampler=train_sampler,
         num_workers=config.data.num_workers,
-        pin_memory=True,  # Always use pin_memory=True like the working script
+        pin_memory=False,  # Disable pin_memory to avoid issues
         drop_last=True,
-        collate_fn=collate_variable_imu
+        collate_fn=collate_variable_imu,
+        persistent_workers=(config.data.num_workers > 0),  # Keep workers alive
+        prefetch_factor=2 if config.data.num_workers > 0 else None
     )
     
     val_loader = DataLoader(
@@ -160,9 +158,11 @@ def create_dataloaders(config: Config, rank: int, world_size: int):
         shuffle=False,
         sampler=val_sampler,
         num_workers=config.data.num_workers,
-        pin_memory=True,  # Always use pin_memory=True like the working script
+        pin_memory=False,
         drop_last=False,
-        collate_fn=collate_variable_imu
+        collate_fn=collate_variable_imu,
+        persistent_workers=(config.data.num_workers > 0),
+        prefetch_factor=2 if config.data.num_workers > 0 else None
     )
     
     return train_loader, val_loader, train_sampler
@@ -210,7 +210,7 @@ def train_epoch(
         
         # Forward pass with mixed precision
         if config.training.use_amp and scaler is not None:
-            with autocast('cuda'):
+            with torch.amp.autocast('cuda'):
                 outputs = model(images, imu_sequences)
                 loss_dict = compute_pose_loss(
                     outputs['poses'],
@@ -424,7 +424,7 @@ def main():
         )
     
     # Create gradient scaler for mixed precision
-    scaler = GradScaler('cuda') if config.training.use_amp else None
+    scaler = torch.amp.GradScaler('cuda') if config.training.use_amp else None
     
     # Create dataloaders
     train_loader, val_loader, train_sampler = create_dataloaders(

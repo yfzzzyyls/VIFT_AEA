@@ -30,7 +30,8 @@ IMU[t→t+1] → LSTM → Temporal Features → Transformer → Poses[t→t+1]
 cd /home/external/VIFT_AEA
 python process_aria.py \
     --input-dir /mnt/ssd_ext/incSeg-data/aria_everyday \
-    --output-dir aria_processed
+    --output-dir aria_processed \
+    --max-frames 1000
 
 # Note: The script automatically uses 2×2 binning for better quality
 # First bins 1408×1408 → 704×704, then resizes to final resolution
@@ -46,12 +47,14 @@ cd /home/external/VIFT_AEA/new_architecture
 ./train_distributed.sh
 
 # OR manually:
-torchrun --nproc_per_node=4 train_flownet_lstm_transformer.py \
+torchrun --nproc_per_node=4 train_flownet_lstm_transformer_preload.py \
     --distributed \
     --use-amp \
     --variable-length \
-    --batch-size 6 \
-    --learning-rate 4e-4 \
+    --data-dir ../aria_processed \
+    --batch-size 16 \
+    --num-workers 4 \
+    --learning-rate 8e-4 \
     --num-epochs 100 \
     --min-seq-len 10 \
     --max-seq-len 50 \
@@ -59,8 +62,8 @@ torchrun --nproc_per_node=4 train_flownet_lstm_transformer.py \
     --curriculum-increment 5 \
     --stride 5 \
     --use-curriculum \
-    --checkpoint-dir checkpoints/exp_704_4gpu \
-    --experiment-name flownet_lstm_704
+    --checkpoint-dir checkpoints/exp_704_4gpu_bs16_1k \
+    --experiment-name flownet_lstm_704_bs16_1k
 ```
 
 #### Alternative: 512×512 Resolution (1.9× faster, slightly lower quality)
@@ -69,7 +72,9 @@ torchrun --nproc_per_node=4 train_flownet_lstm_transformer.py \
     --distributed \
     --use-amp \
     --variable-length \
+    --data-dir ../aria_processed \
     --batch-size 8 \
+    --num-workers 4 \
     --image-height 512 \
     --image-width 512 \
     --learning-rate 4e-4 \
@@ -107,8 +112,10 @@ tail -f checkpoints/exp_512_4gpu/train.log
 
 ## Key Training Arguments
 
+- `--data-dir`: Path to processed Aria data (use `../aria_processed` from new_architecture)
 - `--image-height/width`: Resolution (512 or 704 recommended)
-- `--batch-size`: Batch size per GPU (8 for 512×512, 6 for 704×704)
+- `--batch-size`: Batch size per GPU (4 for 704×704, 8 for 512×512)
+- `--num-workers`: DataLoader workers per GPU (4 recommended for maximum GPU utilization)
 - `--learning-rate`: Base LR (scale by num_gpus, e.g., 4e-4 for 4 GPUs)
 - `--min-seq-len`: Starting sequence length (default: 10 frames = 0.5s)
 - `--curriculum-step`: Epochs between sequence length increases (default: 10)
