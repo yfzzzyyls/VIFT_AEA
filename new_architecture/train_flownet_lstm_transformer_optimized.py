@@ -376,8 +376,17 @@ def validate(
     
     # Compute trajectory metrics if on main process
     if rank == 0 and len(all_predictions) > 0:
-        all_predictions = torch.cat(all_predictions, dim=0)
-        all_ground_truth = torch.cat(all_ground_truth, dim=0)
+        # Flatten predictions to handle variable sequence lengths
+        all_pred_flat = []
+        all_gt_flat = []
+        for pred, gt in zip(all_predictions, all_ground_truth):
+            # pred and gt are [B, T-1, 7]
+            B, T_minus_1, _ = pred.shape
+            all_pred_flat.append(pred.reshape(-1, 7))
+            all_gt_flat.append(gt.reshape(-1, 7))
+        
+        all_predictions = torch.cat(all_pred_flat, dim=0)
+        all_ground_truth = torch.cat(all_gt_flat, dim=0)
         
         trajectory_metrics = compute_trajectory_metrics(
             all_predictions.numpy(),
@@ -515,17 +524,18 @@ def main():
                     torch.save(checkpoint, checkpoint_dir / 'best_model.pt')
                     print(f"Saved best model (val_loss: {best_val_loss:.4f})")
         
-        # Save periodic checkpoint
-        if is_main_process and epoch % config.training.save_every == 0:
+        # Save latest checkpoint (overwrite each time)
+        if is_main_process:
             checkpoint = {
                 'epoch': epoch,
                 'model_state_dict': model.module.state_dict() if config.training.distributed else model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'train_losses': train_losses,
-                'config': config
+                'config': config,
+                'best_val_loss': best_val_loss
             }
-            torch.save(checkpoint, checkpoint_dir / f'checkpoint_epoch_{epoch}.pt')
+            torch.save(checkpoint, checkpoint_dir / 'latest_checkpoint.pt')
         
         # Update learning rate
         scheduler.step()
