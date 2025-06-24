@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Process first 20 sequences from AriaEveryday dataset with real IMU data.
-Combines shell script logic with processing script and adds IMU order assertions.
+Extracts ALL raw IMU samples between consecutive frames for proper VIO processing.
 """
 
 import argparse
@@ -26,12 +26,7 @@ from projectaria_tools.core import data_provider
 from projectaria_tools.core.stream_id import StreamId
 from projectaria_tools.core.sensor_data import TimeDomain, TimeQueryOptions
 
-# Try alternative VRS reader
-try:
-    from aria_everyday_vision.aria_everyday_vrs import AriaVrsDataLoader
-    ARIA_VRS_LOADER_AVAILABLE = True
-except ImportError:
-    ARIA_VRS_LOADER_AVAILABLE = False
+# No fallback imports - we only use projectaria_tools
 
 
 class AriaProcessor:
@@ -176,256 +171,103 @@ class AriaProcessor:
             
         return resampled_poses if resampled_poses else None
     
-    def extract_real_imu_data(self, vrs_path: Path, poses: List[Dict]) -> Optional[Tuple[torch.Tensor, str]]:
-        """Extract real IMU data from VRS file with channel order assertions.
-        Returns: (imu_data, stream_id) or None
+    def extract_real_imu_data(self, vrs_path: Path, poses: List[Dict]) -> Tuple[List[torch.Tensor], str]:
+        """Extract ALL raw IMU data from VRS file between consecutive frames.
+        Returns: (imu_data_raw, stream_id) where imu_data_raw is a list of variable-length tensors
         """
         prefix = f"[{self.seq_id}] " if self.seq_id else ""
-        print(f"{prefix}📊 Extracting real IMU data from VRS...")
+        print(f"{prefix}📊 Extracting ALL raw IMU data from VRS...")
         
-        # Try AriaVrsDataLoader first if available
-        if ARIA_VRS_LOADER_AVAILABLE:
-            try:
-                result = self.extract_real_imu_data_alternative(vrs_path, poses)
-                if result is not None:
-                    return result
-            except Exception as e:
-                print(f"{prefix}❌ AriaVrsDataLoader failed: {e}")
+        # Use projectaria_tools to extract ALL IMU samples
+        provider = data_provider.create_vrs_data_provider(str(vrs_path))
+        if not provider:
+            raise RuntimeError(f"Failed to create VRS data provider for {vrs_path}")
         
-        # Try original method
-        try:
-            return self.extract_real_imu_data_original(vrs_path, poses)
-        except Exception as e:
-            print(f"{prefix}❌ Real IMU extraction failed: {e}")
-            raise RuntimeError(f"Failed to extract real IMU data: {e}")
-    
-    def assert_imu_channel_order(self, imu_data: torch.Tensor, source: str):
-        """Assert that IMU data has correct channel order [accel, gyro]."""
-        prefix = f"[{self.seq_id}] " if self.seq_id else ""
-        
-        # Calculate magnitudes
-        acc_norm = torch.norm(imu_data[..., :3], dim=-1).mean().item()
-        gyro_norm = torch.norm(imu_data[..., 3:], dim=-1).mean().item()
-        
-        print(f"{prefix}📊 IMU sanity check ({source}): |acc|={acc_norm:.2f} m/s² ({acc_norm/9.81:.2f}g), |gyro|={gyro_norm:.2f} rad/s")
-        
-        # More refined checks to handle edge cases
-        if acc_norm < 5.0:
-            print(f"{prefix}❌ ERROR: Accelerometer magnitude too low: {acc_norm:.2f} m/s²")
-            print(f"{prefix}   Expected ~9.8 m/s² (gravity). Channel order is likely wrong!")
-            raise ValueError(f"IMU channel order error: |acc|={acc_norm:.2f} m/s², expected ~9.8")
-        
-        if gyro_norm > 10.0:
-            print(f"{prefix}❌ ERROR: Gyroscope magnitude too high: {gyro_norm:.2f} rad/s")
-            print(f"{prefix}   Expected <5 rad/s for indoor motion. Channel order is likely wrong!")
-            raise ValueError(f"IMU channel order error: |gyro|={gyro_norm:.2f} rad/s, expected <5")
-        
-        # Warnings for unusual but potentially valid cases
-        # Relaxed threshold for stationary/tilted scenarios
-        if acc_norm < 7.0:
-            print(f"{prefix}⚠️ WARNING: Low accelerometer magnitude: {acc_norm:.2f} m/s²")
-            print(f"{prefix}   Device may be stationary on a tilted surface")
-        elif acc_norm > 15.0:
-            print(f"{prefix}⚠️ WARNING: High accelerometer magnitude: {acc_norm:.2f} m/s²")
-            print(f"{prefix}   This might indicate rapid motion or impacts")
-            
-        if gyro_norm > 5.0:
-            print(f"{prefix}⚠️ WARNING: High gyroscope magnitude: {gyro_norm:.2f} rad/s")
-            print(f"{prefix}   This might indicate rapid rotation")
-    
-    def extract_real_imu_data_alternative(self, vrs_path: Path, poses: List[Dict]) -> Optional[Tuple[torch.Tensor, str]]:
-        """Extract real IMU data using AriaVrsDataLoader."""
-        prefix = f"[{self.seq_id}] " if self.seq_id else ""
-        
-        try:
-            # Use AriaVrsDataLoader for simpler IMU extraction
-            dl = AriaVrsDataLoader(str(vrs_path))
-            
-            # Try to load right IMU first (≈1 kHz)
-            imu_timestamps_ns = None
-            accel_data = None
-            gyro_data = None
-            stream_id = None
-            
-            try:
-                imu_timestamps_ns, accel_data, gyro_data = dl.load_imu_stream("imu-right")
-                stream_id = "1202-1"  # Right IMU
-                print(f"{prefix}✅ Using right IMU stream (1202-1)")
-            except:
-                try:
-                    # Fall back to left IMU (≈800 Hz)
-                    imu_timestamps_ns, accel_data, gyro_data = dl.load_imu_stream("imu-left")
-                    stream_id = "1202-2"  # Left IMU
-                    print(f"{prefix}✅ Using left IMU stream (1202-2)")
-                except Exception as e:
-                    print(f"{prefix}❌ No IMU streams found: {e}")
-                    return None
-            
-            if imu_timestamps_ns is None or len(imu_timestamps_ns) == 0:
-                print(f"{prefix}❌ No IMU data found")
-                return None
-            
-            print(f"{prefix}📊 Found {len(imu_timestamps_ns)} IMU samples")
-            
-            # Convert timestamps to seconds
-            imu_timestamps_s = imu_timestamps_ns / 1e9
-            
-            # Extract ALL IMU data BETWEEN consecutive frames (proper VIO approach)
-            imu_data_raw = []  # Store ALL IMU samples
-            imu_counts = []
-            
-            # Process each interval between consecutive frames
-            for i in range(len(poses) - 1):
-                if self.max_frames > 0 and i >= self.max_frames - 1:
-                    break
-                
-                # Get timestamps for consecutive frames
-                t_start = poses[i]['timestamp']
-                t_end = poses[i + 1]['timestamp']
-                
-                # Find all IMU samples in this interval
-                mask = (imu_timestamps_s >= t_start) & (imu_timestamps_s < t_end)
-                interval_indices = np.where(mask)[0]
-                
-                if len(interval_indices) == 0:
-                    print(f"{prefix}⚠️ No IMU data between frames {i} and {i+1}")
-                    # Create zero-filled data
-                    raw_samples = torch.zeros((1, 6), dtype=torch.float32)
-                else:
-                    # Extract ALL IMU samples in this interval
-                    raw_samples = []
-                    for idx in interval_indices:
-                        sample_data = torch.tensor([
-                            accel_data[idx, 0], accel_data[idx, 1], accel_data[idx, 2],
-                            gyro_data[idx, 0], gyro_data[idx, 1], gyro_data[idx, 2]
-                        ], dtype=torch.float32)
-                        raw_samples.append(sample_data)
-                    raw_samples = torch.stack(raw_samples)
-                
-                imu_data_raw.append(raw_samples)
-                imu_counts.append(len(interval_indices))
-            
-            if imu_data_raw:
-                # Print statistics about raw IMU data
-                if imu_counts:
-                    avg_samples = np.mean(imu_counts)
-                    min_samples = np.min(imu_counts)
-                    max_samples = np.max(imu_counts)
-                    print(f"{prefix}✅ Extracted raw IMU data for {len(imu_data_raw)} frame intervals")
-                    print(f"{prefix}   IMU samples per interval: avg={avg_samples:.1f}, min={min_samples}, max={max_samples}")
-                
-                # Return raw IMU data
-                return (imu_data_raw, stream_id)
+        # Get IMU stream
+        imu_stream_id = provider.get_stream_id_from_label("imu-right")
+        if imu_stream_id.is_valid():
+            stream_id = "1202-1"
+            print(f"{prefix}✅ Using right IMU stream (1202-1)")
+        else:
+            imu_stream_id = provider.get_stream_id_from_label("imu-left")
+            if imu_stream_id.is_valid():
+                stream_id = "1202-2"
+                print(f"{prefix}✅ Using left IMU stream (1202-2)")
             else:
-                print(f"{prefix}❌ No IMU data extracted")
-            
-        except Exception as e:
-            print(f"{prefix}❌ Error with AriaVrsDataLoader: {e}")
-            import traceback
-            traceback.print_exc()
+                raise RuntimeError("No valid IMU stream found")
         
-        return None
-    
-    def extract_real_imu_data_original(self, vrs_path: Path, poses: List[Dict]) -> Optional[Tuple[torch.Tensor, str]]:
-        """Extract real IMU data from VRS file using original API."""
-        prefix = f"[{self.seq_id}] " if self.seq_id else ""
-        print(f"{prefix}📊 Using original projectaria_tools method...")
-        try:
-            provider = data_provider.create_vrs_data_provider(str(vrs_path))
-            if not provider:
-                print(f"{prefix}❌ Failed to open VRS file")
-                return None
-            
-            # Get IMU stream - try right IMU first, then left
-            imu_stream = None
-            used_stream_id = None
-            stream_ids = ["1202-1", "1202-2"]  # Right and left IMU
-            
-            for stream_id_str in stream_ids:
-                try:
-                    imu_stream_id = StreamId(stream_id_str)
-                    # Try to get configuration to check if stream exists
-                    config = provider.get_imu_configuration(imu_stream_id)
-                    if config:
-                        imu_stream = imu_stream_id
-                        used_stream_id = stream_id_str
-                        print(f"{prefix}✅ Using IMU stream: {stream_id_str}")
-                        print(f"{prefix}📊 IMU rate: {config.nominal_rate_hz} Hz")
-                        break
-                except:
-                    continue
-            
-            if not imu_stream:
-                print(f"{prefix}❌ No IMU streams found")
-                return None
-            
-            # Extract IMU data BETWEEN consecutive frames (proper VIO approach)
-            imu_data = []
-            samples_per_frame = 11  # Directly extract 11 samples per interval
-            
-            print(f"{prefix}📊 Extracting IMU between {len(poses)-1} frame pairs...")
-            for i in range(len(poses) - 1):
-                if self.max_frames > 0 and i >= self.max_frames - 1:
-                    break
-                
-                if i % 1000 == 0:
-                    print(f"{prefix}  Progress: {i}/{len(poses)-1} intervals...")
-                
-                # Get timestamps for consecutive frames
-                t_start = poses[i]['timestamp']
-                t_end = poses[i + 1]['timestamp']
-                frame_samples = []
-                
-                # Get 11 IMU samples evenly distributed between frames
-                # Using endpoint=True for symmetric [0, Δt] grid including t_end
-                sample_times = np.linspace(t_start, t_end, samples_per_frame, endpoint=True)
-                
-                for j, sample_time in enumerate(sample_times):
-                    sample_time_ns = int(sample_time * 1e9)
-                    
-                    # Get IMU data
-                    try:
-                        imu_sample = provider.get_imu_data_by_time_ns(
-                            imu_stream,
-                            sample_time_ns,
-                            TimeDomain.DEVICE_TIME,
-                            TimeQueryOptions.CLOSEST
-                        )
-                    except Exception as e:
-                        print(f"{prefix}⚠️ Error getting IMU sample: {e}")
-                        imu_sample = None
-                    
-                    if imu_sample:
-                        # CORRECT FORMAT: [accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z]
-                        sample_data = torch.tensor([
-                            imu_sample.accel_msec2[0],
-                            imu_sample.accel_msec2[1],
-                            imu_sample.accel_msec2[2],
-                            imu_sample.gyro_radsec[0],
-                            imu_sample.gyro_radsec[1],
-                            imu_sample.gyro_radsec[2]
-                        ], dtype=torch.float32)
-                        frame_samples.append(sample_data)
-                    else:
-                        # Pad with zeros if needed
-                        frame_samples.append(torch.zeros(6, dtype=torch.float32))
-                
-                if len(frame_samples) == samples_per_frame:
-                    imu_data.append(torch.stack(frame_samples))
-            
+        # Get number of IMU samples
+        num_imu_data = provider.get_num_data(imu_stream_id)
+        print(f"{prefix}📊 Found {num_imu_data} total IMU samples in VRS file")
+        
+        # Extract ALL IMU data by iterating through all indices
+        all_accel_data = []
+        all_gyro_data = []
+        all_timestamps_ns = []
+        
+        print(f"{prefix}📊 Loading all IMU data...")
+        for idx in range(num_imu_data):
+            imu_data = provider.get_imu_data_by_index(imu_stream_id, idx)
             if imu_data:
-                stacked_imu = torch.stack(imu_data)
-                # Assert correct channel order
-                self.assert_imu_channel_order(stacked_imu, "projectaria_tools")
-                print(f"{prefix}✅ Extracted real IMU data for {len(imu_data)} frames")
-                return stacked_imu.to(self.device), used_stream_id
-            
-        except Exception as e:
-            print(f"{prefix}❌ Error extracting IMU: {e}")
-            import traceback
-            traceback.print_exc()
+                all_timestamps_ns.append(imu_data.capture_timestamp_ns)
+                all_accel_data.append([imu_data.accel_msec2[0], imu_data.accel_msec2[1], imu_data.accel_msec2[2]])
+                all_gyro_data.append([imu_data.gyro_radsec[0], imu_data.gyro_radsec[1], imu_data.gyro_radsec[2]])
         
-        return None
+        # Convert to numpy arrays
+        timestamps_ns = np.array(all_timestamps_ns)
+        accel_data = np.array(all_accel_data) / 1000.0  # Convert to m/s²
+        gyro_data = np.array(all_gyro_data)
+        
+        # Convert timestamps to seconds
+        timestamps_s = timestamps_ns / 1e9
+        
+        print(f"{prefix}📊 IMU data time range: {timestamps_s[0]:.3f}s to {timestamps_s[-1]:.3f}s")
+        print(f"{prefix}📊 IMU sampling rate: ~{1.0/np.mean(np.diff(timestamps_s)):.0f} Hz")
+        
+        # Extract IMU data between consecutive frames
+        imu_data_raw = []
+        imu_counts = []
+        
+        for i in range(len(poses) - 1):
+            if self.max_frames > 0 and i >= self.max_frames - 1:
+                break
+            
+            t_start = poses[i]['timestamp']
+            t_end = poses[i + 1]['timestamp']
+            
+            # Find ALL IMU samples in [t_start, t_end)
+            mask = (timestamps_s >= t_start) & (timestamps_s < t_end)
+            indices = np.where(mask)[0]
+            
+            if len(indices) == 0:
+                # No IMU data in this interval - use single zero sample
+                samples = torch.zeros((1, 6), dtype=torch.float32)
+                print(f"{prefix}⚠️ No IMU data found in interval [{t_start:.3f}, {t_end:.3f})")
+            else:
+                # Extract ALL samples
+                samples = torch.tensor(
+                    np.hstack([accel_data[indices], gyro_data[indices]]),
+                    dtype=torch.float32
+                )
+            
+            imu_data_raw.append(samples)
+            imu_counts.append(len(indices))
+        
+        # Print detailed statistics
+        if imu_counts:
+            avg_samples = np.mean(imu_counts)
+            min_samples = np.min(imu_counts)
+            max_samples = np.max(imu_counts)
+            print(f"{prefix}✅ Extracted raw IMU data for {len(imu_data_raw)} frame intervals")
+            print(f"{prefix}   IMU samples per interval: avg={avg_samples:.1f}, min={min_samples}, max={max_samples}")
+            
+            # Check if we're getting the expected ~50 samples
+            if avg_samples < 40:
+                print(f"{prefix}⚠️ WARNING: Expected ~50 IMU samples per frame interval, but got avg={avg_samples:.1f}")
+                print(f"{prefix}   This might indicate the IMU data is being downsampled or filtered")
+        
+        return imu_data_raw, stream_id
+    
     
     def extract_rgb_frames(self, vrs_path: Path, poses: List[Dict], output_video_path: Path) -> Optional[torch.Tensor]:
         """Extract RGB frames from VRS file."""
