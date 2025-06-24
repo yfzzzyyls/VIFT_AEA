@@ -35,7 +35,7 @@ except ImportError:
 
 
 class AriaProcessor:
-    def __init__(self, input_dir: str, output_dir: str, max_frames: int = 1000, seq_id: str = None):
+    def __init__(self, input_dir: str, output_dir: str, max_frames: int = -1, seq_id: str = None):
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
         self.max_frames = max_frames
@@ -270,9 +270,9 @@ class AriaProcessor:
             # Convert timestamps to seconds
             imu_timestamps_s = imu_timestamps_ns / 1e9
             
-            # Extract IMU data BETWEEN consecutive frames (proper VIO approach)
-            imu_data = []
-            samples_per_frame = 11  # Directly extract 11 samples per interval
+            # Extract ALL IMU data BETWEEN consecutive frames (proper VIO approach)
+            imu_data_raw = []  # Store ALL IMU samples
+            imu_counts = []
             
             # Process each interval between consecutive frames
             for i in range(len(poses) - 1):
@@ -290,32 +290,32 @@ class AriaProcessor:
                 if len(interval_indices) == 0:
                     print(f"{prefix}⚠️ No IMU data between frames {i} and {i+1}")
                     # Create zero-filled data
-                    frame_samples = [torch.zeros(6, dtype=torch.float32) for _ in range(samples_per_frame)]
+                    raw_samples = torch.zeros((1, 6), dtype=torch.float32)
                 else:
-                    # Create 11 evenly spaced target times
-                    # Using endpoint=True for symmetric [0, Δt] grid including t_end
-                    target_times = np.linspace(t_start, t_end, samples_per_frame, endpoint=True)
-                    frame_samples = []
-                    
-                    for target_t in target_times:
-                        # Find closest IMU sample
-                        closest_idx = interval_indices[np.argmin(np.abs(imu_timestamps_s[interval_indices] - target_t))]
-                        # CORRECT ORDER: [accel, gyro]
+                    # Extract ALL IMU samples in this interval
+                    raw_samples = []
+                    for idx in interval_indices:
                         sample_data = torch.tensor([
-                            accel_data[closest_idx, 0], accel_data[closest_idx, 1], accel_data[closest_idx, 2],
-                            gyro_data[closest_idx, 0], gyro_data[closest_idx, 1], gyro_data[closest_idx, 2]
+                            accel_data[idx, 0], accel_data[idx, 1], accel_data[idx, 2],
+                            gyro_data[idx, 0], gyro_data[idx, 1], gyro_data[idx, 2]
                         ], dtype=torch.float32)
-                        frame_samples.append(sample_data)
+                        raw_samples.append(sample_data)
+                    raw_samples = torch.stack(raw_samples)
                 
-                if len(frame_samples) == samples_per_frame:
-                    imu_data.append(torch.stack(frame_samples))
+                imu_data_raw.append(raw_samples)
+                imu_counts.append(len(interval_indices))
             
-            if imu_data:
-                stacked_imu = torch.stack(imu_data)
-                # Assert correct channel order
-                self.assert_imu_channel_order(stacked_imu, "AriaVrsDataLoader")
-                print(f"{prefix}✅ Extracted real IMU data for {len(imu_data)} frames")
-                return stacked_imu.to(self.device), stream_id
+            if imu_data_raw:
+                # Print statistics about raw IMU data
+                if imu_counts:
+                    avg_samples = np.mean(imu_counts)
+                    min_samples = np.min(imu_counts)
+                    max_samples = np.max(imu_counts)
+                    print(f"{prefix}✅ Extracted raw IMU data for {len(imu_data_raw)} frame intervals")
+                    print(f"{prefix}   IMU samples per interval: avg={avg_samples:.1f}, min={min_samples}, max={max_samples}")
+                
+                # Return raw IMU data
+                return (imu_data_raw, stream_id)
             else:
                 print(f"{prefix}❌ No IMU data extracted")
             
@@ -454,8 +454,8 @@ class AriaProcessor:
             original_width = config.image_width
             original_height = config.image_height
             
-            # Target 512x512 area to match model input (maintain aspect ratio)
-            target_area = 512 * 512
+            # Target 704x704 (2x2 binning from 1408x1408)
+            target_area = 704 * 704
             aspect_ratio = original_width / original_height
             
             # Calculate dimensions that maintain aspect ratio
@@ -489,19 +489,25 @@ class AriaProcessor:
                     # Get the first image if multiple
                     img_array = image_data[0].to_numpy_array()
                     
-                    # For 1408x1408 to 512x512: first do 2x2 binning, then resize
-                    if img_array.shape[0] == 1408 and img_array.shape[1] == 1408:
-                        # Step 1: 2x2 binning to 704x704
-                        if len(img_array.shape) == 3:  # Color image
-                            img_binned = img_array.reshape(704, 2, 704, 2, 3).mean(axis=(1, 3))
-                        else:  # Grayscale
-                            img_binned = img_array.reshape(704, 2, 704, 2).mean(axis=(1, 3))
-                        img_binned = img_binned.astype(np.uint8)
-                        # Step 2: Resize to 512x512 using INTER_AREA
-                        img_resized = cv2.resize(img_binned, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                    # Keep full resolution - no downsampling
+                    if target_width == original_width and target_height == original_height:
+                        # No resizing needed, keep original
+                        img_resized = img_array
                     else:
-                        # For other sizes, use INTER_AREA directly
-                        img_resized = cv2.resize(img_array, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                        # Only resize if target size is different
+                        # For 1408x1408 to 512x512: first do 2x2 binning, then resize
+                        if img_array.shape[0] == 1408 and img_array.shape[1] == 1408 and target_width == 512:
+                            # Step 1: 2x2 binning to 704x704
+                            if len(img_array.shape) == 3:  # Color image
+                                img_binned = img_array.reshape(704, 2, 704, 2, 3).mean(axis=(1, 3))
+                            else:  # Grayscale
+                                img_binned = img_array.reshape(704, 2, 704, 2).mean(axis=(1, 3))
+                            img_binned = img_binned.astype(np.uint8)
+                            # Step 2: Resize to 512x512 using INTER_AREA
+                            img_resized = cv2.resize(img_binned, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                        else:
+                            # For other sizes, use INTER_AREA directly
+                            img_resized = cv2.resize(img_array, (target_width, target_height), interpolation=cv2.INTER_AREA)
                     
                     # Keep as uint8 to save memory, convert to float later if needed
                     # This follows PyTorch's recommendation for preprocessing pipelines
@@ -580,7 +586,7 @@ class AriaProcessor:
         imu_result = self.extract_real_imu_data(vrs_path, poses)
         if imu_result is None:
             return False
-        imu_data, imu_stream_id = imu_result
+        imu_data_raw, imu_stream_id = imu_result
         
         # Extract RGB frames
         seq_output_dir = self.output_dir / sequence_id
@@ -594,12 +600,12 @@ class AriaProcessor:
         # Ensure matching lengths
         # Note: IMU data has N-1 intervals for N frames
         num_frames = min(len(poses), visual_data.shape[0])
-        num_imu_intervals = min(num_frames - 1, imu_data.shape[0])
+        num_imu_intervals = min(num_frames - 1, len(imu_data_raw))
         
         # Adjust to have consistent data
         poses = poses[:num_imu_intervals + 1]
         visual_data = visual_data[:num_imu_intervals + 1]
-        imu_data = imu_data[:num_imu_intervals]
+        imu_data_raw = imu_data_raw[:num_imu_intervals]
         
         min_frames = num_imu_intervals + 1  # For metadata
         
@@ -609,16 +615,28 @@ class AriaProcessor:
             json.dump(poses, f, indent=2)
         
         torch.save(visual_data.cpu(), seq_output_dir / "visual_data.pt")
-        torch.save(imu_data.cpu(), seq_output_dir / "imu_data.pt")
+        
+        # Save raw IMU data as a list of variable-length tensors
+        # Each element contains all IMU samples between consecutive frames
+        torch.save(imu_data_raw, seq_output_dir / "imu_data.pt")
         
         # Save metadata
+        # Calculate raw IMU statistics
+        raw_imu_lengths = [len(samples) for samples in imu_data_raw]
+        
         metadata = {
             'sequence_name': sequence_path.name,
             'sequence_id': sequence_id,
-            'num_frames': min_frames,
-            'num_imu_intervals': num_imu_intervals,
-            'visual_shape': list(visual_data.shape),
-            'imu_shape': list(imu_data.shape),
+            'num_frames': int(min_frames),
+            'num_imu_intervals': int(num_imu_intervals),
+            'visual_shape': [int(x) for x in visual_data.shape],
+            'imu_intervals': int(len(imu_data_raw)),
+            'imu_samples_per_interval': {
+                'mean': float(np.mean(raw_imu_lengths)),
+                'min': int(np.min(raw_imu_lengths)),
+                'max': int(np.max(raw_imu_lengths)),
+                'std': float(np.std(raw_imu_lengths))
+            },
             'slam_source': 'mps_slam_time_based_20hz',
             'imu_source': 'real_vrs_data_between_frames',
             'imu_stream_id': imu_stream_id,
@@ -626,11 +644,11 @@ class AriaProcessor:
             'imu_frequency': 1000,
             'camera_frequency': 20,
             'rotation_format': 'quaternion_xyzw',
-            'imu_format': 'between_frames',
+            'imu_format': 'raw_variable_length',
             'imu_channel_order': 'ax,ay,az,gx,gy,gz',
             'imu_units': 'm/s²,m/s²,m/s²,rad/s,rad/s,rad/s',
-            'imu_note': 'IMU data contains 11 evenly spaced samples between consecutive frames (N-1 intervals for N frames)',
-            'imu_sampling': 'np.linspace with endpoint=True for symmetric [t_start, t_end] interval'
+            'imu_note': 'IMU data contains ALL raw samples between consecutive frames (variable length per interval)',
+            'imu_sampling': 'All IMU samples with timestamps in [t_start, t_end) interval'
         }
         
         with open(seq_output_dir / "metadata.json", 'w') as f:
@@ -655,8 +673,8 @@ def main():
                        help='Path to raw AriaEveryday dataset')
     parser.add_argument('--output-dir', type=str, default='./aria_processed',
                        help='Output directory')
-    parser.add_argument('--max-frames', type=int, default=1000,
-                       help='Max frames per sequence (default: 1000, evenly sampled)')
+    parser.add_argument('--max-frames', type=int, default=-1,
+                       help='Max frames per sequence (default: -1 = all frames, no subsampling)')
     parser.add_argument('--num-workers', type=int, default=4,
                        help='Number of parallel workers')
     
@@ -763,7 +781,10 @@ def main():
     
     print(f"\n📊 Summary:")
     print(f"  - Processed {processed_count} sequences")
-    print(f"  - Each with up to {args.max_frames} frames")
+    if args.max_frames > 0:
+        print(f"  - Each with up to {args.max_frames} frames")
+    else:
+        print(f"  - Using ALL frames (no subsampling)")
     print(f"  - IMU data format: [ax,ay,az,gx,gy,gz]")
     print(f"  - IMU extracted between consecutive frames")
     print(f"\n📁 Output saved to: {output_path}")
