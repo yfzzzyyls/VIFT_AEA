@@ -39,31 +39,44 @@ python process_aria.py \
 
 ### 2. Training Commands
 
-#### Recommended: Multi-GPU Training with 4× A6000
+#### Multi-GPU Training with 4× A6000 (Memory-Optimized)
 ```bash
 cd /home/external/VIFT_AEA/new_architecture
 
-# Default training with 704×704 images (best quality/speed tradeoff)
-./run_training_final.sh
+# Latest optimized training with shared memory (uses all 4 GPUs efficiently)
+./run_training_shared.sh
 
-# OR manually:
-torchrun --nproc_per_node=4 train_flownet_lstm_transformer_optimized.py \
+# This runs:
+python train_flownet_lstm_transformer_shared.py \
     --distributed \
     --use-amp \
-    --variable-length \
     --data-dir ../aria_processed \
-    --batch-size 8 \
-    --num-workers 2 \
-    --learning-rate 1.2e-3 \
+    --encoder-type resnet18 \
+    --pretrained \
+    --warmup-epochs 2 \
+    --batch-size 64 \
+    --num-workers 0 \
+    --learning-rate 4.8e-3 \
     --num-epochs 100 \
-    --min-seq-len 11 \
-    --max-seq-len 41 \
-    --curriculum-step 10 \
-    --curriculum-increment 4 \
+    --sequence-length 41 \
     --stride 5 \
-    --use-curriculum \
-    --checkpoint-dir checkpoints/exp_final_4gpu \
-    --experiment-name flownet_lstm_final
+    --translation-weight 1.0 \
+    --rotation-weight 100.0 \
+    --scale-weight 10.0 \
+    --checkpoint-dir ../checkpoints_from_scratch \
+    --experiment-name resnet_lstm_41frames_mmap_shared \
+    --validate-every 1
+
+# Key features:
+# - Uses memory-mapped shared data (89GB total, not 4×89GB)
+# - ResNet18 encoder (faster than FlowNet, similar performance)
+# - Large batch size (64 per GPU = 256 total)
+```
+
+#### Monitor GPU Usage
+```bash
+# In another terminal, monitor GPU memory and utilization
+python monitor_gpu_snapshot.py --interval 2
 ```
 
 #### Alternative: 512×512 Resolution (1.9× faster, slightly lower quality)
@@ -89,18 +102,6 @@ torchrun --nproc_per_node=4 train_flownet_lstm_transformer.py \
     --experiment-name flownet_lstm_512
 ```
 
-#### Single GPU Training (not recommended)
-```bash
-python train_flownet_lstm_transformer.py \
-    --use-amp \
-    --variable-length \
-    --batch-size 8 \
-    --image-height 512 \
-    --image-width 512 \
-    --min-seq-len 10 \
-    --num-epochs 100
-```
-
 ### 3. Monitor Training
 ```bash
 # In another terminal
@@ -113,15 +114,16 @@ tail -f checkpoints/exp_512_4gpu/train.log
 ## Key Training Arguments
 
 - `--data-dir`: Path to processed Aria data (use `../aria_processed` from new_architecture)
-- `--image-height/width`: Resolution (704×704 default, no resizing needed)
-- `--batch-size`: Batch size per GPU (8 for 704×704 with 4x A6000)
-- `--num-workers`: DataLoader workers per GPU (2 recommended to reduce memory overhead)
-- `--learning-rate`: Base LR (1.2e-3 for batch size 32 total)
-- `--min-seq-len`: Starting sequence length (default: 11 frames = 0.55s)
-- `--max-seq-len`: Maximum sequence length (default: 41 frames = 2.05s)
-- `--curriculum-step`: Epochs between sequence length increases (default: 10)
-- `--curriculum-increment`: Frames to add each step (default: 4)
+- `--encoder-type`: Visual encoder type (`resnet18` recommended, `flownet` for original)
+- `--batch-size`: Batch size per GPU (64 with memory-mapped data on A6000)
+- `--num-workers`: DataLoader workers per GPU (0 for shared memory to prevent duplication)
+- `--learning-rate`: Base LR (4.8e-3 for effective batch size 256)
+- `--warmup-epochs`: Learning rate warmup epochs (2 recommended for large batch)
+- `--sequence-length`: Fixed sequence length (41 frames = 2.05s for AR/VR)
 - `--stride`: Sliding window stride (default: 5)
+- `--translation-weight`: Loss weight for translation (1.0)
+- `--rotation-weight`: Loss weight for rotation (100.0 for quaternion geodesic)
+- `--scale-weight`: Loss weight for scale consistency (10.0)
 
 ## Model Configuration
 
@@ -183,29 +185,6 @@ new_architecture/
 └── README.md                           # This file
 ```
 
-## Example Usage
-
-```python
-from models import FlowNetLSTMTransformer
-from configs import get_config
-
-# Load configuration
-config = get_config()
-
-# Create model
-model = FlowNetLSTMTransformer(config.model)
-
-# Forward pass
-# images: [B, T, 3, H, W]
-# imu_sequences: List of B lists, each with T-1 variable-length IMU tensors
-outputs = model(images, imu_sequences)
-
-# Outputs contain:
-# - poses: [B, T-1, 7] (3 trans + 4 quat)
-# - translation: [B, T-1, 3]
-# - rotation: [B, T-1, 4]
-```
-
 ## Resolution Comparison
 
 | Resolution | Memory/GPU | Training Speed | Quality | Recommendation |
@@ -220,7 +199,7 @@ outputs = model(images, imu_sequences)
 - Best quality/speed tradeoff for production models
 - Only 1.9× slower than 512×512 but noticeably better quality
 
-## Curriculum Learning Schedule
+## Curriculum Learning Schedule (optional)
 
 ```
 Epochs   1-10:  11 frames (0.55s)  ← Start (matches original VIFT)
@@ -255,27 +234,6 @@ python evaluate_flownet_lstm_transformer.py \
 3. **Better Motion Features**: FlowNet explicitly models optical flow
 4. **Temporal Modeling**: LSTM captures IMU dynamics better than CNN
 5. **Attention Mechanism**: Transformer learns when to trust each modality
-
-## Tips for Best Results
-
-1. **Resolution Choice**:
-   - Start with 512×512 for faster experimentation
-   - Use 704×704 for final model if quality is critical
-   
-2. **Batch Size Tuning**:
-   - 512×512: batch_size=8-12 per GPU
-   - 704×704: batch_size=8 per GPU (with optimized memory usage)
-   - Use gradient accumulation if needed
-
-3. **Learning Rate**:
-   - Scale with total batch size: base_lr × (total_batch_size / 8)
-   - Current: 1.2e-3 for batch size 32 (8 per GPU × 4 GPUs)
-   - Use warmup for first 2 epochs if unstable
-
-4. **Monitoring**:
-   - Watch GPU memory usage in first epoch
-   - Adjust batch size if OOM
-   - Check scale drift in validation
 
 ## Complete Workflow
 
@@ -314,15 +272,15 @@ python process_aria.py \
 # 2.1 Navigate to new architecture directory
 cd /home/external/VIFT_AEA/new_architecture
 
-# 2.2 Start distributed training with 4 GPUs
-./run_training_final.sh
+# 2.2 Start distributed training with 4 GPUs (memory-optimized)
+./run_training_shared.sh
 
 # Monitor training progress
-# Terminal 1: Watch GPU usage
-watch -n 1 nvidia-smi
+# Terminal 1: Watch detailed GPU usage
+python monitor_gpu_snapshot.py --interval 2
 
-# Terminal 2: Monitor training logs
-tail -f checkpoints/exp_final_4gpu/train.log
+# Terminal 2: Monitor training output
+# (Training logs appear in console, not separate file)
 
 # Training will save:
 # - Best model: checkpoints/exp_final_4gpu/best_model.pt
@@ -347,153 +305,6 @@ python evaluate_flownet_lstm_transformer.py \
 # - evaluation/exp_final_4gpu/visualizations/     # Trajectory plots
 # - evaluation/exp_final_4gpu/detailed_results.npz # Raw predictions
 ```
-
-### Step 4: Inference
-
-#### 4.1 Batch Inference on New Data
-```python
-# inference_example.py
-import torch
-from models.flownet_lstm_transformer import FlowNetLSTMTransformer
-from configs.flownet_lstm_transformer_config import ModelConfig
-from data.aria_variable_imu_dataset import AriaVariableIMUDataset, collate_variable_imu
-from torch.utils.data import DataLoader
-
-# Load model
-config = ModelConfig()
-model = FlowNetLSTMTransformer(config)
-checkpoint = torch.load('checkpoints/exp_final_4gpu/best_model.pt')
-model.load_state_dict(checkpoint['model_state_dict'])
-model.eval()
-model.cuda()
-
-# Create dataset for new data
-dataset = AriaVariableIMUDataset(
-    data_dir='../aria_processed',
-    split='test',  # or your custom split
-    variable_length=False,
-    sequence_length=31,
-    image_size=(704, 704)
-)
-
-dataloader = DataLoader(
-    dataset, 
-    batch_size=1, 
-    collate_fn=collate_variable_imu
-)
-
-# Run inference
-with torch.no_grad():
-    for batch in dataloader:
-        images = batch['images'].cuda()
-        imu_sequences = batch['imu_sequences']
-        
-        # Move IMU to GPU
-        for b in range(len(imu_sequences)):
-            for t in range(len(imu_sequences[b])):
-                imu_sequences[b][t] = imu_sequences[b][t].cuda()
-        
-        # Predict poses
-        outputs = model(images, imu_sequences)
-        poses = outputs['poses']  # [1, 30, 7]
-        
-        # poses contain relative transformations
-        # Format: [dx, dy, dz, qx, qy, qz, qw]
-        print(f"Predicted {poses.shape[1]} relative poses")
-```
-
-#### 4.2 Real-time Inference (Sliding Window)
-```python
-# realtime_inference.py
-import collections
-import numpy as np
-
-class RealTimeVIO:
-    def __init__(self, model_path, window_size=31):
-        self.window_size = window_size
-        self.image_buffer = collections.deque(maxlen=window_size)
-        self.imu_buffer = collections.deque(maxlen=window_size-1)
-        
-        # Load model
-        self.model = self.load_model(model_path)
-        self.model.eval()
-        
-    def process_frame(self, image, imu_data):
-        """Process new frame with associated IMU data."""
-        # Add to buffers
-        self.image_buffer.append(image)
-        if len(self.image_buffer) > 1:
-            self.imu_buffer.append(imu_data)
-        
-        # Run inference when buffer is full
-        if len(self.image_buffer) == self.window_size:
-            poses = self.run_inference()
-            # Return the latest pose estimate
-            return poses[-1]  # Most recent relative pose
-        
-        return None
-    
-    def run_inference(self):
-        # Convert buffers to tensors
-        images = torch.stack(list(self.image_buffer))
-        images = images.unsqueeze(0)  # Add batch dimension
-        
-        # Prepare IMU sequences
-        imu_sequences = [[imu for imu in self.imu_buffer]]
-        
-        # Run model
-        with torch.no_grad():
-            outputs = self.model(images.cuda(), imu_sequences)
-            return outputs['poses'].cpu().numpy()
-
-# Usage
-vio = RealTimeVIO('checkpoints/exp_final_4gpu/best_model.pt')
-
-# Process incoming frames
-for frame, imu in data_stream:
-    relative_pose = vio.process_frame(frame, imu)
-    if relative_pose is not None:
-        # Update absolute pose
-        update_trajectory(relative_pose)
-```
-
-### Step 5: Fine-tuning (Optional)
-
-```bash
-# 5.1 Fine-tune on specific sequences or scenarios
-python train_flownet_lstm_transformer_optimized.py \
-    --checkpoint checkpoints/exp_final_4gpu/best_model.pt \
-    --data-dir ../aria_processed_custom \
-    --learning-rate 1e-5 \
-    --num-epochs 20 \
-    --batch-size 4 \
-    --checkpoint-dir checkpoints/finetuned \
-    --experiment-name flownet_lstm_finetuned
-```
-
-### Tips for Production Deployment
-
-1. **Model Optimization**:
-   ```bash
-   # Convert to TorchScript for faster inference
-   python export_model.py \
-       --checkpoint checkpoints/exp_final_4gpu/best_model.pt \
-       --output model.pt
-   ```
-
-2. **Batch Processing**:
-   - Use larger batch sizes for offline processing
-   - Enable CUDA graphs for consistent input sizes
-
-3. **Memory Management**:
-   - Clear gradients: `torch.cuda.empty_cache()`
-   - Use half precision: `model.half()`
-
-4. **Integration with ROS/C++**:
-   - Export to ONNX for cross-platform deployment
-   - Use LibTorch for C++ inference
-
-## Future Improvements
 
 - [ ] Add uncertainty estimation
 - [ ] Implement online/streaming mode
