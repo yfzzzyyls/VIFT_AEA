@@ -27,7 +27,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from models.flownet_lstm_transformer import FlowNetLSTMTransformer
-from data.aria_variable_imu_dataset_padded import AriaVariableIMUDataset, collate_variable_imu_padded
+from data.aria_dataset_cpu_cached_shared import AriaDatasetCPUCachedShared as AriaVariableIMUDataset, collate_cpu_cached_shared as collate_variable_imu_padded
 from configs.flownet_lstm_transformer_config import get_config, Config
 from utils.losses import compute_pose_loss, quaternion_geodesic_loss
 from utils.metrics import compute_trajectory_metrics
@@ -105,11 +105,14 @@ def create_dataloaders(config: Config, rank: int, world_size: int):
     train_dataset = AriaVariableIMUDataset(
         data_dir=config.data.data_dir,
         split='train',
+        sequence_length=config.data.sequence_length,
         variable_length=config.data.variable_length,
         min_seq_len=config.data.min_seq_len,
         max_seq_len=config.data.max_seq_len,
         stride=config.data.stride,
-        image_size=config.data.image_size
+        image_size=config.data.image_size,
+        rank=rank,
+        world_size=world_size
     )
     
     # Validation dataset
@@ -119,7 +122,9 @@ def create_dataloaders(config: Config, rank: int, world_size: int):
         variable_length=False,  # Fixed length for validation
         sequence_length=config.data.sequence_length,
         stride=config.data.stride * 5,  # Less dense sampling for validation
-        image_size=config.data.image_size
+        image_size=config.data.image_size,
+        rank=rank,
+        world_size=world_size
     )
     
     # Create samplers for distributed training
