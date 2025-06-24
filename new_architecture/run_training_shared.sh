@@ -1,7 +1,6 @@
 #!/bin/bash
 
 echo "FlowNet-LSTM-Transformer Training with Memory-Mapped Shared Data"
-echo "Using true shared memory across all processes"
 echo ""
 
 # Install required packages if not already installed
