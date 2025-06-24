@@ -26,7 +26,7 @@ python train_flownet_lstm_transformer_shared.py \
     --data-dir ../aria_processed \
     --encoder-type resnet18 \
     --pretrained \
-    --batch-size 4 \
+    --batch-size 16 \
     --num-workers 0 \
     --learning-rate 1.2e-3 \
     --num-epochs 100 \
