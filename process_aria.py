@@ -454,15 +454,12 @@ class AriaProcessor:
             original_width = config.image_width
             original_height = config.image_height
             
-            # Target roughly 336x188 area but maintain aspect ratio
-            target_area = 336 * 188
+            # Fixed target resolution 704x704
+            target_width = 704
+            target_height = 704
+            
             aspect_ratio = original_width / original_height
-            
-            # Calculate dimensions that maintain aspect ratio
-            target_height = int(np.sqrt(target_area / aspect_ratio))
-            target_width = int(target_height * aspect_ratio)
-            
-            print(f"{prefix}📐 Resizing to {target_width}x{target_height} (aspect ratio: {aspect_ratio:.2f})")
+            print(f"{prefix}📐 Resizing to {target_width}x{target_height} (original aspect ratio: {aspect_ratio:.2f})")
             
             # Extract frames aligned with poses
             frames = []

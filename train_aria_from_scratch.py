@@ -82,8 +82,8 @@ class VIFTFromScratch(nn.Module):
             seq_len = 11
             
             # Image parameters
-            img_w = 512
-            img_h = 256
+            img_w = 704
+            img_h = 704
             
             # Feature dimensions
             v_f_len = 512  # Visual feature dimension
@@ -126,7 +126,7 @@ class VIFTFromScratch(nn.Module):
     
     def forward(self, batch):
         """Forward pass."""
-        images = batch['images']  # [B, 11, 3, 256, 512]
+        images = batch['images']  # [B, 11, 3, 704, 704]
         imu = batch['imu']        # [B, 110, 6]
         
         # Get features from backbone (which creates RGB-RGB pairs internally)
@@ -191,7 +191,8 @@ def compute_loss(predictions, batch, alpha=10.0, beta=5.0):
     
     # Combined loss with proper weighting
     # Translation needs higher weight as it's in meters
-    total_loss = alpha * trans_loss + beta * scale_loss + rot_loss
+    # total_loss = alpha * trans_loss + beta * scale_loss + rot_loss
+    total_loss = 10 * trans_loss + beta * scale_loss + 2000 * rot_loss
     
     return {
         'total_loss': total_loss,
@@ -424,7 +425,7 @@ def main():
         print(f"- Batch size per GPU: {args.batch_size}")
         print(f"- Total batch size: {args.batch_size * world_size}")
         print(f"- Learning rate: {args.lr}")
-        print(f"- Window stride: 10 (non-overlapping transitions)")
+        print(f"- Window stride: 1 (overlapping windows for more training samples)")
         print("="*60 + "\n")
     
     # Create data module
@@ -434,7 +435,7 @@ def main():
         batch_size=args.batch_size,  # Per GPU batch size
         num_workers=args.num_workers,
         sequence_length=11,
-        stride=10  # Ensures all transitions are covered (minimal frame overlap)
+        stride=1  # Changed from 10 - will create 10x more training samples
     )
     data_module.setup()
     

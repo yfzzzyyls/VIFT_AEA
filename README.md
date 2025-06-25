@@ -167,15 +167,6 @@ python prepare_aria_splits.py --source-dir aria_processed
 
 # 4. Train all components from scratch (improved loss weighting)
 
-# Single GPU training
-python train_aria_from_scratch.py \
-    --data-dir aria_processed \
-    --epochs 50 \
-    --batch-size 16 \
-    --lr 1e-4 \
-    --checkpoint-dir checkpoints_from_scratch \
-    --num-workers 4
-
 # Multi-GPU training with distributed data parallel
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
     --data-dir aria_processed \
