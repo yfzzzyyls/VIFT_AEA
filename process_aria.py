@@ -125,11 +125,10 @@ class AriaProcessor:
         
         # Limit to max_frames if specified
         if self.max_frames > 0 and len(target_timestamps) > self.max_frames:
-            # Evenly sample from the 20Hz grid
-            indices = np.linspace(0, len(target_timestamps) - 1, self.max_frames, dtype=int)
-            target_timestamps = target_timestamps[indices]
+            # Take first max_frames consecutive frames for dense temporal sampling
+            target_timestamps = target_timestamps[:self.max_frames]
         
-        print(f"{prefix}📊 Resampling to {len(target_timestamps)} frames at 20Hz...")
+        print(f"{prefix}📊 Taking first {len(target_timestamps)} consecutive frames at 20Hz...")
         
         # Extract all raw timestamps for efficient search
         raw_timestamps = np.array([p['timestamp'] for p in raw_poses])
@@ -271,8 +270,9 @@ class AriaProcessor:
             imu_timestamps_s = imu_timestamps_ns / 1e9
             
             # Extract IMU data BETWEEN consecutive frames (proper VIO approach)
+            # Save ALL IMU samples between frames
             imu_data = []
-            samples_per_frame = 11  # Directly extract 11 samples per interval
+            imu_sample_counts = []  # Track number of samples per interval
             
             # Process each interval between consecutive frames
             for i in range(len(poses) - 1):
@@ -283,39 +283,46 @@ class AriaProcessor:
                 t_start = poses[i]['timestamp']
                 t_end = poses[i + 1]['timestamp']
                 
-                # Find all IMU samples in this interval
+                # Find all IMU samples in this interval [t_start, t_end)
                 mask = (imu_timestamps_s >= t_start) & (imu_timestamps_s < t_end)
                 interval_indices = np.where(mask)[0]
                 
                 if len(interval_indices) == 0:
                     print(f"{prefix}⚠️ No IMU data between frames {i} and {i+1}")
-                    # Create zero-filled data
-                    frame_samples = [torch.zeros(6, dtype=torch.float32) for _ in range(samples_per_frame)]
+                    # Create empty tensor for this interval
+                    frame_samples = torch.zeros((0, 6), dtype=torch.float32)
                 else:
-                    # Create 11 evenly spaced target times
-                    # Using endpoint=True for symmetric [0, Δt] grid including t_end
-                    target_times = np.linspace(t_start, t_end, samples_per_frame, endpoint=True)
+                    # NEW: Extract ALL IMU samples in this interval
                     frame_samples = []
-                    
-                    for target_t in target_times:
-                        # Find closest IMU sample
-                        closest_idx = interval_indices[np.argmin(np.abs(imu_timestamps_s[interval_indices] - target_t))]
+                    for idx in interval_indices:
                         # CORRECT ORDER: [accel, gyro]
                         sample_data = torch.tensor([
-                            accel_data[closest_idx, 0], accel_data[closest_idx, 1], accel_data[closest_idx, 2],
-                            gyro_data[closest_idx, 0], gyro_data[closest_idx, 1], gyro_data[closest_idx, 2]
+                            accel_data[idx, 0], accel_data[idx, 1], accel_data[idx, 2],
+                            gyro_data[idx, 0], gyro_data[idx, 1], gyro_data[idx, 2]
                         ], dtype=torch.float32)
                         frame_samples.append(sample_data)
+                    
+                    frame_samples = torch.stack(frame_samples) if frame_samples else torch.zeros((0, 6), dtype=torch.float32)
                 
-                if len(frame_samples) == samples_per_frame:
-                    imu_data.append(torch.stack(frame_samples))
+                imu_data.append(frame_samples)
+                imu_sample_counts.append(len(frame_samples))
             
             if imu_data:
-                stacked_imu = torch.stack(imu_data)
-                # Assert correct channel order
-                self.assert_imu_channel_order(stacked_imu, "AriaVrsDataLoader")
-                print(f"{prefix}✅ Extracted real IMU data for {len(imu_data)} frames")
-                return stacked_imu.to(self.device), stream_id
+                # NEW: Can't stack variable-length sequences, return as list
+                # Print statistics about IMU samples per interval
+                avg_samples = np.mean(imu_sample_counts)
+                min_samples = np.min(imu_sample_counts)
+                max_samples = np.max(imu_sample_counts)
+                print(f"{prefix}✅ Extracted real IMU data for {len(imu_data)} intervals")
+                print(f"{prefix}📊 IMU samples per interval: avg={avg_samples:.1f}, min={min_samples}, max={max_samples}")
+                
+                # Check channel order on first non-empty interval
+                for data in imu_data:
+                    if len(data) > 0:
+                        self.assert_imu_channel_order(data.unsqueeze(0), "AriaVrsDataLoader")
+                        break
+                
+                return imu_data, stream_id
             else:
                 print(f"{prefix}❌ No IMU data extracted")
             
@@ -360,42 +367,58 @@ class AriaProcessor:
                 return None
             
             # Extract IMU data BETWEEN consecutive frames (proper VIO approach)
+            # Extract ALL IMU samples between frames
             imu_data = []
-            samples_per_frame = 11  # Directly extract 11 samples per interval
+            imu_sample_counts = []
             
-            print(f"{prefix}📊 Extracting IMU between {len(poses)-1} frame pairs...")
+            print(f"{prefix}📊 Extracting ALL IMU samples between {len(poses)-1} frame pairs...")
+            
+            # First, get all IMU data in the time range
+            start_time_ns = int(poses[0]['timestamp'] * 1e9)
+            end_time_ns = int(poses[-1]['timestamp'] * 1e9)
+            
+            # Collect all IMU samples in the sequence timespan
+            all_imu_samples = []
+            all_imu_timestamps = []
+            
+            # Query IMU data in chunks to avoid memory issues
+            chunk_duration_ns = int(1e9)  # 1 second chunks
+            current_time_ns = start_time_ns
+            
+            while current_time_ns < end_time_ns:
+                try:
+                    imu_sample = provider.get_imu_data_by_time_ns(
+                        imu_stream,
+                        current_time_ns,
+                        TimeDomain.DEVICE_TIME,
+                        TimeQueryOptions.CLOSEST
+                    )
+                    if imu_sample:
+                        all_imu_samples.append(imu_sample)
+                        all_imu_timestamps.append(current_time_ns / 1e9)  # Convert to seconds
+                except:
+                    pass
+                current_time_ns += int(1e6)  # 1ms steps for ~1000Hz IMU
+            
+            print(f"{prefix}📊 Collected {len(all_imu_samples)} total IMU samples")
+            
+            # Now extract samples for each frame interval
             for i in range(len(poses) - 1):
                 if self.max_frames > 0 and i >= self.max_frames - 1:
                     break
                 
-                if i % 1000 == 0:
+                if i % 100 == 0:
                     print(f"{prefix}  Progress: {i}/{len(poses)-1} intervals...")
                 
                 # Get timestamps for consecutive frames
                 t_start = poses[i]['timestamp']
                 t_end = poses[i + 1]['timestamp']
+                
+                # Find all IMU samples in this interval [t_start, t_end)
                 frame_samples = []
-                
-                # Get 11 IMU samples evenly distributed between frames
-                # Using endpoint=True for symmetric [0, Δt] grid including t_end
-                sample_times = np.linspace(t_start, t_end, samples_per_frame, endpoint=True)
-                
-                for j, sample_time in enumerate(sample_times):
-                    sample_time_ns = int(sample_time * 1e9)
-                    
-                    # Get IMU data
-                    try:
-                        imu_sample = provider.get_imu_data_by_time_ns(
-                            imu_stream,
-                            sample_time_ns,
-                            TimeDomain.DEVICE_TIME,
-                            TimeQueryOptions.CLOSEST
-                        )
-                    except Exception as e:
-                        print(f"{prefix}⚠️ Error getting IMU sample: {e}")
-                        imu_sample = None
-                    
-                    if imu_sample:
+                for j, ts in enumerate(all_imu_timestamps):
+                    if t_start <= ts < t_end:
+                        imu_sample = all_imu_samples[j]
                         # CORRECT FORMAT: [accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z]
                         sample_data = torch.tensor([
                             imu_sample.accel_msec2[0],
@@ -406,19 +429,31 @@ class AriaProcessor:
                             imu_sample.gyro_radsec[2]
                         ], dtype=torch.float32)
                         frame_samples.append(sample_data)
-                    else:
-                        # Pad with zeros if needed
-                        frame_samples.append(torch.zeros(6, dtype=torch.float32))
                 
-                if len(frame_samples) == samples_per_frame:
-                    imu_data.append(torch.stack(frame_samples))
+                if len(frame_samples) == 0:
+                    # No samples in this interval, create empty tensor
+                    frame_samples_tensor = torch.zeros((0, 6), dtype=torch.float32)
+                else:
+                    frame_samples_tensor = torch.stack(frame_samples)
+                
+                imu_data.append(frame_samples_tensor)
+                imu_sample_counts.append(len(frame_samples))
             
             if imu_data:
-                stacked_imu = torch.stack(imu_data)
-                # Assert correct channel order
-                self.assert_imu_channel_order(stacked_imu, "projectaria_tools")
-                print(f"{prefix}✅ Extracted real IMU data for {len(imu_data)} frames")
-                return stacked_imu.to(self.device), used_stream_id
+                # NEW: Return as list of variable-length tensors
+                avg_samples = np.mean(imu_sample_counts) if imu_sample_counts else 0
+                min_samples = np.min(imu_sample_counts) if imu_sample_counts else 0
+                max_samples = np.max(imu_sample_counts) if imu_sample_counts else 0
+                print(f"{prefix}✅ Extracted real IMU data for {len(imu_data)} intervals")
+                print(f"{prefix}📊 IMU samples per interval: avg={avg_samples:.1f}, min={min_samples}, max={max_samples}")
+                
+                # Check channel order on first non-empty interval
+                for data in imu_data:
+                    if len(data) > 0:
+                        self.assert_imu_channel_order(data.unsqueeze(0), "projectaria_tools")
+                        break
+                
+                return imu_data, used_stream_id
             
         except Exception as e:
             print(f"{prefix}❌ Error extracting IMU: {e}")
@@ -580,12 +615,12 @@ class AriaProcessor:
         # Ensure matching lengths
         # Note: IMU data has N-1 intervals for N frames
         num_frames = min(len(poses), visual_data.shape[0])
-        num_imu_intervals = min(num_frames - 1, imu_data.shape[0])
+        num_imu_intervals = min(num_frames - 1, len(imu_data))  # imu_data is now a list
         
         # Adjust to have consistent data
         poses = poses[:num_imu_intervals + 1]
         visual_data = visual_data[:num_imu_intervals + 1]
-        imu_data = imu_data[:num_imu_intervals]
+        imu_data = imu_data[:num_imu_intervals]  # Slice the list
         
         min_frames = num_imu_intervals + 1  # For metadata
         
@@ -595,7 +630,8 @@ class AriaProcessor:
             json.dump(poses, f, indent=2)
         
         torch.save(visual_data.cpu(), seq_output_dir / "visual_data.pt")
-        torch.save(imu_data.cpu(), seq_output_dir / "imu_data.pt")
+        # Save as list of tensors for variable-length IMU data
+        torch.save(imu_data, seq_output_dir / "imu_data.pt")
         
         # Save metadata
         metadata = {
@@ -604,7 +640,8 @@ class AriaProcessor:
             'num_frames': min_frames,
             'num_imu_intervals': num_imu_intervals,
             'visual_shape': list(visual_data.shape),
-            'imu_shape': list(imu_data.shape),
+            'imu_shape': f"List of {len(imu_data)} variable-length tensors",
+            'imu_samples_per_interval': [len(interval) for interval in imu_data],
             'slam_source': 'mps_slam_time_based_20hz',
             'imu_source': 'real_vrs_data_between_frames',
             'imu_stream_id': imu_stream_id,
@@ -612,11 +649,12 @@ class AriaProcessor:
             'imu_frequency': 1000,
             'camera_frequency': 20,
             'rotation_format': 'quaternion_xyzw',
-            'imu_format': 'between_frames',
+            'imu_format': 'variable_length_between_frames',
             'imu_channel_order': 'ax,ay,az,gx,gy,gz',
             'imu_units': 'm/s²,m/s²,m/s²,rad/s,rad/s,rad/s',
-            'imu_note': 'IMU data contains 11 evenly spaced samples between consecutive frames (N-1 intervals for N frames)',
-            'imu_sampling': 'np.linspace with endpoint=True for symmetric [t_start, t_end] interval'
+            'imu_note': 'IMU data contains ALL samples between consecutive frames (variable length per interval)',
+            'imu_sampling': 'All IMU samples in [t_start, t_end) interval are preserved',
+            'frame_sampling': 'First 1000 consecutive frames at 20Hz for dense temporal sampling'
         }
         
         with open(seq_output_dir / "metadata.json", 'w') as f:
@@ -642,7 +680,7 @@ def main():
     parser.add_argument('--output-dir', type=str, default='./aria_processed',
                        help='Output directory')
     parser.add_argument('--max-frames', type=int, default=1000,
-                       help='Max frames per sequence (default: 1000, evenly sampled)')
+                       help='Max frames per sequence (default: 1000, first consecutive frames)')
     parser.add_argument('--num-workers', type=int, default=4,
                        help='Number of parallel workers')
     
@@ -741,7 +779,8 @@ def main():
         'imu_type': 'real_sensor_data',
         'imu_channel_order': 'ax,ay,az,gx,gy,gz',
         'slam_resampling': 'time_based_20hz',
-        'max_frames_per_sequence': args.max_frames
+        'max_frames_per_sequence': args.max_frames,
+        'frame_sampling_strategy': 'first_consecutive_frames'
     }
     
     with open(output_path / "dataset_summary.json", 'w') as f:
@@ -749,7 +788,7 @@ def main():
     
     print(f"\n📊 Summary:")
     print(f"  - Processed {processed_count} sequences")
-    print(f"  - Each with up to {args.max_frames} frames")
+    print(f"  - Each with up to {args.max_frames} consecutive frames (50 seconds at 20Hz)")
     print(f"  - IMU data format: [ax,ay,az,gx,gy,gz]")
     print(f"  - IMU extracted between consecutive frames")
     print(f"\n📁 Output saved to: {output_path}")

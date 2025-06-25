@@ -22,11 +22,16 @@ def conv(batchNorm, in_planes, out_planes, kernel_size=3, stride=1, dropout=0.0)
             nn.Dropout(dropout)  # , inplace=True)
         )
 
-# The inertial encoder for raw imu data
-class Inertial_encoder(nn.Module):
-    def __init__(self, opt):
-        super(Inertial_encoder, self).__init__()
+# Note: Old fixed 11-sample Inertial_encoder removed. Use FlexibleInertialEncoder instead.
 
+
+class FlexibleInertialEncoder(nn.Module):
+    """Enhanced IMU encoder that accepts variable-length IMU sequences."""
+    
+    def __init__(self, opt):
+        super(FlexibleInertialEncoder, self).__init__()
+        
+        # Keep same 3-layer Conv1D architecture as original
         self.encoder_conv = nn.Sequential(
             nn.Conv1d(6, 64, kernel_size=3, padding=1),
             nn.BatchNorm1d(64),
@@ -39,17 +44,58 @@ class Inertial_encoder(nn.Module):
             nn.Conv1d(128, 256, kernel_size=3, padding=1),
             nn.BatchNorm1d(256),
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Dropout(opt.imu_dropout))
-        self.proj = nn.Linear(256 * 1 * 11, opt.i_f_len)
-
+            nn.Dropout(opt.imu_dropout)
+        )
+        
+        # Multi-scale temporal aggregation using average pooling for robustness
+        self.pool_local = nn.AdaptiveAvgPool1d(8)    # Local motion details
+        self.pool_mid = nn.AdaptiveAvgPool1d(4)      # Mid-level patterns
+        self.pool_global = nn.AdaptiveAvgPool1d(1)   # Global motion statistics
+        
+        # Combine multi-scale features
+        self.combine = nn.Sequential(
+            nn.Linear(256 * 13, 512),  # 8+4+1=13 pooled positions
+            nn.ReLU(),
+            nn.Dropout(opt.imu_dropout),
+            nn.Linear(512, opt.i_f_len)  # Project to same dimension as original
+        )
+    
     def forward(self, x):
-        # x: (N, seq_len, 11, 6)
+        # x: (N, seq_len, num_samples, 6) - variable num_samples per transition!
         batch_size = x.shape[0]
         seq_len = x.shape[1]
-        x = x.view(batch_size * seq_len, x.size(2), x.size(3))    # x: (N x seq_len, 11, 6)
-        x = self.encoder_conv(x.permute(0, 2, 1))                 # x: (N x seq_len, 64, 11)
-        out = self.proj(x.view(x.shape[0], -1))                   # out: (N x seq_len, 256)
-        return out.view(batch_size, seq_len, 256)
+        
+        outputs = []
+        for i in range(seq_len):
+            # Get IMU sequence for this transition
+            imu_seq = x[:, i]  # [N, num_samples, 6]
+            
+            # Handle empty sequences
+            if imu_seq.shape[1] == 0:
+                outputs.append(torch.zeros(batch_size, 256, device=x.device))
+                continue
+            
+            # Transpose for Conv1d: [N, 6, num_samples]
+            imu_seq = imu_seq.permute(0, 2, 1)
+            
+            # Extract features at all temporal positions
+            features = self.encoder_conv(imu_seq)  # [N, 256, num_samples]
+            
+            # Multi-scale pooling to capture different temporal resolutions
+            local_feat = self.pool_local(features).flatten(1)    # [N, 256*8]
+            mid_feat = self.pool_mid(features).flatten(1)        # [N, 256*4]
+            global_feat = self.pool_global(features).flatten(1)   # [N, 256*1]
+            
+            # Concatenate multi-scale features
+            multi_scale = torch.cat([local_feat, mid_feat, global_feat], dim=1)  # [N, 256*13]
+            
+            # Combine and project to output dimension
+            output = self.combine(multi_scale)  # [N, 256]
+            outputs.append(output)
+        
+        # Stack back to original output format
+        return torch.stack(outputs, dim=1)  # [N, seq_len, 256]
+
 
 class Encoder(nn.Module):
     def __init__(self, opt):
@@ -70,7 +116,9 @@ class Encoder(nn.Module):
         __tmp = self.encode_image(__tmp)
 
         self.visual_head = nn.Linear(int(np.prod(__tmp.size())), opt.v_f_len)
-        self.inertial_encoder = Inertial_encoder(opt)
+        
+        # Always use flexible IMU encoder for variable-length sequences
+        self.inertial_encoder = FlexibleInertialEncoder(opt)
 
     def forward(self, img, imu):
         v = torch.cat((img[:, :-1], img[:, 1:]), dim=2)
@@ -83,10 +131,11 @@ class Encoder(nn.Module):
         v = v.view(batch_size, seq_len, -1)  # (batch, seq_len, fv)
         v = self.visual_head(v)  # (batch, seq_len, 256)
         
-        # IMU CNN
-        imu = torch.cat([imu[:, i * 10:i * 10 + 11, :].unsqueeze(1) for i in range(seq_len)], dim=1)
-        imu = self.inertial_encoder(imu)
-        return v, imu
+        # IMU CNN - expects variable length per transition
+        # Expected format: [batch, seq_len, num_samples, 6]
+        imu_features = self.inertial_encoder(imu)
+        
+        return v, imu_features
 
     def encode_image(self, x):
         out_conv2 = self.conv2(self.conv1(x))

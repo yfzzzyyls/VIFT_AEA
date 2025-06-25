@@ -163,7 +163,7 @@ source venv/bin/activate
 python process_aria.py
 
 # 3. Create train/val/test splits
-python prepare_aria_splits.py --source-dir aria_processed
+python organize_data_splits.py --data-dir aria_processed --train-ratio 0.7 --val-ratio 0.15
 
 # 4. Train all components from scratch (improved loss weighting)
 

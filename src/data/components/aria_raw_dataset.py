@@ -6,12 +6,13 @@ from pathlib import Path
 import json
 import torch.nn.functional as F
 from scipy.spatial.transform import Rotation as R
+from torch.nn.utils.rnn import pad_sequence
 
 
 class AriaRawDataset(Dataset):
     """
     Dataset for loading raw Aria data (images + IMU) for end-to-end training.
-    Expects data processed with fixed between-frames IMU format.
+    Expects data processed with variable-length IMU format (all samples between frames).
     """
     
     def __init__(self, data_dir, sequence_length=11, stride=10, transform=None):
@@ -52,14 +53,19 @@ class AriaRawDataset(Dataset):
         """Create sliding window samples from a sequence."""
         # Load data
         visual_data = torch.load(seq_dir / 'visual_data.pt')  # [N, 3, H, W]
-        imu_data = torch.load(seq_dir / 'imu_data.pt')        # [N-1, 11, 6]
+        imu_data = torch.load(seq_dir / 'imu_data.pt')        # List of variable-length tensors
         
         with open(seq_dir / 'poses_quaternion.json', 'r') as f:
             poses_data = json.load(f)
         
         # Get number of frames
         num_frames = visual_data.shape[0]
-        num_imu_intervals = imu_data.shape[0]
+        
+        # IMU data must be in new format (list of variable-length tensors)
+        if not isinstance(imu_data, list):
+            raise ValueError(f"IMU data in {seq_dir} is in old format. Please reprocess with updated process_aria.py")
+        
+        num_imu_intervals = len(imu_data)
         
         # Ensure consistency
         if num_imu_intervals != num_frames - 1:
@@ -75,7 +81,10 @@ class AriaRawDataset(Dataset):
             
             # Extract window data
             window_visual = visual_data[start_idx:end_idx]  # [11, 3, H, W]
-            window_imu = imu_data[start_idx:start_idx + self.sequence_length - 1]  # [10, 11, 6]
+            
+            # Extract list of variable-length tensors
+            window_imu = imu_data[start_idx:start_idx + self.sequence_length - 1]  # List of tensors
+            
             window_poses = poses_data[start_idx:end_idx]    # 11 poses
             
             # Store absolute poses for this window
@@ -110,12 +119,21 @@ class AriaRawDataset(Dataset):
         if visual.shape[-2:] != (704, 704):
             visual = F.interpolate(visual, size=(704, 704), mode='bilinear', align_corners=False)
                 
-        # Get IMU data - already in correct format (11 samples per interval)
-        # VIFT expects 110 samples (11 per transition)
-        imu = sample['imu']  # [10, 11, 6]
+        # Get IMU data
+        imu = sample['imu']  # List of variable-length tensors
         
-        # Reshape to [110, 6]
-        imu_110 = imu.reshape(-1, 6)  # [110, 6]
+        # For flexible encoder: Stack into padded tensor for batch processing
+        max_len = max(tensor.shape[0] for tensor in imu)
+        imu_padded = []
+        for tensor in imu:
+            if tensor.shape[0] < max_len:
+                # Pad with zeros to max length
+                padding = torch.zeros(max_len - tensor.shape[0], 6)
+                padded = torch.cat([tensor, padding], dim=0)
+            else:
+                padded = tensor
+            imu_padded.append(padded)
+        imu_data = torch.stack(imu_padded)  # [10, max_len, 6]
         
         # Get ground truth poses
         poses = sample['poses']
@@ -149,8 +167,8 @@ class AriaRawDataset(Dataset):
         gt_poses = torch.tensor(np.array(gt_poses), dtype=torch.float32)  # [10, 7]
         
         return {
-            'images': visual,        # [11, 3, 256, 512]
-            'imu': imu_110,         # [110, 6]
+            'images': visual,        # [11, 3, H, W]
+            'imu': imu_data,  # [10, max_len, 6] with variable max_len per batch
             'gt_poses': gt_poses,   # [10, 7] (3 trans + 4 quat)
             'seq_name': sample['seq_name'],
             'start_idx': sample['start_idx']
@@ -187,7 +205,8 @@ class AriaRawDataModule:
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True
+            pin_memory=True,
+            collate_fn=collate_variable_length
         )
     
     def val_dataloader(self):
@@ -196,5 +215,46 @@ class AriaRawDataModule:
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            pin_memory=True
+            pin_memory=True,
+            collate_fn=collate_variable_length
         )
+
+
+def collate_variable_length(batch):
+    """Custom collate function to handle variable-length IMU sequences."""
+    # Stack fixed-size tensors normally
+    images = torch.stack([item['images'] for item in batch])
+    gt_poses = torch.stack([item['gt_poses'] for item in batch])
+    
+    # Handle IMU data - each item already has padded IMU data but with different max_len
+    # Find the maximum length across all items in the batch
+    max_len = max(item['imu'].shape[1] for item in batch)
+    
+    # Pad all IMU sequences to the same max length
+    padded_imu_list = []
+    for item in batch:
+        imu_data = item['imu']  # [10, item_max_len, 6]
+        item_max_len = imu_data.shape[1]
+        
+        if item_max_len < max_len:
+            # Pad along the second dimension (samples dimension)
+            padding = torch.zeros(10, max_len - item_max_len, 6)
+            padded_imu = torch.cat([imu_data, padding], dim=1)
+        else:
+            padded_imu = imu_data
+        
+        padded_imu_list.append(padded_imu)
+    
+    imu = torch.stack(padded_imu_list)  # [B, 10, max_len, 6]
+    
+    # Metadata
+    seq_names = [item['seq_name'] for item in batch]
+    start_indices = [item['start_idx'] for item in batch]
+    
+    return {
+        'images': images,
+        'imu': imu,
+        'gt_poses': gt_poses,
+        'seq_name': seq_names,
+        'start_idx': start_indices
+    }

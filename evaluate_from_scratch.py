@@ -920,7 +920,7 @@ def main():
         print("Please ensure test sequences are in the test directory")
         return
     
-    test_dataset = AriaRawDataset(test_dir, sequence_length=11, stride=10)  # Use stride=10 to match training
+    test_dataset = AriaRawDataset(test_dir, sequence_length=11, stride=10)  # Use stride=10 for non-overlapping evaluation
     test_loader = DataLoader(
         test_dataset,
         batch_size=args.batch_size,

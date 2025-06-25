@@ -38,7 +38,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from src.models.components.vsvio import TransformerVIO
-from src.data.components.aria_raw_dataset import AriaRawDataModule
+from src.data.components.aria_raw_dataset import AriaRawDataModule, collate_variable_length
 
 
 def robust_geodesic_loss_stable(pred_quat, gt_quat):
@@ -471,7 +471,8 @@ def main():
         sampler=train_sampler,
         num_workers=args.num_workers,
         pin_memory=True,
-        drop_last=True
+        drop_last=True,
+        collate_fn=collate_variable_length
     )
     
     val_loader = torch.utils.data.DataLoader(
@@ -481,7 +482,8 @@ def main():
         sampler=val_sampler,
         num_workers=args.num_workers,
         pin_memory=True,
-        drop_last=False
+        drop_last=False,
+        collate_fn=collate_variable_length
     )
     
     if is_main_process:
