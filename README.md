@@ -180,7 +180,7 @@ tail -f train.log
 
 # 6. Evaluate trained model
 python evaluate_from_scratch.py \
-    --checkpoint checkpoints_from_scratch/best_model.pt \
+    --checkpoint checkpoints_distributed/best_model.pt \
     --data-dir aria_processed \
     --output-dir evaluation_from_scratch \
     --batch-size 16 \
