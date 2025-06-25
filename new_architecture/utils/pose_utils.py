@@ -18,7 +18,11 @@ def quaternion_to_rotation_matrix(q: np.ndarray) -> np.ndarray:
         R: 3x3 rotation matrix
     """
     # Normalize quaternion
-    q = q / np.linalg.norm(q)
+    q_norm = np.linalg.norm(q)
+    if q_norm < 1e-8:
+        # Return identity rotation for zero quaternion
+        return np.eye(3)
+    q = q / q_norm
     
     # Assume quaternion format [x, y, z, w] (following PyTorch3D convention)
     x, y, z, w = q[0], q[1], q[2], q[3]

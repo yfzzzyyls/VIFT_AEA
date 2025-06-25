@@ -15,11 +15,12 @@ class ModelConfig:
     pretrained: bool = True  # Use pretrained weights for ResNet
     visual_feature_dim: int = 256
     
-    # IMU encoder (LSTM)
-    imu_hidden_dim: int = 128
-    imu_lstm_layers: int = 3
+    # IMU encoder
+    imu_encoder_type: str = 'lstm'  # Options: 'lstm', 'cnn'
+    imu_hidden_dim: int = 128  # For LSTM
+    imu_lstm_layers: int = 3   # For LSTM
     imu_feature_dim: int = 256
-    imu_bidirectional: bool = True
+    imu_bidirectional: bool = True  # For LSTM
     
     # Transformer
     transformer_dim: int = 512
@@ -114,6 +115,7 @@ class Config:
             encoder_type=args.encoder_type,
             pretrained=args.pretrained,
             visual_feature_dim=args.visual_feature_dim,
+            imu_encoder_type=args.imu_encoder_type,
             imu_hidden_dim=args.imu_hidden_dim,
             imu_lstm_layers=args.imu_lstm_layers,
             imu_feature_dim=args.imu_feature_dim,
@@ -183,6 +185,9 @@ def get_parser() -> argparse.ArgumentParser:
                             help="Use pretrained weights for ResNet")
     model_group.add_argument("--visual-feature-dim", type=int, default=256,
                             help="Visual encoder output dimension")
+    model_group.add_argument("--imu-encoder-type", type=str, default='lstm',
+                            choices=['lstm', 'cnn'],
+                            help="IMU encoder type (lstm or cnn)")
     model_group.add_argument("--imu-hidden-dim", type=int, default=128,
                             help="IMU LSTM hidden dimension")
     model_group.add_argument("--imu-lstm-layers", type=int, default=3,

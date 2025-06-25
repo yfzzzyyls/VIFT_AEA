@@ -30,14 +30,14 @@ from models.flownet_lstm_transformer import FlowNetLSTMTransformer
 from data.aria_variable_imu_dataset import AriaVariableIMUDataset, collate_variable_imu
 from configs.flownet_lstm_transformer_config import Config, ModelConfig
 from utils.metrics import compute_trajectory_metrics, compute_ate, compute_rpe
-from utils.visualization import plot_trajectory_comparison, plot_error_distribution
+from utils.visualization import plot_trajectory_comparison
 from utils.pose_utils import integrate_poses, poses_to_trajectory
 
 
 def load_checkpoint(checkpoint_path: str, device: torch.device) -> Tuple[nn.Module, Config]:
     """Load model from checkpoint."""
     print(f"Loading checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     
     # Extract configuration
     if 'config' in checkpoint:
@@ -181,7 +181,9 @@ def evaluate_sequence(
         'translations_pred': all_translations_pred,
         'translations_gt': all_translations_gt,
         'rotations_pred': all_rotations_pred,
-        'rotations_gt': all_rotations_gt
+        'rotations_gt': all_rotations_gt,
+        'predictions': all_predictions,  # Raw relative poses for plotting
+        'ground_truth': all_ground_truth  # Raw relative poses for plotting
     }
     
     return results
@@ -201,8 +203,11 @@ def create_visualizations(results: Dict, output_dir: Path, sequence_name: str):
                 results['trajectories_gt'][i],
                 title=f"{sequence_name} - Trajectory {i}"
             )
-            fig.savefig(vis_dir / f'{sequence_name}_trajectory_{i}.png', dpi=150, bbox_inches='tight')
-            plt.close(fig)
+            if fig is not None:
+                fig.savefig(vis_dir / f'{sequence_name}_trajectory_{i}.png', dpi=150, bbox_inches='tight')
+                plt.close(fig)
+            else:
+                print(f"Warning: Failed to create trajectory plot {i}")
     
     # 2. Error distribution plots
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
@@ -326,7 +331,7 @@ def main():
         variable_length=False,  # Fixed length for evaluation
         sequence_length=args.sequence_length,
         stride=args.stride,
-        image_size=(512, 512)
+        image_size=(704, 704)  # Match training image size
     )
     
     dataloader = DataLoader(
@@ -391,6 +396,13 @@ def main():
         rotations_gt=results['rotations_gt']
     )
     print(f"Detailed results saved to: {results_file}")
+    
+    # Also save as .pt for the plotting script
+    torch.save({
+        'predictions': results['predictions'],
+        'ground_truth': results['ground_truth']
+    }, output_dir / 'results.pt')
+    print(f"Results saved to: {output_dir / 'results.pt'}")
     
     print("\n" + "="*80)
     print("Evaluation completed successfully!")

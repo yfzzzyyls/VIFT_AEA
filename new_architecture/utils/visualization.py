@@ -14,7 +14,7 @@ def plot_trajectory_comparison(
     gt_trajectory: np.ndarray,
     title: str = "Trajectory Comparison",
     save_path: Optional[str] = None
-) -> None:
+):
     """
     Plot predicted vs ground truth trajectory in 2D (bird's eye view).
     
@@ -23,8 +23,11 @@ def plot_trajectory_comparison(
         gt_trajectory: Ground truth trajectory [N, 3]
         title: Plot title
         save_path: Path to save the plot
+        
+    Returns:
+        fig: The matplotlib figure object
     """
-    plt.figure(figsize=(10, 8))
+    fig = plt.figure(figsize=(10, 8))
     
     # Plot trajectories
     plt.plot(gt_trajectory[:, 0], gt_trajectory[:, 1], 'g-', 
@@ -50,6 +53,7 @@ def plot_trajectory_comparison(
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
+    return fig
 
 
 def plot_3d_trajectory(

@@ -46,16 +46,43 @@ def compute_relative_pose_error(
     rot_errors = []
     
     for i in range(len(pred_poses) - delta):
+        # Validate and normalize quaternions
+        pred_q1 = pred_poses[i, 3:]
+        pred_q2 = pred_poses[i + delta, 3:]
+        gt_q1 = gt_poses[i, 3:]
+        gt_q2 = gt_poses[i + delta, 3:]
+        
+        # Check for zero quaternions and replace with identity
+        if np.linalg.norm(pred_q1) < 1e-8:
+            pred_q1 = np.array([0, 0, 0, 1])
+        else:
+            pred_q1 = pred_q1 / np.linalg.norm(pred_q1)
+            
+        if np.linalg.norm(pred_q2) < 1e-8:
+            pred_q2 = np.array([0, 0, 0, 1])
+        else:
+            pred_q2 = pred_q2 / np.linalg.norm(pred_q2)
+            
+        if np.linalg.norm(gt_q1) < 1e-8:
+            gt_q1 = np.array([0, 0, 0, 1])
+        else:
+            gt_q1 = gt_q1 / np.linalg.norm(gt_q1)
+            
+        if np.linalg.norm(gt_q2) < 1e-8:
+            gt_q2 = np.array([0, 0, 0, 1])
+        else:
+            gt_q2 = gt_q2 / np.linalg.norm(gt_q2)
+        
         # Predicted relative pose
         pred_trans_rel = pred_poses[i + delta, :3] - pred_poses[i, :3]
-        pred_rot1 = R.from_quat(pred_poses[i, 3:])
-        pred_rot2 = R.from_quat(pred_poses[i + delta, 3:])
+        pred_rot1 = R.from_quat(pred_q1)
+        pred_rot2 = R.from_quat(pred_q2)
         pred_rot_rel = pred_rot1.inv() * pred_rot2
         
         # Ground truth relative pose
         gt_trans_rel = gt_poses[i + delta, :3] - gt_poses[i, :3]
-        gt_rot1 = R.from_quat(gt_poses[i, 3:])
-        gt_rot2 = R.from_quat(gt_poses[i + delta, 3:])
+        gt_rot1 = R.from_quat(gt_q1)
+        gt_rot2 = R.from_quat(gt_q2)
         gt_rot_rel = gt_rot1.inv() * gt_rot2
         
         # Translation error

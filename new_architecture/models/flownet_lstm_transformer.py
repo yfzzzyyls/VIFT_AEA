@@ -46,15 +46,26 @@ class FlowNetLSTMTransformer(nn.Module):
                 output_dim=config.visual_feature_dim
             )
         
-        # IMU encoder: LSTM for temporal processing
-        self.imu_encoder = IMULSTMEncoder(
-            input_dim=6,  # ax, ay, az, gx, gy, gz
-            hidden_dim=config.imu_hidden_dim,
-            num_layers=config.imu_lstm_layers,
-            output_dim=config.imu_feature_dim,
-            dropout=config.dropout,
-            bidirectional=config.imu_bidirectional
-        )
+        # IMU encoder: Choose between LSTM and CNN
+        imu_encoder_type = getattr(config, 'imu_encoder_type', 'lstm')
+        
+        if imu_encoder_type == 'cnn':
+            from .imu_cnn_encoder import IMUCNN1DEncoder
+            self.imu_encoder = IMUCNN1DEncoder(
+                input_channels=6,  # ax, ay, az, gx, gy, gz
+                hidden_channels=[64, 128, 256],
+                output_dim=config.imu_feature_dim,
+                dropout=config.dropout
+            )
+        else:  # Default to LSTM
+            self.imu_encoder = IMULSTMEncoder(
+                input_dim=6,  # ax, ay, az, gx, gy, gz
+                hidden_dim=config.imu_hidden_dim,
+                num_layers=config.imu_lstm_layers,
+                output_dim=config.imu_feature_dim,
+                dropout=config.dropout,
+                bidirectional=config.imu_bidirectional
+            )
         
         # Fusion and prediction: Transformer
         self.pose_predictor = PoseTransformer(
