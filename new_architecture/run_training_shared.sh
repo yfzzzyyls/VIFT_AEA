@@ -1,6 +1,10 @@
 #!/bin/bash
 
-echo "FlowNet-LSTM-Transformer Training with Memory-Mapped Shared Data"
+echo "FlowNet-CNN-Transformer Training with Memory-Mapped Shared Data"
+echo "Configuration:"
+echo "- Visual Encoder: FlowNet (optical flow for motion estimation)"
+echo "- IMU Encoder: 1D CNN (processes all ~50 IMU samples between frames)"
+echo "- Loss: Smooth L1 for translation and scale, geodesic for rotation"
 echo ""
 
 # Install required packages if not already installed
@@ -16,6 +20,7 @@ rm -rf /dev/shm/aria_mmap_cache
 # Set environment variables for optimal performance
 export OMP_NUM_THREADS=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Run training with shared memory
 # Note: We use the new script that handles multiprocessing internally
@@ -23,18 +28,18 @@ python train_flownet_lstm_transformer_shared.py \
     --distributed \
     --use-amp \
     --data-dir ../aria_processed \
-    --encoder-type resnet18 \
-    --pretrained \
+    --encoder-type flownet \
+    --imu-encoder-type cnn \
     --warmup-epochs 2 \
-    --batch-size 64 \
+    --batch-size 4 \
     --num-workers 0 \
-    --learning-rate 4.8e-3 \
+    --learning-rate 1e-3 \
     --num-epochs 100 \
-    --sequence-length 41 \
+    --sequence-length 21 \
     --stride 5 \
-    --translation-weight 1.0 \
+    --translation-weight 10.0 \
     --rotation-weight 100.0 \
-    --scale-weight 10.0 \
+    --scale-weight 20.0 \
     --checkpoint-dir ../checkpoints_from_scratch \
-    --experiment-name resnet_lstm_41frames_mmap_shared \
+    --experiment-name flownet_cnn_smoothl1_allsamples \
     --validate-every 1

@@ -6,6 +6,7 @@ Training script with true shared memory using torch.multiprocessing.spawn
 import os
 import sys
 import time
+import math
 import random
 import numpy as np
 from pathlib import Path
@@ -252,12 +253,12 @@ def train_epoch(
         scale_loss_sum += loss_dict['scale_loss'].item()
         num_batches += 1
         
-        # Update progress bar
+        # Update progress bar (convert rotation from radians to degrees)
         if rank == 0 and batch_idx % config.training.log_every == 0:
             pbar.set_postfix({
                 'loss': f"{loss.item():.4f}",
-                'trans': f"{loss_dict['translation_loss'].item():.4f}",
-                'rot': f"{loss_dict['rotation_loss'].item():.4f}",
+                'trans(m)': f"{loss_dict['translation_loss'].item():.4f}",
+                'rot(°)': f"{loss_dict['rotation_loss'].item() * 180.0 / math.pi:.2f}",
                 'scale': f"{loss_dict['scale_loss'].item():.4f}"
             })
     
@@ -430,7 +431,13 @@ def train_worker(rank: int, world_size: int, config: Config):
                 if is_main_process:
                     print(f"\nEpoch {epoch} Summary:")
                     print(f"Train Loss: {train_losses['total_loss']:.4f}")
+                    print(f"  - Translation (m): {train_losses['translation_loss']:.4f}")
+                    print(f"  - Rotation (°): {train_losses['rotation_loss'] * 180.0 / math.pi:.2f}")
+                    print(f"  - Scale: {train_losses['scale_loss']:.4f}")
                     print(f"Val Loss: {val_losses['total_loss']:.4f}")
+                    print(f"  - Translation (m): {val_losses['translation_loss']:.4f}")
+                    print(f"  - Rotation (°): {val_losses['rotation_loss'] * 180.0 / math.pi:.2f}")
+                    print(f"  - Scale: {val_losses['scale_loss']:.4f}")
                     
                     # Save best model
                     if val_losses['total_loss'] < best_val_loss:

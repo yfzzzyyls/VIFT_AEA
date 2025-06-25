@@ -74,15 +74,30 @@ def evaluate_sequence(
     model: nn.Module,
     dataloader: DataLoader,
     device: torch.device,
-    sequence_name: str
+    sequence_name: str,
+    stride: int = 10,
+    sequence_length: int = 11
 ) -> Dict[str, any]:
-    """Evaluate model on a single sequence."""
+    """Evaluate model on a single sequence.
+    
+    Handles overlapping predictions based on stride:
+    - stride = 1: Use only the last prediction from each window
+    - stride = sequence_length - 1: Use all predictions (non-overlapping)
+    - 1 < stride < sequence_length - 1: Average overlapping predictions
+    """
     all_predictions = []
     all_ground_truth = []
     all_translations_pred = []
     all_translations_gt = []
     all_rotations_pred = []
     all_rotations_gt = []
+    
+    # For handling overlapping predictions
+    if 1 < stride < sequence_length - 1:
+        # Dictionary to store all predictions for each global timestep
+        global_predictions = {}
+        global_ground_truth = {}
+        global_index = 0
     
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(dataloader, desc=f"Evaluating {sequence_name}")):
@@ -99,32 +114,127 @@ def evaluate_sequence(
             # Forward pass
             outputs = model(images, imu_sequences)
             
-            # Store predictions
-            all_predictions.append(outputs['poses'].cpu())
-            all_ground_truth.append(poses_gt.cpu())
-            all_translations_pred.append(outputs['translation'].cpu())
-            all_translations_gt.append(poses_gt[:, :, :3].cpu())
-            all_rotations_pred.append(outputs['rotation'].cpu())
-            all_rotations_gt.append(poses_gt[:, :, 3:].cpu())
+            # Handle predictions based on stride
+            if stride == 1:
+                # Use only the last prediction from each window
+                all_predictions.append(outputs['poses'][:, -1:, :].cpu())
+                all_ground_truth.append(poses_gt[:, -1:, :].cpu())
+                all_translations_pred.append(outputs['translation'][:, -1:, :].cpu())
+                all_translations_gt.append(poses_gt[:, -1:, :3].cpu())
+                all_rotations_pred.append(outputs['rotation'][:, -1:, :].cpu())
+                all_rotations_gt.append(poses_gt[:, -1:, 3:].cpu())
+            
+            elif stride == sequence_length - 1:
+                # Non-overlapping windows - use all predictions
+                all_predictions.append(outputs['poses'].cpu())
+                all_ground_truth.append(poses_gt.cpu())
+                all_translations_pred.append(outputs['translation'].cpu())
+                all_translations_gt.append(poses_gt[:, :, :3].cpu())
+                all_rotations_pred.append(outputs['rotation'].cpu())
+                all_rotations_gt.append(poses_gt[:, :, 3:].cpu())
+            
+            else:
+                # Overlapping windows - store for averaging later
+                batch_size = outputs['poses'].shape[0]
+                seq_len = outputs['poses'].shape[1]
+                
+                for b in range(batch_size):
+                    window_start = global_index
+                    
+                    for t in range(seq_len):
+                        global_t = window_start + t
+                        
+                        if global_t not in global_predictions:
+                            global_predictions[global_t] = []
+                            global_ground_truth[global_t] = []
+                        
+                        global_predictions[global_t].append({
+                            'pose': outputs['poses'][b, t].cpu(),
+                            'translation': outputs['translation'][b, t].cpu(),
+                            'rotation': outputs['rotation'][b, t].cpu()
+                        })
+                        global_ground_truth[global_t].append(poses_gt[b, t].cpu())
+                    
+                    global_index += stride
     
-    # Concatenate all batches
-    all_predictions = torch.cat(all_predictions, dim=0).numpy()
-    all_ground_truth = torch.cat(all_ground_truth, dim=0).numpy()
-    all_translations_pred = torch.cat(all_translations_pred, dim=0).numpy()
-    all_translations_gt = torch.cat(all_translations_gt, dim=0).numpy()
-    all_rotations_pred = torch.cat(all_rotations_pred, dim=0).numpy()
-    all_rotations_gt = torch.cat(all_rotations_gt, dim=0).numpy()
+    # Process results based on stride
+    if 1 < stride < sequence_length - 1:
+        # Average overlapping predictions
+        sorted_timesteps = sorted(global_predictions.keys())
+        
+        avg_predictions = []
+        avg_ground_truth = []
+        avg_translations_pred = []
+        avg_translations_gt = []
+        avg_rotations_pred = []
+        avg_rotations_gt = []
+        
+        for t in sorted_timesteps:
+            # Average predictions for this timestep
+            poses = torch.stack([p['pose'] for p in global_predictions[t]])
+            translations = torch.stack([p['translation'] for p in global_predictions[t]])
+            rotations = torch.stack([p['rotation'] for p in global_predictions[t]])
+            gts = torch.stack(global_ground_truth[t])
+            
+            # Average translations
+            avg_trans = translations.mean(dim=0)
+            
+            # Average rotations (normalize quaternions first, then average and renormalize)
+            rotations_norm = rotations / rotations.norm(dim=-1, keepdim=True)
+            avg_rot = rotations_norm.mean(dim=0)
+            avg_rot = avg_rot / avg_rot.norm()
+            
+            # Combine averaged pose
+            avg_pose = torch.cat([avg_trans, avg_rot])
+            
+            avg_predictions.append(avg_pose.unsqueeze(0))
+            avg_ground_truth.append(gts[0].unsqueeze(0))  # GT should be the same
+            avg_translations_pred.append(avg_trans.unsqueeze(0))
+            avg_translations_gt.append(gts[0, :3].unsqueeze(0))
+            avg_rotations_pred.append(avg_rot.unsqueeze(0))
+            avg_rotations_gt.append(gts[0, 3:].unsqueeze(0))
+        
+        # Stack into arrays
+        all_predictions = torch.cat(avg_predictions, dim=0).numpy()
+        all_ground_truth = torch.cat(avg_ground_truth, dim=0).numpy()
+        all_translations_pred = torch.cat(avg_translations_pred, dim=0).numpy()
+        all_translations_gt = torch.cat(avg_translations_gt, dim=0).numpy()
+        all_rotations_pred = torch.cat(avg_rotations_pred, dim=0).numpy()
+        all_rotations_gt = torch.cat(avg_rotations_gt, dim=0).numpy()
+    else:
+        # Concatenate all batches (for stride=1 or non-overlapping cases)
+        all_predictions = torch.cat(all_predictions, dim=0).numpy()
+        all_ground_truth = torch.cat(all_ground_truth, dim=0).numpy()
+        all_translations_pred = torch.cat(all_translations_pred, dim=0).numpy()
+        all_translations_gt = torch.cat(all_translations_gt, dim=0).numpy()
+        all_rotations_pred = torch.cat(all_rotations_pred, dim=0).numpy()
+        all_rotations_gt = torch.cat(all_rotations_gt, dim=0).numpy()
     
     # Compute trajectories from relative poses
     trajectories_pred = []
     trajectories_gt = []
     
-    for i in range(len(all_predictions)):
-        # Integrate relative poses to get absolute trajectory
-        traj_pred = integrate_poses(all_predictions[i])
-        traj_gt = integrate_poses(all_ground_truth[i])
-        trajectories_pred.append(traj_pred)
-        trajectories_gt.append(traj_gt)
+    # Handle different shapes based on stride
+    if stride == 1:
+        # For stride=1, we have individual predictions, not sequences
+        # Integrate all predictions as one long sequence
+        traj_pred = integrate_poses(all_predictions)
+        traj_gt = integrate_poses(all_ground_truth)
+        trajectories_pred = [traj_pred]
+        trajectories_gt = [traj_gt]
+    elif 1 < stride < sequence_length - 1:
+        # For averaged predictions, integrate as one sequence
+        traj_pred = integrate_poses(all_predictions)
+        traj_gt = integrate_poses(all_ground_truth)
+        trajectories_pred = [traj_pred]
+        trajectories_gt = [traj_gt]
+    else:
+        # For non-overlapping windows, integrate each window separately
+        for i in range(len(all_predictions)):
+            traj_pred = integrate_poses(all_predictions[i])
+            traj_gt = integrate_poses(all_ground_truth[i])
+            trajectories_pred.append(traj_pred)
+            trajectories_gt.append(traj_gt)
     
     # Compute metrics
     metrics = {}
@@ -346,8 +456,21 @@ def main():
     
     print(f"Dataset loaded: {len(dataset)} samples")
     
+    # Print prediction selection strategy
+    print(f"\nPrediction Selection Strategy:")
+    if args.stride == 1:
+        print(f"  Using only the LAST prediction from each window (maximum context)")
+    elif args.stride == args.sequence_length - 1:
+        print(f"  Using ALL predictions (non-overlapping windows)")
+    else:
+        print(f"  AVERAGING overlapping predictions (stride={args.stride})")
+    
     # Evaluate
-    results = evaluate_sequence(model, dataloader, device, args.split)
+    results = evaluate_sequence(
+        model, dataloader, device, args.split, 
+        stride=args.stride, 
+        sequence_length=args.sequence_length
+    )
     
     # Print metrics
     print("\n" + "="*80)

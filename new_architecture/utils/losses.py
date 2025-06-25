@@ -134,15 +134,17 @@ def compute_pose_loss(
     gt_trans = gt_poses[..., :3]
     gt_rot = gt_poses[..., 3:]
     
-    # Translation loss (MSE)
-    trans_loss = F.mse_loss(pred_trans, gt_trans, reduction='none')
+    # Translation loss (Smooth L1)
+    trans_loss = F.smooth_l1_loss(pred_trans, gt_trans, reduction='none')
     trans_loss = (trans_loss.mean(dim=-1) * mask).sum() / mask.sum()
     
     # Rotation loss (geodesic)
     rot_loss = quaternion_geodesic_loss(pred_rot, gt_rot)
     
-    # Scale consistency loss
-    scale_loss = scale_consistency_loss(pred_trans)
+    # Scale consistency loss - match old VIFT
+    pred_scale = pred_trans.norm(dim=-1)  # [B, T]
+    gt_scale = gt_trans.norm(dim=-1)      # [B, T]
+    scale_loss = F.smooth_l1_loss(pred_scale, gt_scale)
     
     # Temporal smoothness loss
     smoothness_loss = temporal_smoothness_loss(pred_poses)
