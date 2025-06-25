@@ -40,6 +40,6 @@ python train_flownet_lstm_transformer_shared.py \
     --translation-weight 10.0 \
     --rotation-weight 100.0 \
     --scale-weight 20.0 \
-    --checkpoint-dir ../checkpoints_from_scratch \
+    --checkpoint-dir checkpoints \
     --experiment-name flownet_cnn_smoothl1_allsamples \
     --validate-every 1

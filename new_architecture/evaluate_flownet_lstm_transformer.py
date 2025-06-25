@@ -527,6 +527,39 @@ def main():
     }, output_dir / 'results.pt')
     print(f"Results saved to: {output_dir / 'results.pt'}")
     
+    # Generate required 3D plots and CSV
+    print("\nGenerating required 3D plots and CSV...")
+    try:
+        from generate_evaluation_plots import load_results, integrate_trajectory, plot_3d_trajectory, plot_3d_rotation, save_trajectory_csv
+        
+        # Load and integrate trajectories
+        predictions_np = results['predictions']
+        ground_truth_np = results['ground_truth']
+        traj_pred = integrate_trajectory(predictions_np)
+        traj_gt = integrate_trajectory(ground_truth_np)
+        
+        # Generate 1s and 5s plots
+        vis_dir = output_dir / 'visualizations'
+        for duration in [1, 5]:
+            # 3D trajectory plot
+            traj_output = vis_dir / f'trajectory_3d_001_{duration}s.png'
+            plot_3d_trajectory(traj_pred, traj_gt, duration, traj_output)
+            
+            # 3D rotation plot  
+            rot_output = vis_dir / f'rotation_3d_001_{duration}s.png'
+            plot_3d_rotation(traj_pred, traj_gt, duration, rot_output)
+        
+        # Save trajectory CSVs (both ground truth and predictions)
+        csv_output_pred = vis_dir / 'trajectory_001_pred.csv'
+        csv_output_gt = vis_dir / 'trajectory_001_gt.csv'
+        save_trajectory_csv(traj_pred, traj_gt, csv_output_pred, csv_output_gt)
+        
+        print("  ✓ Generated 3D trajectory plots (1s and 5s)")
+        print("  ✓ Generated 3D rotation plots (1s and 5s)")
+        print("  ✓ Saved trajectory CSVs (ground truth and predictions with errors)")
+    except Exception as e:
+        print(f"  Warning: Could not generate 3D plots: {e}")
+    
     print("\n" + "="*80)
     print("Evaluation completed successfully!")
     print("="*80)
