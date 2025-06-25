@@ -13,7 +13,7 @@ class ModelConfig:
     # Visual encoder
     encoder_type: str = 'resnet18'  # Options: 'flownet', 'resnet18', 'resnet18_diff'
     pretrained: bool = True  # Use pretrained weights for ResNet
-    visual_feature_dim: int = 256
+    visual_feature_dim: int = 512  # Match old VIFT
     
     # IMU encoder
     imu_encoder_type: str = 'lstm'  # Options: 'lstm', 'cnn'
@@ -23,7 +23,7 @@ class ModelConfig:
     imu_bidirectional: bool = True  # For LSTM
     
     # Transformer
-    transformer_dim: int = 512
+    transformer_dim: int = 768  # Match old VIFT (512 visual + 256 IMU)
     transformer_heads: int = 8
     transformer_layers: int = 6
     transformer_feedforward: int = 2048
@@ -94,6 +94,10 @@ class TrainingConfig:
     curriculum_start_len: int = 10  # Start with 10 frames
     curriculum_step: int = 10  # Increase sequence length every 10 epochs
     curriculum_increment: int = 5  # How many frames to add each step
+    
+    # Pretrained model support
+    pretrained_path: Optional[str] = None  # Path to pretrained encoder model
+    train_transformer_only: bool = False  # Only train pose transformer
 
 
 @dataclass
@@ -158,7 +162,9 @@ class Config:
             use_amp=args.use_amp,
             use_curriculum=args.use_curriculum,
             curriculum_step=args.curriculum_step if hasattr(args, 'curriculum_step') else 10,
-            curriculum_increment=args.curriculum_increment if hasattr(args, 'curriculum_increment') else 5
+            curriculum_increment=args.curriculum_increment if hasattr(args, 'curriculum_increment') else 5,
+            pretrained_path=args.pretrained_path if hasattr(args, 'pretrained_path') else None,
+            train_transformer_only=args.train_transformer_only if hasattr(args, 'train_transformer_only') else False
         )
         
         return cls(
@@ -272,6 +278,10 @@ def get_parser() -> argparse.ArgumentParser:
                                help="Increase sequence length every N epochs")
     training_group.add_argument("--curriculum-increment", type=int, default=5,
                                help="How many frames to add at each step")
+    training_group.add_argument("--pretrained-path", type=str, default=None,
+                               help="Path to pretrained encoder model")
+    training_group.add_argument("--train-transformer-only", action="store_true",
+                               help="Only train the pose transformer, freeze encoders")
     
     # Experiment arguments
     exp_group = parser.add_argument_group("Experiment")

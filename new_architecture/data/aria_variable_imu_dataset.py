@@ -36,7 +36,8 @@ class AriaVariableIMUDataset(Dataset):
         min_seq_len: int = 5,
         max_seq_len: int = 50,
         stride: int = 1,
-        image_size: Tuple[int, int] = (704, 704)  # Default: 2x2 binned from 1408x1408
+        image_size: Tuple[int, int] = (704, 704),  # Default: 2x2 binned from 1408x1408
+        sequences: Optional[List[str]] = None  # Specify sequences to load
     ):
         """
         Args:
@@ -48,6 +49,7 @@ class AriaVariableIMUDataset(Dataset):
             max_seq_len: Maximum sequence length when variable_length=True
             stride: Stride for sliding window over sequences
             image_size: Target size for images (H, W)
+            sequences: Optional list of sequence names to load (e.g., ['016', '017'])
         """
         self.data_dir = Path(data_dir)
         self.split = split
@@ -57,17 +59,22 @@ class AriaVariableIMUDataset(Dataset):
         self.max_seq_len = max_seq_len
         self.stride = stride
         self.image_size = image_size
+        self.specified_sequences = sequences
         
         # Load split information
-        splits_file = self.data_dir / 'splits.json'
-        if splits_file.exists():
-            with open(splits_file, 'r') as f:
-                splits_data = json.load(f)
-                self.split_sequences = splits_data['splits'][split]
+        if sequences is not None:
+            # Use specified sequences
+            self.split_sequences = sequences
         else:
-            # Fallback: look for train/val/test subdirectories
-            self.data_dir = self.data_dir / split
-            self.split_sequences = None
+            splits_file = self.data_dir / 'splits.json'
+            if splits_file.exists():
+                with open(splits_file, 'r') as f:
+                    splits_data = json.load(f)
+                    self.split_sequences = splits_data['splits'][split]
+            else:
+                # Fallback: look for train/val/test subdirectories
+                self.data_dir = self.data_dir / split
+                self.split_sequences = None
         
         # Find all valid sequences
         self.sequences = []

@@ -70,12 +70,57 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def create_model(config: Config, device: torch.device) -> nn.Module:
+def create_model(config: Config, device: torch.device, pretrained_path: Optional[str] = None, 
+                 train_transformer_only: bool = False) -> nn.Module:
     """Create and initialize the model."""
     model = FlowNetLSTMTransformer(config.model)
+    
+    # Load pretrained encoders if specified
+    if pretrained_path and os.path.exists(pretrained_path):
+        print(f"Loading pretrained encoders from {pretrained_path}")
+        pretrained_state = torch.load(pretrained_path, map_location='cpu')
+        
+        # Extract encoder weights from pretrained model
+        visual_encoder_dict = {}
+        imu_encoder_dict = {}
+        
+        for k, v in pretrained_state.items():
+            if k.startswith('visual_encoder.'):
+                # Map old visual encoder names to new model
+                new_key = k.replace('visual_encoder.', '')
+                visual_encoder_dict[new_key] = v
+            elif k.startswith('imu_encoder.'):
+                # Map old IMU encoder names to new model
+                new_key = k.replace('imu_encoder.', '')
+                imu_encoder_dict[new_key] = v
+        
+        # Load visual encoder weights
+        if visual_encoder_dict:
+            try:
+                model.visual_encoder.load_state_dict(visual_encoder_dict, strict=False)
+                print(f"Loaded {len(visual_encoder_dict)} visual encoder parameters")
+            except Exception as e:
+                print(f"Warning: Could not load all visual encoder weights: {e}")
+        
+        # Load IMU encoder weights
+        if imu_encoder_dict:
+            try:
+                model.imu_encoder.load_state_dict(imu_encoder_dict, strict=False)
+                print(f"Loaded {len(imu_encoder_dict)} IMU encoder parameters")
+            except Exception as e:
+                print(f"Warning: Could not load all IMU encoder weights: {e}")
+        
+        # Freeze encoders if only training transformer
+        if train_transformer_only:
+            print("Freezing visual and IMU encoders - only training pose transformer")
+            for param in model.visual_encoder.parameters():
+                param.requires_grad = False
+            for param in model.imu_encoder.parameters():
+                param.requires_grad = False
+    
     model = model.to(device)
     
-    # Initialize weights
+    # Initialize weights for unfrozen parts
     def init_weights(m):
         if isinstance(m, (nn.Linear, nn.Conv2d)):
             nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -96,7 +141,14 @@ def create_model(config: Config, device: torch.device) -> nn.Module:
                     n = param.size(0)
                     param.data[n//4:n//2].fill_(1)
     
-    model.apply(init_weights)
+    # Only initialize pose predictor and output heads if using pretrained encoders
+    if pretrained_path and train_transformer_only:
+        model.pose_predictor.apply(init_weights)
+        model.translation_head.apply(init_weights)
+        model.rotation_head.apply(init_weights)
+    else:
+        model.apply(init_weights)
+    
     return model
 
 
@@ -380,16 +432,28 @@ def train_worker(rank: int, world_size: int, config: Config):
         print(f"Total batch size: {config.data.batch_size * world_size}")
         print("="*80 + "\n")
     
-    # Create model
-    model = create_model(config, device)
+    # Create model with optional pretrained encoders
+    pretrained_path = getattr(config.training, 'pretrained_path', None)
+    train_transformer_only = getattr(config.training, 'train_transformer_only', False)
+    
+    model = create_model(config, device, pretrained_path, train_transformer_only)
     print(f"[Rank {rank}] After model creation: {get_memory_usage():.2f} GB")
+    
+    # Print trainable parameters
+    if is_main_process:
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"Total parameters: {total_params:,}")
+        print(f"Trainable parameters: {trainable_params:,}")
+        if train_transformer_only:
+            print(f"Training pose transformer only ({trainable_params/total_params*100:.1f}% of model)")
     
     model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
     print(f"[Rank {rank}] After DDP wrap: {get_memory_usage():.2f} GB")
     
-    # Create optimizer
+    # Create optimizer - only for parameters that require gradients
     optimizer = torch.optim.AdamW(
-        model.parameters(),
+        filter(lambda p: p.requires_grad, model.parameters()),
         lr=config.training.learning_rate,
         weight_decay=config.training.weight_decay
     )

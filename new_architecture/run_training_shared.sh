@@ -31,15 +31,15 @@ python train_flownet_lstm_transformer_shared.py \
     --encoder-type flownet \
     --imu-encoder-type cnn \
     --warmup-epochs 2 \
-    --batch-size 4 \
+    --batch-size 8 \
     --num-workers 0 \
-    --learning-rate 1e-3 \
+    --learning-rate 1e-4 \
     --num-epochs 100 \
     --sequence-length 21 \
     --stride 5 \
     --translation-weight 10.0 \
-    --rotation-weight 100.0 \
-    --scale-weight 20.0 \
+    --rotation-weight 1000.0 \
+    --scale-weight 10.0 \
     --checkpoint-dir checkpoints \
-    --experiment-name flownet_cnn_smoothl1_allsamples \
+    --experiment-name flownet_cnn_rotation1000_stride5_first500frames \
     --validate-every 1

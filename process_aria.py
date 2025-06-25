@@ -120,9 +120,8 @@ class AriaProcessor:
         
         # Limit to max_frames if specified
         if self.max_frames > 0 and len(target_timestamps) > self.max_frames:
-            # Evenly sample from the 20Hz grid
-            indices = np.linspace(0, len(target_timestamps) - 1, self.max_frames, dtype=int)
-            target_timestamps = target_timestamps[indices]
+            # Take first max_frames consecutive frames
+            target_timestamps = target_timestamps[:self.max_frames]
         
         print(f"{prefix}📊 Resampling to {len(target_timestamps)} frames at 20Hz...")
         

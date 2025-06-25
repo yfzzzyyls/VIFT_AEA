@@ -79,18 +79,19 @@ class FlowNetLSTMTransformer(nn.Module):
         )
         
         # Output heads for pose prediction
+        # Note: transformer_dim is now 768 (512 visual + 256 IMU)
         self.translation_head = nn.Sequential(
-            nn.Linear(config.transformer_dim, 256),
+            nn.Linear(config.transformer_dim, 384),  # 768 -> 384
             nn.ReLU(),
             nn.Dropout(config.dropout),
-            nn.Linear(256, 3)
+            nn.Linear(384, 3)
         )
         
         self.rotation_head = nn.Sequential(
-            nn.Linear(config.transformer_dim, 256),
+            nn.Linear(config.transformer_dim, 384),  # 768 -> 384
             nn.ReLU(),
             nn.Dropout(config.dropout),
-            nn.Linear(256, 4)  # quaternion representation
+            nn.Linear(384, 4)  # quaternion representation
         )
         
     def forward(self, images: torch.Tensor, imu_sequences: List[List[torch.Tensor]]) -> dict:
@@ -378,19 +379,19 @@ class PoseTransformer(nn.Module):
     Uses causal attention to ensure temporal consistency.
     """
     
-    def __init__(self, visual_dim, imu_dim, d_model=512, nhead=8,
+    def __init__(self, visual_dim, imu_dim, d_model=768, nhead=8,
                  num_layers=6, dim_feedforward=2048, dropout=0.1):
         super().__init__()
         
         self.d_model = d_model
         
-        # Project visual and IMU features to transformer dimension
-        self.visual_projection = nn.Linear(visual_dim, d_model // 2)
-        self.imu_projection = nn.Linear(imu_dim, d_model // 2)
+        # For old VIFT compatibility: directly concatenate features
+        # visual_dim=512 + imu_dim=256 = 768
+        assert visual_dim + imu_dim == d_model, f"Visual ({visual_dim}) + IMU ({imu_dim}) must equal d_model ({d_model})"
         
-        # Learnable modality embeddings
-        self.visual_embedding = nn.Parameter(torch.randn(1, 1, d_model // 2))
-        self.imu_embedding = nn.Parameter(torch.randn(1, 1, d_model // 2))
+        # No projection needed - we'll concatenate directly
+        self.visual_dim = visual_dim
+        self.imu_dim = imu_dim
         
         # Positional encoding
         self.pos_encoder = PositionalEncoding(d_model, dropout)
@@ -427,16 +428,8 @@ class PoseTransformer(nn.Module):
         """
         B, T_minus_1 = visual_features.shape[:2]
         
-        # Project features
-        visual_proj = self.visual_projection(visual_features)  # [B, T-1, d_model/2]
-        imu_proj = self.imu_projection(imu_features)  # [B, T-1, d_model/2]
-        
-        # Add modality embeddings
-        visual_proj = visual_proj + self.visual_embedding
-        imu_proj = imu_proj + self.imu_embedding
-        
-        # Concatenate modalities
-        combined = torch.cat([visual_proj, imu_proj], dim=-1)  # [B, T-1, d_model]
+        # Directly concatenate features (like old VIFT)
+        combined = torch.cat([visual_features, imu_features], dim=-1)  # [B, T-1, 768]
         
         # Add positional encoding
         combined = self.pos_encoder(combined)
