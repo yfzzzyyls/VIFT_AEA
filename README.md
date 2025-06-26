@@ -42,6 +42,58 @@ pip install -r requirements.txt
 # Install additional packages for VIFT
 pip install hydra-core omegaconf pytorch-lightning
 pip install rootutils colorlog natsort
+
+# (Optional) For SEA-RAFT visual encoder
+# Note: SEA-RAFT will be cloned locally, no pip install needed
+```
+
+## Quick Start
+
+### Option 1: Train from Scratch (Recommended)
+```bash
+# 1. Process Aria data
+python process_aria.py
+
+# 2. Create data splits
+python organize_data_splits.py --data-dir aria_processed
+
+# 3. Train with distributed GPU
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --data-dir aria_processed \
+    --epochs 50 \
+    --batch-size 16 \
+    --checkpoint-dir checkpoints_distributed \
+    --distributed
+
+# 4. Evaluate
+python evaluate_from_scratch.py \
+    --checkpoint checkpoints_distributed/best_model.pt \
+    --data-dir aria_processed \
+    --output-dir evaluation_results
+```
+
+### Option 2: Train with SEA-RAFT (Advanced Motion Features)
+```bash
+# 1. Setup SEA-RAFT
+python setup_searaft.py
+
+# 2. Download pretrained weights (REQUIRED!)
+# Go to: https://drive.google.com/drive/folders/1YLovlvUW94vciWvTyLf-p3uWscbOQRWW
+# Download: 'Tartan-C-T-TSKH432x960-S.pth' (~35MB)
+cp ~/Downloads/Tartan-C-T-TSKH432x960-S.pth third_party/SEA-RAFT/SEA-RAFT-Sintel.pth
+
+# 3. Verify setup
+python setup_searaft.py  # Should show "weights already present"
+python test_searaft_integration.py
+
+# 4. Train with SEA-RAFT
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --data-dir aria_processed \
+    --epochs 50 \
+    --batch-size 16 \
+    --checkpoint-dir checkpoints_searaft \
+    --distributed \
+    --use-searaft
 ```
 
 ## Complete Workflows
@@ -187,6 +239,76 @@ python evaluate_from_scratch.py \
     --num-workers 4
 ```
 
+### Workflow 5: Train with SEA-RAFT Visual Encoder (Advanced Motion Features)
+
+SEA-RAFT is a state-of-the-art optical flow network that can replace the simple CNN encoder for better motion estimation.
+
+```bash
+# 1. Setup SEA-RAFT (one-time setup)
+python setup_searaft.py
+
+# 2. REQUIRED: Download pretrained weights (SEA-RAFT won't work without them!)
+# SEA-RAFT was trained for weeks on large optical flow datasets.
+
+# Download weights from Google Drive:
+# 1. Go to: https://drive.google.com/drive/folders/1YLovlvUW94vciWvTyLf-p3uWscbOQRWW
+# 2. Download ALL .pth files (or at minimum, files ending with '-S.pth' for small model)
+# 3. Recommended model: 'Tartan-C-T-TSKH432x960-S.pth' (~35MB)
+
+# Copy the model to the correct location:
+cd /home/external/VIFT_AEA
+cp ~/Downloads/Tartan-C-T-TSKH432x960-S.pth third_party/SEA-RAFT/SEA-RAFT-Sintel.pth
+
+# Or if you downloaded all files in a zip:
+cp drive-download-20250626T060023Z-1-001/Tartan-C-T-TSKH432x960-S.pth third_party/SEA-RAFT/SEA-RAFT-Sintel.pth
+
+# Verify weights are in place (should show ~35M)
+ls -lh third_party/SEA-RAFT/SEA-RAFT-Sintel.pth
+
+# Re-run setup to confirm weights are detected
+python setup_searaft.py
+
+# 3. Test SEA-RAFT integration (verify weights loaded correctly)
+python test_searaft_integration.py
+
+# 5. Train with SEA-RAFT encoder (multi-GPU distributed)
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --data-dir aria_processed \
+    --epochs 50 \
+    --batch-size 16 \
+    --checkpoint-dir checkpoints_searaft_distributed \
+    --distributed \
+    --use-searaft
+
+# 6. Compare CNN vs SEA-RAFT performance
+# Train baseline CNN model first
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --data-dir aria_processed \
+    --epochs 50 \
+    --batch-size 16 \
+    --checkpoint-dir checkpoints_cnn_baseline \
+    --distributed
+
+# Evaluate both models
+python evaluate_from_scratch.py \
+    --checkpoint checkpoints_cnn_baseline/best_model.pt \
+    --data-dir aria_processed \
+    --output-dir evaluation_cnn
+
+python evaluate_from_scratch.py \
+    --checkpoint checkpoints_searaft_distributed/best_model.pt \
+    --data-dir aria_processed \
+    --output-dir evaluation_searaft
+```
+
+**SEA-RAFT Notes:**
+- **REQUIRES pretrained weights** - was trained for weeks on optical flow datasets
+- Without pretrained weights, it's just a random CNN and won't work properly
+- ~4.3x slower than CNN encoder but expected to improve accuracy by 10-15%
+- Requires ~2GB additional GPU memory for feature extraction
+- Uses frozen pretrained features from optical flow task
+- Preserves spatial tokens (4×4) for better parallax reasoning
+
 ## Important: IMU Data Format
 
 This repository includes a critical fix for IMU temporal alignment:
@@ -207,11 +329,13 @@ This repository includes a critical fix for IMU temporal alignment:
 
 VIFT consists of three main components:
 
-1. **Visual Encoder**: 6-layer CNN processing consecutive image pairs
-2. **IMU Encoder**: 3-layer 1D CNN processing IMU measurements
-3. **Pose Transformer**: 4-layer transformer with 8 attention heads
+1. **Visual Encoder**: 
+   - **Default**: 6-layer CNN processing consecutive image pairs
+   - **Optional**: SEA-RAFT feature encoder for improved motion estimation (see Workflow 5)
+2. **IMU Encoder**: 3-layer 1D CNN processing IMU measurements with multi-scale temporal pooling
+3. **Pose Transformer**: 4-layer transformer with 8 attention heads (configurable)
 
-The model predicts relative poses (3D translation + 3D rotation) between consecutive frames.
+The model outputs 7-DoF poses (3D translation + 4D quaternion rotation) between consecutive frames.
 
 ## Key Improvements in This Implementation
 
@@ -236,6 +360,12 @@ The model predicts relative poses (3D translation + 3D rotation) between consecu
 - Interactive 3D HTML trajectory visualizations using Plotly
 - CSV export of trajectories for further analysis
 
+### 5. SEA-RAFT Visual Encoder Option
+- Integrated state-of-the-art optical flow features
+- Uses pretrained SEA-RAFT's feature network (fnet)
+- Preserves spatial structure for better motion reasoning
+- Available via `--use-searaft` flag in training
+
 ## Performance Results
 
 | Model | Training Data | Test Data | Translation Error | Rotation Error |
@@ -250,14 +380,21 @@ The model predicts relative poses (3D translation + 3D rotation) between consecu
 VIFT_AEA/
 ├── src/                              # Source code
 │   ├── models/                       # Model architectures
+│   │   └── components/               
+│   │       ├── vsvio.py             # Main VIFT model
+│   │       └── searaft_encoder.py   # SEA-RAFT feature encoder
 │   ├── data/                         # Dataset loaders
 │   └── metrics/                      # Loss functions
 ├── configs/                          # Hydra configuration files
 ├── scripts/                          # Processing scripts
 ├── pretrained_models/                # Pretrained encoders
+├── third_party/                      # External dependencies (gitignored)
+│   └── SEA-RAFT/                    # SEA-RAFT repository (after setup)
 ├── process_aria.py                   # Unified Aria data processing
-├── train_efficient.py                # Aria training script
-└── evaluate_stable_model.py          # Evaluation script
+├── train_aria_from_scratch.py        # Main training script with --use-searaft
+├── setup_searaft.py                  # SEA-RAFT installation script
+├── test_searaft_integration.py       # Test SEA-RAFT integration
+└── evaluate_from_scratch.py          # Evaluation script
 ```
 
 ## Troubleshooting
@@ -265,6 +402,9 @@ VIFT_AEA/
 1. **High validation errors**: Ensure you're using the fixed IMU extraction (`python process_aria.py`)
 2. **Out of memory**: Reduce batch size or use gradient accumulation
 3. **NaN losses**: Check for corrupted data samples or reduce learning rate
+4. **SEA-RAFT import errors**: Run `python setup_searaft.py` to fix imports and dependencies
+5. **SEA-RAFT weights missing**: Download manually from Google Drive (REQUIRED, not optional!)
+6. **SEA-RAFT performing poorly**: Ensure you downloaded pretrained weights - random init won't work
 
 ## Citation
 

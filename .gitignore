@@ -59,6 +59,9 @@ aria_latent_data*/
 Visual-Selective-VIO-Pretrained/
 pretrained_models/
 
+# Third-party repositories
+third_party/
+
 # Temporary files
 *.tmp
 *.temp

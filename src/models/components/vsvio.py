@@ -100,22 +100,31 @@ class FlexibleInertialEncoder(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, opt):
         super(Encoder, self).__init__()
-        # CNN
         self.opt = opt
-        self.conv1 = conv(True, 6, 64, kernel_size=7, stride=2, dropout=0.2)
-        self.conv2 = conv(True, 64, 128, kernel_size=5, stride=2, dropout=0.2)
-        self.conv3 = conv(True, 128, 256, kernel_size=5, stride=2, dropout=0.2)
-        self.conv3_1 = conv(True, 256, 256, kernel_size=3, stride=1, dropout=0.2)
-        self.conv4 = conv(True, 256, 512, kernel_size=3, stride=2, dropout=0.2)
-        self.conv4_1 = conv(True, 512, 512, kernel_size=3, stride=1, dropout=0.2)
-        self.conv5 = conv(True, 512, 512, kernel_size=3, stride=2, dropout=0.2)
-        self.conv5_1 = conv(True, 512, 512, kernel_size=3, stride=1, dropout=0.2)
-        self.conv6 = conv(True, 512, 1024, kernel_size=3, stride=2, dropout=0.5)
-        # Comput the shape based on diff image size
-        __tmp = Variable(torch.zeros(1, 6, opt.img_w, opt.img_h))
-        __tmp = self.encode_image(__tmp)
-
-        self.visual_head = nn.Linear(int(np.prod(__tmp.size())), opt.v_f_len)
+        
+        # Choose visual encoder based on flag
+        self.use_searaft = getattr(opt, 'use_searaft', False)
+        
+        if self.use_searaft:
+            # Use SEA-RAFT feature encoder
+            from .searaft_encoder import SEARAFTFeatureEncoder
+            self.visual_encoder = SEARAFTFeatureEncoder(opt)
+        else:
+            # Use original CNN encoder
+            self.conv1 = conv(True, 6, 64, kernel_size=7, stride=2, dropout=0.2)
+            self.conv2 = conv(True, 64, 128, kernel_size=5, stride=2, dropout=0.2)
+            self.conv3 = conv(True, 128, 256, kernel_size=5, stride=2, dropout=0.2)
+            self.conv3_1 = conv(True, 256, 256, kernel_size=3, stride=1, dropout=0.2)
+            self.conv4 = conv(True, 256, 512, kernel_size=3, stride=2, dropout=0.2)
+            self.conv4_1 = conv(True, 512, 512, kernel_size=3, stride=1, dropout=0.2)
+            self.conv5 = conv(True, 512, 512, kernel_size=3, stride=2, dropout=0.2)
+            self.conv5_1 = conv(True, 512, 512, kernel_size=3, stride=1, dropout=0.2)
+            self.conv6 = conv(True, 512, 1024, kernel_size=3, stride=2, dropout=0.5)
+            
+            # Compute the shape based on diff image size
+            __tmp = Variable(torch.zeros(1, 6, opt.img_w, opt.img_h))
+            __tmp = self.encode_image(__tmp)
+            self.visual_head = nn.Linear(int(np.prod(__tmp.size())), opt.v_f_len)
         
         # Always use flexible IMU encoder for variable-length sequences
         self.inertial_encoder = FlexibleInertialEncoder(opt)
@@ -125,11 +134,19 @@ class Encoder(nn.Module):
         batch_size = v.size(0)
         seq_len = v.size(1)
 
-        # image CNN
+        # Process visual features
         v = v.view(batch_size * seq_len, v.size(2), v.size(3), v.size(4))
-        v = self.encode_image(v)
-        v = v.view(batch_size, seq_len, -1)  # (batch, seq_len, fv)
-        v = self.visual_head(v)  # (batch, seq_len, 256)
+        
+        if self.use_searaft:
+            # SEA-RAFT encoder directly outputs final features
+            v = self.visual_encoder.encode_image(v)
+        else:
+            # Original CNN encoder needs visual head
+            v = self.encode_image(v)
+            v = v.view(batch_size * seq_len, -1)  # Flatten
+            v = self.visual_head(v)
+        
+        v = v.view(batch_size, seq_len, -1)  # (batch, seq_len, v_f_len)
         
         # IMU CNN - expects variable length per transition
         # Expected format: [batch, seq_len, num_samples, 6]

@@ -73,7 +73,7 @@ def robust_geodesic_loss_stable(pred_quat, gt_quat):
 class VIFTFromScratch(nn.Module):
     """VIFT model for training from scratch with quaternion output."""
     
-    def __init__(self):
+    def __init__(self, use_searaft=False):
         super().__init__()
         
         # Model configuration
@@ -106,6 +106,8 @@ class VIFTFromScratch(nn.Module):
             fuse_method = 'cat'
         
         self.config = Config()
+        # Add use_searaft after creating the config
+        self.config.use_searaft = use_searaft
         self.backbone = TransformerVIO(self.config)
         
         # Replace output layer for quaternion output (7 values instead of 6)
@@ -381,6 +383,8 @@ def main():
                         help='Directory to save checkpoints')
     parser.add_argument('--num-workers', type=int, default=4,
                         help='Number of data loading workers')
+    parser.add_argument('--use-searaft', action='store_true',
+                        help='Use SEA-RAFT feature encoder instead of CNN')
     
     # Distributed training arguments
     parser.add_argument('--distributed', action='store_true',
@@ -414,7 +418,7 @@ def main():
         print("Training VIFT from Scratch on Aria Data")
         print("="*60)
         print("Training all components:")
-        print("- Image Encoder (6-layer CNN)")
+        print(f"- Image Encoder ({'SEA-RAFT Features' if args.use_searaft else '6-layer CNN'})")
         print("- IMU Encoder (3-layer 1D CNN)")
         print("- Pose Transformer (4 layers, 8 heads)")
         print("- Quaternion output (3 trans + 4 quat)")
@@ -491,7 +495,7 @@ def main():
         print(f"Val samples: {len(val_dataset)}")
     
     # Create model
-    model = VIFTFromScratch()
+    model = VIFTFromScratch(use_searaft=args.use_searaft)
     model = model.to(device)
     
     # Wrap with DDP if distributed
