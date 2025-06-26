@@ -289,16 +289,28 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py \
     --checkpoint-dir checkpoints_cnn_baseline \
     --distributed
 
-# Evaluate both models
+# Evaluate both models (auto-detects encoder type)
+# For CNN model:
 python evaluate_from_scratch.py \
     --checkpoint checkpoints_cnn_baseline/best_model.pt \
     --data-dir aria_processed \
-    --output-dir evaluation_cnn
+    --output-dir evaluation_cnn \
+    --batch-size 16 \
+    --num-workers 4
 
+# For SEA-RAFT model:
 python evaluate_from_scratch.py \
     --checkpoint checkpoints_searaft_distributed/best_model.pt \
+    --use-searaft \
     --data-dir aria_processed \
-    --output-dir evaluation_searaft
+    --output-dir evaluation_searaft \
+    --batch-size 16 \
+    --num-workers 4
+
+# Notes:
+# - The script automatically detects encoder type from checkpoint
+# - Use --use-searaft flag only if auto-detection fails
+# - Clear error messages guide you if there's a mismatch
 ```
 
 **SEA-RAFT Notes:**

@@ -60,14 +60,38 @@ def remove_gravity(imu_window: torch.Tensor) -> torch.Tensor:
     return torch.cat([accel_corrected, imu_window[..., 3:]], dim=-1)
 
 
-def load_checkpoint(checkpoint_path, device):
+def load_checkpoint(checkpoint_path, device, force_searaft=None):
     """Load model from checkpoint"""
     checkpoint = torch.load(checkpoint_path, map_location=device)
     
-    model = VIFTFromScratch().to(device)
+    # Detect model type from checkpoint
+    use_searaft = False
+    state_dict = checkpoint['model_state_dict']
+    
+    # First check if forced by command line
+    if force_searaft is not None:
+        use_searaft = force_searaft
+        print(f"✓ Using {'SEA-RAFT' if use_searaft else 'CNN'} encoder (forced by command line)")
+    else:
+        # Method 1: Check if config is stored in checkpoint
+        if 'config' in checkpoint and hasattr(checkpoint['config'], 'use_searaft'):
+            use_searaft = checkpoint['config'].use_searaft
+            print(f"✓ Detected {'SEA-RAFT' if use_searaft else 'CNN'} model from checkpoint config")
+        # Method 2: Detect from state dict keys
+        elif any('visual_encoder.fnet' in k for k in state_dict.keys()):
+            use_searaft = True
+            print("✓ Detected SEA-RAFT model from state dict keys")
+        elif any('Feature_net.conv1' in k for k in state_dict.keys()):
+            use_searaft = False
+            print("✓ Detected CNN model from state dict keys")
+        else:
+            print("⚠ Could not auto-detect encoder type, defaulting to CNN")
+            print("  Use --use-searaft flag if this is a SEA-RAFT model")
+    
+    # Create model with correct encoder
+    model = VIFTFromScratch(use_searaft=use_searaft).to(device)
     
     # Handle DataParallel state dict
-    state_dict = checkpoint['model_state_dict']
     new_state_dict = {}
     for k, v in state_dict.items():
         if k.startswith('module.'):
@@ -75,10 +99,31 @@ def load_checkpoint(checkpoint_path, device):
         else:
             new_state_dict[k] = v
     
-    model.load_state_dict(new_state_dict)
-    model.eval()
+    try:
+        model.load_state_dict(new_state_dict)
+        model.eval()
+    except RuntimeError as e:
+        if "Missing key(s)" in str(e) or "Unexpected key(s)" in str(e):
+            print("\n❌ Error: Model architecture mismatch!")
+            print("   The checkpoint and model architectures don't match.")
+            
+            # Provide helpful debugging info
+            if "visual_encoder.fnet" in str(e):
+                print("\n   💡 This appears to be a SEA-RAFT checkpoint.")
+                print("      Try running with: --use-searaft")
+            elif "Feature_net.conv1" in str(e):
+                print("\n   💡 This appears to be a CNN checkpoint.")
+                print("      Make sure you're NOT using --use-searaft")
+            
+            print(f"\n   Current model type: {'SEA-RAFT' if use_searaft else 'CNN'}")
+            print("   If auto-detection failed, use --use-searaft flag to force encoder type")
+            
+            raise e
+        else:
+            raise e
     
     print(f"\n📊 Model Information:")
+    print(f"   Encoder Type: {'SEA-RAFT Feature Encoder' if use_searaft else '6-Layer CNN Encoder'}")
     print(f"   Loaded checkpoint from epoch {checkpoint['epoch']}")
     if 'val_metrics' in checkpoint:
         metrics = checkpoint['val_metrics']
@@ -87,6 +132,12 @@ def load_checkpoint(checkpoint_path, device):
             print(f"   Val translation error: {metrics['trans_error']*100:.2f} cm")
         if 'rot_error' in metrics:
             print(f"   Val rotation error: {metrics['rot_error']:.2f}°")
+    
+    # Count parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"   Total parameters: {total_params:,}")
+    print(f"   Trainable parameters: {trainable_params:,}")
     
     return model
 
@@ -891,6 +942,8 @@ def main():
                         help='Device to use')
     parser.add_argument('--num-workers', type=int, default=4,
                         help='Number of data loading workers')
+    parser.add_argument('--use-searaft', action='store_true',
+                        help='Force using SEA-RAFT encoder (auto-detected from checkpoint by default)')
     
     args = parser.parse_args()
     
@@ -907,7 +960,7 @@ def main():
     print("="*60)
     
     # Load model
-    model = load_checkpoint(args.checkpoint, device)
+    model = load_checkpoint(args.checkpoint, device, force_searaft=args.use_searaft if args.use_searaft else None)
     
     # Test sequences
     test_sequences = ['016', '017', '018', '019']
