@@ -276,7 +276,7 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py \
     --data-dir aria_processed \
     --epochs 50 \
     --batch-size 16 \
-    --checkpoint-dir checkpoints_searaft_distributed \
+    --checkpoint-dir checkpoints_searaft_multiframe \
     --distributed \
     --use-searaft
 

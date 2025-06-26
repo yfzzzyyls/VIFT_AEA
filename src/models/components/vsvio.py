@@ -129,7 +129,7 @@ class Encoder(nn.Module):
         # Always use flexible IMU encoder for variable-length sequences
         self.inertial_encoder = FlexibleInertialEncoder(opt)
 
-    def forward(self, img, imu):
+    def forward(self, img, imu, frame_ids=None):
         v = torch.cat((img[:, :-1], img[:, 1:]), dim=2)
         batch_size = v.size(0)
         seq_len = v.size(1)
@@ -138,8 +138,22 @@ class Encoder(nn.Module):
         v = v.view(batch_size * seq_len, v.size(2), v.size(3), v.size(4))
         
         if self.use_searaft:
-            # SEA-RAFT encoder directly outputs final features
-            v = self.visual_encoder.encode_image(v)
+            # SEA-RAFT encoder with optional frame IDs for multi-frame
+            if frame_ids is not None:
+                # Create frame ID list for each pair in the batch
+                batch_frame_ids = []
+                for b in range(batch_size):
+                    for s in range(seq_len):
+                        # Use the second frame ID of each pair
+                        if isinstance(frame_ids[0], list):
+                            # frame_ids is [B, seq_len+1]
+                            batch_frame_ids.append(frame_ids[b][s + 1])
+                        else:
+                            # frame_ids is [seq_len+1]
+                            batch_frame_ids.append(frame_ids[s + 1])
+                v = self.visual_encoder.encode_image(v, batch_frame_ids)
+            else:
+                v = self.visual_encoder.encode_image(v)
         else:
             # Original CNN encoder needs visual head
             v = self.encode_image(v)
@@ -399,8 +413,8 @@ class TransformerVIO(nn.Module):
         self.Pose_net = PoseTransformer(opt)
         initialization(self)
 
-    def forward(self, img, imu):
-        fv, fi = self.Feature_net(img, imu)
+    def forward(self, img, imu, frame_ids=None):
+        fv, fi = self.Feature_net(img, imu, frame_ids)
         visual_inertial_feature = torch.cat([fv, fi], dim=-1) 
 
         # Continue processing as before

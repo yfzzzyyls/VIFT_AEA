@@ -166,13 +166,28 @@ class AriaRawDataset(Dataset):
         
         gt_poses = torch.tensor(np.array(gt_poses), dtype=torch.float32)  # [10, 7]
         
-        return {
+        # Get frame IDs if available
+        frame_ids = None
+        if 'frame_ids' in sample:
+            frame_ids = torch.tensor(sample['frame_ids'], dtype=torch.long)  # [11]
+        elif 'timestamps' in sample:
+            # Use timestamps as frame IDs if actual IDs not available
+            # Convert to unique integers based on start_idx
+            start_idx = sample['start_idx']
+            frame_ids = torch.arange(start_idx, start_idx + 11, dtype=torch.long)
+        
+        result = {
             'images': visual,        # [11, 3, H, W]
             'imu': imu_data,  # [10, max_len, 6] with variable max_len per batch
             'gt_poses': gt_poses,   # [10, 7] (3 trans + 4 quat)
             'seq_name': sample['seq_name'],
             'start_idx': sample['start_idx']
         }
+        
+        if frame_ids is not None:
+            result['frame_ids'] = frame_ids  # [11]
+            
+        return result
 
 
 class AriaRawDataModule:
@@ -251,10 +266,17 @@ def collate_variable_length(batch):
     seq_names = [item['seq_name'] for item in batch]
     start_indices = [item['start_idx'] for item in batch]
     
-    return {
+    result = {
         'images': images,
         'imu': imu,
         'gt_poses': gt_poses,
         'seq_name': seq_names,
         'start_idx': start_indices
     }
+    
+    # Handle frame IDs if present
+    if 'frame_ids' in batch[0]:
+        frame_ids = torch.stack([item['frame_ids'] for item in batch])  # [B, 11]
+        result['frame_ids'] = frame_ids
+    
+    return result

@@ -131,8 +131,11 @@ class VIFTFromScratch(nn.Module):
         images = batch['images']  # [B, 11, 3, 704, 704]
         imu = batch['imu']        # [B, 110, 6]
         
+        # Get frame IDs if available for multi-frame correlation
+        frame_ids = batch.get('frame_ids', None)  # Optional: [B, 11] or None
+        
         # Get features from backbone (which creates RGB-RGB pairs internally)
-        fv, fi = self.backbone.Feature_net(images, imu)  # fv: [B, 10, 512], fi: [B, 10, 256]
+        fv, fi = self.backbone.Feature_net(images, imu, frame_ids)  # fv: [B, 10, 512], fi: [B, 10, 256]
         
         # Concatenate visual and inertial features
         combined_features = torch.cat([fv, fi], dim=-1)  # [B, 10, 768]
@@ -385,6 +388,8 @@ def main():
                         help='Number of data loading workers')
     parser.add_argument('--use-searaft', action='store_true',
                         help='Use SEA-RAFT feature encoder instead of CNN')
+    parser.add_argument('--no-multiframe', action='store_true',
+                        help='Disable multi-frame correlation in SEA-RAFT encoder')
     
     # Distributed training arguments
     parser.add_argument('--distributed', action='store_true',
@@ -419,6 +424,8 @@ def main():
         print("="*60)
         print("Training all components:")
         print(f"- Image Encoder ({'SEA-RAFT Features' if args.use_searaft else '6-layer CNN'})")
+        if args.use_searaft and hasattr(args, 'use_multiframe') and args.use_multiframe:
+            print("  ✓ Multi-frame correlation enabled")
         print("- IMU Encoder (3-layer 1D CNN)")
         print("- Pose Transformer (4 layers, 8 heads)")
         print("- Quaternion output (3 trans + 4 quat)")
@@ -496,6 +503,15 @@ def main():
     
     # Create model
     model = VIFTFromScratch(use_searaft=args.use_searaft)
+    
+    # Configure multi-frame if using SEA-RAFT
+    if args.use_searaft and not args.no_multiframe:
+        model.config.use_multiframe = True
+        if is_main_process:
+            print("✓ Multi-frame correlation enabled for SEA-RAFT")
+    else:
+        model.config.use_multiframe = False
+        
     model = model.to(device)
     
     # Wrap with DDP if distributed
