@@ -276,7 +276,7 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py \
     --data-dir aria_processed \
     --epochs 50 \
     --batch-size 16 \
-    --checkpoint-dir checkpoints_searaft_multiframe \
+    --checkpoint-dir checkpoints_critical_searaft \
     --distributed \
     --use-searaft
 
@@ -300,10 +300,10 @@ python evaluate_from_scratch.py \
 
 # For SEA-RAFT model:
 python evaluate_from_scratch.py \
-    --checkpoint checkpoints_searaft_distributed/best_model.pt \
+    --checkpoint checkpoints_searaft_multiframe/best_model.pt \
     --use-searaft \
     --data-dir aria_processed \
-    --output-dir evaluation_searaft \
+    --output-dir evaluation_searaft_multiframe \
     --batch-size 16 \
     --num-workers 4
 
