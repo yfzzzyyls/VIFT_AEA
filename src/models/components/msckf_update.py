@@ -68,6 +68,13 @@ class MSCKFUpdate:
         # Measurement noise (pixels)
         self.R_pixel = np.eye(2) * (0.5 ** 2)  # 0.5 pixel std
         
+        # Adaptive noise scales (will be set during update)
+        self._adaptive_R_scale = 1.0
+        
+    def set_adaptive_noise_scale(self, r_scale: float):
+        """Set adaptive measurement noise scale from learned model."""
+        self._adaptive_R_scale = r_scale
+        
     def process_feature_tracks(self, 
                              features: List[Feature],
                              state: MSCKFState) -> List[MSCKFMeasurement]:
@@ -448,9 +455,11 @@ class MSCKFUpdate:
         # Null space projection
         r_o, H_o = self.nullspace_project(r, H_x, H_f)
         
-        # Measurement noise after projection
+        # Measurement noise after projection with adaptive scaling
         n_measurements = r_o.size
-        R_o = np.eye(n_measurements) * (self.R_pixel[0, 0])
+        # Apply adaptive noise scaling: R = base_R * scale^2
+        adaptive_R_pixel = self.R_pixel[0, 0] * (self._adaptive_R_scale ** 2)
+        R_o = np.eye(n_measurements) * adaptive_R_pixel
         
         # Compute Kalman gain
         K = self.compute_kalman_gain(H_o, state.P, R_o)
