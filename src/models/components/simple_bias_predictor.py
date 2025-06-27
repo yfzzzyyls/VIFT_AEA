@@ -14,7 +14,7 @@ class SimpleBiasPredictor(nn.Module):
     Input: 6-vector IMU window → GRU(32) → Linear(6) Δbias
     """
     
-    def __init__(self, window_size=10, hidden_dim=32):
+    def __init__(self, window_size=20, hidden_dim=32):
         super().__init__()
         
         # 6 IMU channels * window_size samples

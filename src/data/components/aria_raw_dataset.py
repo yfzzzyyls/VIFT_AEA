@@ -7,6 +7,8 @@ import json
 import torch.nn.functional as F
 from scipy.spatial.transform import Rotation as R
 from torch.nn.utils.rnn import pad_sequence
+from .aria_raw_dataset_ram import AriaRawDatasetRAM
+from .aria_lazy_dataset import AriaLazyDataset
 
 
 class AriaRawDataset(Dataset):
@@ -193,26 +195,60 @@ class AriaRawDataset(Dataset):
 class AriaRawDataModule:
     """Data module for raw Aria data."""
     
-    def __init__(self, data_dir, batch_size=4, num_workers=4, sequence_length=11, stride=10):
+    def __init__(self, data_dir, batch_size=4, num_workers=4, sequence_length=11, stride=10, 
+                 use_mmap=False, use_ram=False, use_lazy=True):
         self.data_dir = Path(data_dir)
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.sequence_length = sequence_length
         self.stride = stride
+        self.use_mmap = use_mmap
+        self.use_ram = use_ram
     
     def setup(self):
-        # Create datasets
-        self.train_dataset = AriaRawDataset(
-            self.data_dir / 'train',
-            sequence_length=self.sequence_length,
-            stride=self.stride
-        )
+        # Choose dataset class based on loading strategy
+        if self.use_ram:
+            dataset_class = AriaRawDatasetRAM
+            print("Using RAM-based dataset (fastest) - preloading sequences...")
+        elif self.use_mmap:
+            dataset_class = AriaRawDatasetMMap
+            print("Using memory-mapped dataset for efficient loading")
+        else:
+            dataset_class = AriaRawDataset
+            print("Using standard dataset")
         
-        self.val_dataset = AriaRawDataset(
-            self.data_dir / 'val',
-            sequence_length=self.sequence_length,
-            stride=self.stride
-        )
+        # Create datasets with appropriate settings
+        if self.use_ram:
+            # For distributed training, reduce preload ratio to fit in memory
+            # Each process will load different sequences
+            import torch.distributed as dist
+            preload_ratio = 0.2 if dist.is_initialized() else 0.8
+            
+            self.train_dataset = dataset_class(
+                self.data_dir / 'train',
+                sequence_length=self.sequence_length,
+                stride=self.stride,
+                preload_ratio=preload_ratio
+            )
+            
+            self.val_dataset = dataset_class(
+                self.data_dir / 'val',
+                sequence_length=self.sequence_length,
+                stride=self.stride,
+                preload_ratio=preload_ratio
+            )
+        else:
+            self.train_dataset = dataset_class(
+                self.data_dir / 'train',
+                sequence_length=self.sequence_length,
+                stride=self.stride
+            )
+            
+            self.val_dataset = dataset_class(
+                self.data_dir / 'val',
+                sequence_length=self.sequence_length,
+                stride=self.stride
+            )
     
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
@@ -233,6 +269,162 @@ class AriaRawDataModule:
             pin_memory=True,
             collate_fn=collate_variable_length
         )
+
+
+class AriaRawDatasetMMap(Dataset):
+    """
+    Memory-mapped dataset for loading raw Aria data efficiently.
+    Loads data on-demand instead of keeping everything in memory.
+    """
+    
+    def __init__(self, data_dir, sequence_length=11, stride=10, transform=None):
+        """
+        Args:
+            data_dir: Directory containing processed Aria sequences (e.g., aria_processed/train)
+            sequence_length: Number of frames per sequence (default: 11 for VIFT)
+            stride: Stride for sliding window (default: 10 for non-overlapping transitions)
+            transform: Optional transforms to apply to images
+        """
+        self.data_dir = Path(data_dir)
+        self.sequence_length = sequence_length
+        self.stride = stride
+        self.transform = transform
+        
+        # Get all sequences
+        self.sequences = []
+        for seq_dir in sorted(self.data_dir.iterdir()):
+            if seq_dir.is_dir() and seq_dir.name.isdigit():
+                # Check if it has the required files
+                visual_path = seq_dir / 'visual_data.pt'
+                imu_path = seq_dir / 'imu_data.pt'
+                poses_path = seq_dir / 'poses_quaternion.json'
+                
+                if visual_path.exists() and imu_path.exists() and poses_path.exists():
+                    self.sequences.append(seq_dir)
+        
+        print(f"Found {len(self.sequences)} sequences in {data_dir}")
+        
+        # Create samples with sliding windows (store only metadata)
+        self.samples = []
+        for seq_dir in self.sequences:
+            self._create_samples_from_sequence(seq_dir)
+        
+        print(f"Created {len(self.samples)} samples with window size {sequence_length}")
+    
+    def _create_samples_from_sequence(self, seq_dir):
+        """Create sliding window samples from a sequence (metadata only)."""
+        # Load only metadata to determine number of frames
+        with open(seq_dir / 'metadata.json', 'r') as f:
+            metadata = json.load(f)
+        
+        num_frames = metadata['num_frames']
+        
+        # Create sliding windows with specified stride
+        for start_idx in range(0, num_frames - self.sequence_length + 1, self.stride):
+            end_idx = start_idx + self.sequence_length
+            
+            # Store only metadata, not actual data
+            self.samples.append({
+                'seq_dir': seq_dir,
+                'seq_name': seq_dir.name,
+                'start_idx': start_idx,
+                'end_idx': end_idx,
+            })
+    
+    def __len__(self):
+        return len(self.samples)
+    
+    def __getitem__(self, idx):
+        sample = self.samples[idx]
+        seq_dir = sample['seq_dir']
+        start_idx = sample['start_idx']
+        end_idx = sample['end_idx']
+        
+        # More efficient: load visual data with mmap_mode
+        visual_path = seq_dir / 'visual_data.pt'
+        
+        # Use torch.load with weights_only=False to handle the full tensor file
+        # Note: This is still not ideal as it loads the full file structure
+        # For truly efficient loading, we need to store frames separately
+        # or use a different format (HDF5, zarr, or separate frame files)
+        
+        # For now, cache the tensor for each sequence to avoid repeated loading
+        if not hasattr(self, '_visual_cache'):
+            self._visual_cache = {}
+        
+        if seq_dir not in self._visual_cache:
+            # Load once per sequence and cache
+            visual_data = torch.load(visual_path, map_location='cpu')
+            self._visual_cache[seq_dir] = visual_data
+            # Limit cache size to avoid memory issues
+            if len(self._visual_cache) > 10:  # Keep only last 10 sequences
+                # Remove oldest entry
+                oldest_key = list(self._visual_cache.keys())[0]
+                del self._visual_cache[oldest_key]
+        
+        window_visual = self._visual_cache[seq_dir][start_idx:end_idx].clone()
+        
+        # Resize to expected input size (704x704)
+        if window_visual.shape[-2:] != (704, 704):
+            window_visual = F.interpolate(window_visual, size=(704, 704), mode='bilinear', align_corners=False)
+        
+        # Load IMU data on-demand
+        imu_path = seq_dir / 'imu_data.pt'
+        imu_data = torch.load(imu_path, map_location='cpu')
+        window_imu = imu_data[start_idx:start_idx + self.sequence_length - 1]  # List of tensors
+        del imu_data  # Free memory
+        
+        # Load poses on-demand
+        with open(seq_dir / 'poses_quaternion.json', 'r') as f:
+            poses_data = json.load(f)
+        window_poses = poses_data[start_idx:end_idx]
+        
+        # Stack IMU data into padded tensor
+        max_len = max(tensor.shape[0] for tensor in window_imu)
+        imu_padded = []
+        for tensor in window_imu:
+            if tensor.shape[0] < max_len:
+                padding = torch.zeros(max_len - tensor.shape[0], 6)
+                padded = torch.cat([tensor, padding], dim=0)
+            else:
+                padded = tensor
+            imu_padded.append(padded)
+        imu_tensor = torch.stack(imu_padded)  # [10, max_len, 6]
+        
+        # Convert to relative poses
+        gt_poses = []
+        for i in range(len(window_poses) - 1):
+            # Compute relative transformation
+            t1 = np.array(window_poses[i]['translation'])
+            q1 = np.array(window_poses[i]['quaternion'])
+            t2 = np.array(window_poses[i + 1]['translation'])
+            q2 = np.array(window_poses[i + 1]['quaternion'])
+            
+            # Compute relative transformation in local frame
+            r1 = R.from_quat(q1)
+            r2 = R.from_quat(q2)
+            
+            dt_world = t2 - t1
+            dt_local = r1.inv().apply(dt_world)
+            
+            r_rel = r1.inv() * r2
+            q_rel = r_rel.as_quat()
+            
+            gt_poses.append(np.concatenate([dt_local, q_rel]))
+        
+        gt_poses = torch.tensor(np.array(gt_poses), dtype=torch.float32)  # [10, 7]
+        
+        # Generate frame IDs
+        frame_ids = torch.arange(start_idx, start_idx + self.sequence_length, dtype=torch.long)
+        
+        return {
+            'images': window_visual,      # [11, 3, H, W]
+            'imu': imu_tensor,           # [10, max_len, 6]
+            'gt_poses': gt_poses,        # [10, 7]
+            'seq_name': sample['seq_name'],
+            'start_idx': sample['start_idx'],
+            'frame_ids': frame_ids       # [11]
+        }
 
 
 def collate_variable_length(batch):

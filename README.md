@@ -55,11 +55,11 @@ pip install rootutils colorlog natsort
 python process_aria.py
 
 # 2. Create data splits
-python organize_data_splits.py --data-dir aria_processed
+python organize_data_splits.py --data-dir /mnt/ssd_ext/incSeg-data/aria_processed
 
 # 3. Train with distributed GPU
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
-    --data-dir aria_processed \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
     --epochs 50 \
     --batch-size 16 \
     --checkpoint-dir checkpoints_distributed \
@@ -68,7 +68,7 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py \
 # 4. Evaluate
 python evaluate_from_scratch.py \
     --checkpoint checkpoints_distributed/best_model.pt \
-    --data-dir aria_processed \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
     --output-dir evaluation_results
 ```
 
@@ -88,7 +88,7 @@ python test_searaft_integration.py
 
 # 4. Train with SEA-RAFT
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
-    --data-dir aria_processed \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
     --epochs 50 \
     --batch-size 16 \
     --checkpoint-dir checkpoints_searaft \
@@ -139,7 +139,7 @@ python process_aria.py
 
 # 3. Generate latent features with fixed IMU handling
 python generate_all_pretrained_latents_between_frames.py \
-    --processed-dir aria_processed \
+    --processed-dir /mnt/ssd_ext/incSeg-data/aria_processed \
     --output-dir aria_latent \
     --stride 10 \
     --skip-test
@@ -168,7 +168,7 @@ source venv/bin/activate
 python process_aria.py
 
 # 3. Create train/val splits
-python prepare_aria_splits.py --source-dir aria_processed
+python prepare_aria_splits.py --source-dir /mnt/ssd_ext/incSeg-data/aria_processed
 
 # 4. Train all components from scratch (with quaternion output and improved loss)
 torchrun --nproc_per_node=4 train_aria_from_scratch.py --epochs 200 --distributed --batch-size 4
@@ -176,7 +176,7 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py --epochs 200 --distribute
 # 5. Evaluate the trained model
 python evaluate_from_scratch.py \
       --checkpoint checkpoints_from_scratch/best_model.pt \
-      --data-dir aria_processed \
+      --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
       --output-dir evaluation_from_scratch \
       --batch-size 16 \
       --num-workers 4
@@ -215,13 +215,13 @@ source venv/bin/activate
 python process_aria.py
 
 # 3. Create train/val/test splits
-python organize_data_splits.py --data-dir aria_processed --train-ratio 0.7 --val-ratio 0.15
+python organize_data_splits.py --data-dir /mnt/ssd_ext/incSeg-data/aria_processed --train-ratio 0.7 --val-ratio 0.15
 
 # 4. Train all components from scratch (improved loss weighting)
 
 # Multi-GPU training with distributed data parallel
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
-    --data-dir aria_processed \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
     --epochs 50 \
     --batch-size 16 \
     --checkpoint-dir checkpoints_distributed \
@@ -233,13 +233,75 @@ tail -f train.log
 # 6. Evaluate trained model
 python evaluate_from_scratch.py \
     --checkpoint checkpoints_distributed/best_model.pt \
-    --data-dir aria_processed \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
     --output-dir evaluation_from_scratch \
     --batch-size 16 \
     --num-workers 4
 ```
 
-### Workflow 5: Train with SEA-RAFT Visual Encoder (Advanced Motion Features)
+### Workflow 5: Train on Full Aria Dataset with Optimizations
+
+This workflow processes the full Aria Everyday Activities dataset with a 7:1:2 train/val/test split and includes all short-term accuracy optimizations.
+
+```bash
+# 1. Process full Aria dataset (first 1000 frames per sequence)
+python process_aria.py \
+    --input-dir /mnt/ssd_ext/incSeg-data/aria_everyday \
+    --output-dir /mnt/ssd_ext/incSeg-data/aria_processed_full \
+    --max-frames 500 \
+    --train-ratio 0.7 \
+    --val-ratio 0.1 \
+    --all
+
+# This will create:
+# /mnt/ssd_ext/incSeg-data/aria_processed_full/
+#   ├── train/     (70% of sequences)
+#   ├── val/       (10% of sequences)
+#   ├── test/      (20% of sequences)
+#   └── dataset_split.json
+
+# 2. Train with all optimizations (multi-GPU)
+python train_aria_from_scratch.py \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed_full \
+    --use-dataparallel \
+    --batch-size 16 \
+    --checkpoint-dir checkpoints_full_optimized \
+    --use-searaft \
+    --epochs 100
+
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed_full \
+    --epochs 100 \
+    --batch-size 8 \
+    --checkpoint-dir checkpoints_full_optimized \
+    --distributed \
+    --use-searaft
+
+# 3. Evaluate on test set
+python evaluate_from_scratch.py \
+    --checkpoint checkpoints_full_optimized/best_model.pt \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed_full \
+    --output-dir evaluation_full_optimized \
+    --use-searaft \
+    --batch-size 16
+
+# 4. Evaluate 5-second window performance (key metric for AR/VR)
+python validate_5s_window.py \
+    --checkpoint checkpoints_full_optimized/best_model.pt \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed_full \
+    --window-size 100 \
+    --stride 50 \
+    --output-dir evaluation_5s_full
+```
+
+**Optimizations Included:**
+- Expanded bias-GRU window (20 samples)
+- Tighter χ² gating (85% confidence)
+- LSTM-enhanced ZUPT detection
+- Adaptive Q/R noise scaling (connector ready)
+- SEA-RAFT visual encoder for better motion features
+
+### Workflow 6: Train with SEA-RAFT Visual Encoder (Advanced Motion Features)
 
 SEA-RAFT is a state-of-the-art optical flow network that can replace the simple CNN encoder for better motion estimation.
 
@@ -273,7 +335,7 @@ python test_searaft_integration.py
 
 # 5. Train with SEA-RAFT encoder (multi-GPU distributed)
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
-    --data-dir aria_processed \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
     --epochs 50 \
     --batch-size 16 \
     --checkpoint-dir checkpoints_critical_searaft \
@@ -283,7 +345,7 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py \
 # 6. Compare CNN vs SEA-RAFT performance
 # Train baseline CNN model first
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
-    --data-dir aria_processed \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
     --epochs 50 \
     --batch-size 16 \
     --checkpoint-dir checkpoints_cnn_baseline \
@@ -293,17 +355,17 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py \
 # For CNN model:
 python evaluate_from_scratch.py \
     --checkpoint checkpoints_cnn_baseline/best_model.pt \
-    --data-dir aria_processed \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
     --output-dir evaluation_cnn \
     --batch-size 16 \
     --num-workers 4
 
 # For SEA-RAFT model:
 python evaluate_from_scratch.py \
-    --checkpoint checkpoints_searaft_multiframe/best_model.pt \
+    --checkpoint checkpoints_critical_searaft/best_model.pt \
     --use-searaft \
-    --data-dir aria_processed \
-    --output-dir evaluation_searaft_multiframe \
+    --data-dir /mnt/ssd_ext/incSeg-data/aria_processed \
+    --output-dir evaluation_searaft_critical \
     --batch-size 16 \
     --num-workers 4
 

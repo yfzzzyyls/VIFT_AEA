@@ -40,7 +40,8 @@ class MSCKFUpdate:
                  chi2_threshold: float = 5.991,  # 95% for 2 DOF
                  min_baseline: float = 0.1,      # Minimum baseline for triangulation
                  max_reprojection_error: float = 2.0,  # Pixels
-                 use_sparse_qr: bool = True):
+                 use_sparse_qr: bool = True,
+                 gating_confidence: float = 0.85):
         """
         Initialize MSCKF update module.
         
@@ -50,6 +51,7 @@ class MSCKFUpdate:
             min_baseline: Minimum baseline for triangulation (meters)
             max_reprojection_error: Maximum reprojection error (pixels)
             use_sparse_qr: Use sparse QR for efficiency
+            gating_confidence: Confidence level for chi-squared gating (0.85 = 85%)
         """
         self.K = camera_matrix
         self.fx = camera_matrix[0, 0]
@@ -61,6 +63,7 @@ class MSCKFUpdate:
         self.min_baseline = min_baseline
         self.max_reprojection_error = max_reprojection_error
         self.use_sparse_qr = use_sparse_qr
+        self.gating_confidence = gating_confidence
         
         # Measurement noise (pixels)
         self.R_pixel = np.eye(2) * (0.5 ** 2)  # 0.5 pixel std
@@ -464,9 +467,8 @@ class MSCKFUpdate:
             mahalanobis_dist = float('inf')
             
         # Chi-squared threshold for given confidence level
-        # For 95% confidence: chi2.ppf(0.95, df=n_measurements)
         from scipy.stats import chi2 as chi2_dist
-        chi2_threshold = chi2_dist.ppf(0.95, df=n_measurements)
+        chi2_threshold = chi2_dist.ppf(self.gating_confidence, df=n_measurements)
         
         # Gate check
         if mahalanobis_dist > chi2_threshold:
