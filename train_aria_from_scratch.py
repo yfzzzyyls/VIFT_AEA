@@ -39,8 +39,6 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from src.models.components.vsvio import TransformerVIO
 from src.data.components.aria_raw_dataset import AriaRawDataModule, collate_variable_length
-from src.models.components.simple_bias_predictor import SimpleBiasPredictor, apply_bias_correction, bias_regularization_loss
-from src.models.components.simple_adaptive_noise import SimpleAdaptiveNoise, adaptive_noise_loss
 
 
 def robust_geodesic_loss_stable(pred_quat, gt_quat):
@@ -127,97 +125,11 @@ class VIFTFromScratch(nn.Module):
             self.pose_predictor[-1].bias[3:6].fill_(0.0)  # qx, qy, qz = 0
             self.pose_predictor[-1].bias[6].fill_(1.0)    # qw = 1
             self.pose_predictor[-1].weight.data *= 0.01   # Small weights
-            
-        # Add bias predictor (Critical Component #1)
-        self.bias_predictor = SimpleBiasPredictor(window_size=10, hidden_dim=32)
-        
-        # Add adaptive noise predictor (Critical Component #2)
-        self.noise_predictor = SimpleAdaptiveNoise(window_size=20)
     
     def forward(self, batch):
         """Forward pass."""
         images = batch['images']  # [B, 11, 3, 704, 704]
-        imu_raw = batch['imu']    # [B, seq_len-1, K, 6] or [B, 110, 6]
-        
-        # Apply learned bias correction
-        B = imu_raw.shape[0]
-        
-        if len(imu_raw.shape) == 4:
-            # Variable-length format [B, T, K, 6] where K varies (~50 samples)
-            seq_len = imu_raw.shape[1]  # Should be 10
-            
-            # Create IMU windows for bias prediction
-            imu_windows = []
-            for t in range(seq_len):
-                # Get IMU samples for this transition
-                imu_samples = imu_raw[:, t, :, :]  # [B, K, 6] where K varies
-                
-                # Take first 10 samples for bias prediction (or pad if less)
-                if imu_samples.shape[1] >= 10:
-                    window = imu_samples[:, :10, :]
-                else:
-                    # Pad with last value
-                    pad_size = 10 - imu_samples.shape[1]
-                    padding = imu_samples[:, -1:, :].expand(B, pad_size, 6)
-                    window = torch.cat([imu_samples, padding], dim=1)
-                
-                imu_windows.append(window)
-            
-            # Stack windows: [B, 10, 10, 6]
-            imu_windows = torch.stack(imu_windows, dim=1)
-            
-            # Predict bias corrections
-            self._last_bias_corrections = self.bias_predictor(imu_windows)  # [B, 10, 6]
-            
-            # Apply bias corrections to variable-length IMU data
-            imu_corrected = []
-            for t in range(seq_len):
-                # Get IMU samples for this transition
-                imu_samples = imu_raw[:, t, :, :]  # [B, K, 6]
-                
-                # Apply bias correction to all samples in this transition
-                bias_for_transition = self._last_bias_corrections[:, t:t+1, :]  # [B, 1, 6]
-                corrected_samples = imu_samples - bias_for_transition
-                imu_corrected.append(corrected_samples)
-            
-            # Stack back to original format
-            imu = torch.stack(imu_corrected, dim=1)  # [B, 10, K, 6]
-            
-        else:
-            # Old fixed format [B, 110, 6] - unlikely with new dataset
-            # Just pass through without modification for now
-            imu = imu_raw
-            self._last_bias_corrections = torch.zeros(B, 10, 6, device=imu_raw.device)
-        
-        # Compute adaptive noise scales (Critical Component #2)
-        # Create IMU windows for noise prediction
-        if len(imu_raw.shape) == 4:
-            # Variable-length format [B, T, K, 6]
-            seq_len = imu_raw.shape[1]
-            
-            # Use sliding windows of 20 samples
-            windows = []
-            for t in range(seq_len):
-                # Get IMU samples for this transition
-                imu_samples = imu_raw[:, t, :, :]  # [B, K, 6]
-                
-                # Take first 20 samples (or pad if less)
-                if imu_samples.shape[1] >= 20:
-                    window = imu_samples[:, :20, :]
-                else:
-                    # Pad with last value
-                    pad_size = 20 - imu_samples.shape[1]
-                    padding = imu_samples[:, -1:, :].expand(B, pad_size, 6)
-                    window = torch.cat([imu_samples, padding], dim=1)
-                
-                windows.append(window)
-            
-            windows = torch.stack(windows, dim=1)  # [B, 10, 20, 6]
-            self._q_scales, self._r_scales = self.noise_predictor(windows)
-        else:
-            # Old format or fallback
-            self._q_scales = torch.ones(B, 10, 15, device=imu_raw.device)
-            self._r_scales = torch.ones(B, 10, 3, device=imu_raw.device)
+        imu = batch['imu']        # [B, 110, 6]
         
         # Get frame IDs if available for multi-frame correlation
         frame_ids = batch.get('frame_ids', None)  # Optional: [B, 11] or None
@@ -250,13 +162,12 @@ class VIFTFromScratch(nn.Module):
         }
 
 
-def compute_loss(predictions, batch, model=None, alpha=10.0, beta=5.0):
+def compute_loss(predictions, batch, alpha=10.0, beta=5.0):
     """Compute loss with quaternion representation for multi-step prediction
     
     Args:
         predictions: Model predictions with 'poses' key
         batch: Input batch with 'gt_poses' key
-        model: Model instance (for accessing bias predictor)
         alpha: Scale factor for translation loss (default 10.0)
         beta: Scale factor for scale consistency loss (default 5.0)
     """
@@ -288,35 +199,11 @@ def compute_loss(predictions, batch, model=None, alpha=10.0, beta=5.0):
     # total_loss = alpha * trans_loss + beta * scale_loss + rot_loss
     total_loss = 10 * trans_loss + beta * scale_loss + 2000 * rot_loss
     
-    # Add bias regularization if model provided
-    if model is not None and hasattr(model, 'bias_predictor'):
-        # Get bias predictions from last forward pass
-        # Simple approximation: use current IMU window
-        if hasattr(model, '_last_bias_corrections'):
-            bias_reg = bias_regularization_loss(model._last_bias_corrections, alpha=0.001)
-            total_loss = total_loss + bias_reg
-        else:
-            bias_reg = torch.tensor(0.0)
-    else:
-        bias_reg = torch.tensor(0.0)
-    
-    # Add adaptive noise regularization (Critical Component #2)
-    if model is not None and hasattr(model, 'noise_predictor'):
-        if hasattr(model, '_q_scales') and hasattr(model, '_r_scales'):
-            noise_reg = adaptive_noise_loss(model._q_scales, model._r_scales, alpha=0.001)
-            total_loss = total_loss + noise_reg
-        else:
-            noise_reg = torch.tensor(0.0)
-    else:
-        noise_reg = torch.tensor(0.0)
-    
     return {
         'total_loss': total_loss,
         'trans_loss': trans_loss,
         'rot_loss': rot_loss,
-        'scale_loss': scale_loss,
-        'bias_reg': bias_reg,
-        'noise_reg': noise_reg
+        'scale_loss': scale_loss
     }
 
 
@@ -340,7 +227,7 @@ def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=No
         predictions = model(batch)
         
         # Compute loss
-        loss_dict = compute_loss(predictions, batch, model=model)
+        loss_dict = compute_loss(predictions, batch)
         
         if loss_dict is None:
             print(f"NaN loss detected at batch {batch_idx}, skipping...")
@@ -410,7 +297,7 @@ def validate(model, dataloader, device):
             predictions = model(batch)
             
             # Compute loss
-            loss_dict = compute_loss(predictions, batch, model=model)
+            loss_dict = compute_loss(predictions, batch)
             
             if loss_dict is None:
                 continue
