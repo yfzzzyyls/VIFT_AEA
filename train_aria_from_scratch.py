@@ -39,13 +39,8 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from src.models.components.vsvio import TransformerVIO
 from src.data.components.aria_raw_dataset import AriaRawDataModule, collate_variable_length
-from src.data.components.aria_shared_memory_dataset import AriaSharedMemoryDataset
 from src.models.components.simple_bias_predictor import SimpleBiasPredictor, apply_bias_correction, bias_regularization_loss
 from src.models.components.simple_adaptive_noise import SimpleAdaptiveNoise, adaptive_noise_loss
-from src.data.components.augmentations import VIFTAugmentation
-from src.data.components.imu_resampling import IMUResampler
-from src.models.components.zupt_detector import ZUPTDetectorWithLSTM, ZUPTUpdater
-from wire_adaptive_noise import apply_adaptive_noise_to_msckf
 
 
 def robust_geodesic_loss_stable(pred_quat, gt_quat):
@@ -134,8 +129,7 @@ class VIFTFromScratch(nn.Module):
             self.pose_predictor[-1].weight.data *= 0.01   # Small weights
             
         # Add bias predictor (Critical Component #1)
-        # Expanded window: 10 → 20 samples for 12% improvement (IPNet)
-        self.bias_predictor = SimpleBiasPredictor(window_size=20, hidden_dim=32)
+        self.bias_predictor = SimpleBiasPredictor(window_size=10, hidden_dim=32)
         
         # Add adaptive noise predictor (Critical Component #2)
         self.noise_predictor = SimpleAdaptiveNoise(window_size=20)
@@ -158,18 +152,18 @@ class VIFTFromScratch(nn.Module):
                 # Get IMU samples for this transition
                 imu_samples = imu_raw[:, t, :, :]  # [B, K, 6] where K varies
                 
-                # Take first 20 samples for bias prediction (or pad if less)
-                if imu_samples.shape[1] >= 20:
-                    window = imu_samples[:, :20, :]
+                # Take first 10 samples for bias prediction (or pad if less)
+                if imu_samples.shape[1] >= 10:
+                    window = imu_samples[:, :10, :]
                 else:
                     # Pad with last value
-                    pad_size = 20 - imu_samples.shape[1]
+                    pad_size = 10 - imu_samples.shape[1]
                     padding = imu_samples[:, -1:, :].expand(B, pad_size, 6)
                     window = torch.cat([imu_samples, padding], dim=1)
                 
                 imu_windows.append(window)
             
-            # Stack windows: [B, 10, 20, 6]
+            # Stack windows: [B, 10, 10, 6]
             imu_windows = torch.stack(imu_windows, dim=1)
             
             # Predict bias corrections
@@ -291,9 +285,8 @@ def compute_loss(predictions, batch, model=None, alpha=10.0, beta=5.0):
     
     # Combined loss with proper weighting
     # Translation needs higher weight as it's in meters
-    # Rotation loss is already in radians (geodesic distance)
-    # Prioritize rotation: trans=10, scale=5, rot=2000 for strong rotation focus
-    total_loss = 10 * trans_loss + 5 * scale_loss + 2000 * rot_loss
+    # total_loss = alpha * trans_loss + beta * scale_loss + rot_loss
+    total_loss = 10 * trans_loss + beta * scale_loss + 2000 * rot_loss
     
     # Add bias regularization if model provided
     if model is not None and hasattr(model, 'bias_predictor'):
@@ -327,14 +320,9 @@ def compute_loss(predictions, batch, model=None, alpha=10.0, beta=5.0):
     }
 
 
-def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=None, global_step=0, augmentation=None, imu_resampler=None):
+def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=None, global_step=0):
     """Train one epoch."""
     model.train()
-    if augmentation is not None:
-        augmentation.train()
-    if imu_resampler is not None:
-        imu_resampler.train()
-        
     total_loss = 0
     num_batches = 0
     step = global_step  # Use global step counter for gradient clipping
@@ -347,14 +335,6 @@ def train_epoch(model, dataloader, optimizer, device, epoch, warmup_scheduler=No
             'imu': batch['imu'].to(device).float(),
             'gt_poses': batch['gt_poses'].to(device)
         }
-        
-        # Apply augmentations
-        if augmentation is not None:
-            batch = augmentation(batch)
-            
-        # Apply IMU resampling
-        if imu_resampler is not None:
-            batch['imu'] = imu_resampler(batch['imu'])
         
         # Forward pass
         predictions = model(batch)
@@ -523,14 +503,6 @@ def main():
                         help='Use SEA-RAFT feature encoder instead of CNN')
     parser.add_argument('--no-multiframe', action='store_true',
                         help='Disable multi-frame correlation in SEA-RAFT encoder')
-    parser.add_argument('--use-shared-memory', action='store_true',
-                        help='Use shared memory dataset (only one copy in RAM for all GPUs)')
-    
-    # Multi-GPU training options
-    parser.add_argument('--use-dataparallel', action='store_true',
-                        help='Use DataParallel instead of DistributedDataParallel (single process, shared memory)')
-    parser.add_argument('--gpu-ids', nargs='+', type=int, default=None,
-                        help='GPU IDs to use with DataParallel (default: all available)')
     
     # Distributed training arguments
     parser.add_argument('--distributed', action='store_true',
@@ -544,41 +516,16 @@ def main():
     
     args = parser.parse_args()
     
-    # Check for conflicting options
-    if args.use_dataparallel and args.distributed:
-        raise ValueError("Cannot use both --use-dataparallel and --distributed")
+    # Setup distributed training
+    device, rank, world_size = setup_distributed(args)
+    is_main_process = rank == 0
     
-    # Setup training mode
-    if args.use_dataparallel:
-        # DataParallel setup
-        if not torch.cuda.is_available():
-            raise RuntimeError("DataParallel requires CUDA")
-        
-        # Determine which GPUs to use
-        if args.gpu_ids is not None:
-            gpu_ids = args.gpu_ids
+    # Only print from main process
+    if is_main_process:
+        if args.distributed:
+            print(f"Using Distributed Training with {world_size} GPUs")
         else:
-            gpu_ids = list(range(torch.cuda.device_count()))
-        
-        device = torch.device(f'cuda:{gpu_ids[0]}')
-        rank = 0
-        world_size = 1
-        is_main_process = True
-        
-        print(f"Using DataParallel with GPUs: {gpu_ids}")
-        print(f"Total batch size: {args.batch_size} (shared across {len(gpu_ids)} GPUs)")
-    else:
-        # Distributed training setup
-        device, rank, world_size = setup_distributed(args)
-        is_main_process = rank == 0
-        gpu_ids = None  # Not used in distributed mode
-        
-        # Only print from main process
-        if is_main_process:
-            if args.distributed:
-                print(f"Using Distributed Training with {world_size} GPUs")
-            else:
-                print(f"Using single GPU training")
+            print(f"Using single GPU training")
     
     # Create checkpoint directory
     checkpoint_dir = Path(args.checkpoint_dir)
@@ -597,61 +544,30 @@ def main():
         print("- Quaternion output (3 trans + 4 quat)")
         print("- Multi-step prediction (all 10 transitions)")
         print(f"\nTraining Configuration:")
-        if args.use_dataparallel:
-            print(f"- Mode: DataParallel (single process, shared memory)")
-            print(f"- GPUs: {gpu_ids}")
-            print(f"- Total batch size: {args.batch_size}")
-        else:
-            print(f"- Mode: {'Distributed (DDP)' if args.distributed else 'Single GPU'}")
-            print(f"- World size: {world_size}")
-            print(f"- Batch size per GPU: {args.batch_size}")
-            print(f"- Total batch size: {args.batch_size * world_size}")
+        print(f"- Distributed: {'Yes (DDP)' if args.distributed else 'No'}")
+        print(f"- World size: {world_size}")
+        print(f"- Batch size per GPU: {args.batch_size}")
+        print(f"- Total batch size: {args.batch_size * world_size}")
         print(f"- Learning rate: {args.lr}")
         print(f"- Window stride: 1 (overlapping windows for more training samples)")
         print("="*60 + "\n")
     
-    # Create datasets
-    if args.use_shared_memory:
-        if is_main_process:
-            print("Using shared memory dataset - single copy for all GPUs")
-            if args.num_workers > 0:
-                print("WARNING: Setting num_workers=0 for shared memory dataset")
-        args.num_workers = 0  # Force zero workers for shared memory
-        
-        train_dataset = AriaSharedMemoryDataset(
-            data_dir=Path(args.data_dir) / 'train',
-            sequence_length=11,
-            stride=1,  # Overlapping windows
-            rank=rank,
-            world_size=world_size,
-            verbose=is_main_process
-        )
-        
-        val_dataset = AriaSharedMemoryDataset(
-            data_dir=Path(args.data_dir) / 'val',
-            sequence_length=11,
-            stride=1,
-            rank=rank,
-            world_size=world_size,
-            verbose=is_main_process
-        )
-    else:
-        # Use standard data module
-        # For DDP, each process loads its own subset of data
-        data_module = AriaRawDataModule(
-            data_dir=args.data_dir,
-            batch_size=args.batch_size,  # Per GPU batch size
-            num_workers=args.num_workers,
-            sequence_length=11,
-            stride=1  # Changed from 10 - will create 10x more training samples
-        )
-        data_module.setup()
-        
-        # Get datasets
-        train_dataset = data_module.train_dataset
-        val_dataset = data_module.val_dataset
+    # Create data module
+    # For DDP, each process loads its own subset of data
+    data_module = AriaRawDataModule(
+        data_dir=args.data_dir,
+        batch_size=args.batch_size,  # Per GPU batch size
+        num_workers=args.num_workers,
+        sequence_length=11,
+        stride=1  # Changed from 10 - will create 10x more training samples
+    )
+    data_module.setup()
     
-    # Create distributed samplers if using DDP (not needed for DataParallel)
+    # Get datasets
+    train_dataset = data_module.train_dataset
+    val_dataset = data_module.val_dataset
+    
+    # Create distributed samplers if using DDP
     if args.distributed:
         train_sampler = DistributedSampler(
             train_dataset,
@@ -668,7 +584,6 @@ def main():
             drop_last=False
         )
     else:
-        # For both DataParallel and single GPU, we don't need special samplers
         train_sampler = None
         val_sampler = None
     
@@ -712,53 +627,8 @@ def main():
         
     model = model.to(device)
     
-    # Create augmentation and resampling modules
-    augmentation = VIFTAugmentation(
-        enable_photometric=True,
-        enable_imu=True,
-        photometric_kwargs={
-            'brightness_range': (0.9, 1.1),
-            'contrast_range': (0.9, 1.1),
-            'noise_std': 0.01,
-            'p': 0.5
-        },
-        imu_kwargs={
-            'bias_walk_std_acc': 0.2,
-            'bias_walk_std_gyro': 0.015,
-            'noise_std_acc': 0.1,
-            'noise_std_gyro': 0.01,
-            'p': 0.5
-        }
-    ).to(device)
-    
-    imu_resampler = IMUResampler(
-        target_rate=1000.0,
-        add_synthetic_jitter=True,
-        jitter_std_ms=0.1
-    ).to(device)
-    
-    # Create ZUPT detector (optional - for future integration)
-    zupt_detector = ZUPTDetectorWithLSTM(
-        window_size=50,
-        acc_threshold=0.5,
-        gyro_threshold=0.05,
-        use_lstm=False,  # Start without LSTM
-        device=device
-    )
-    
-    if is_main_process:
-        print("\n✓ Data augmentation enabled")
-        print("✓ IMU resampling enabled")
-        print("✓ ZUPT detector initialized")
-    
-    # Wrap model for multi-GPU training
-    if args.use_dataparallel and len(gpu_ids) > 1:
-        # Wrap with DataParallel
-        model = nn.DataParallel(model, device_ids=gpu_ids)
-        if is_main_process:
-            print(f"Using DataParallel across GPUs: {gpu_ids}")
-    elif args.distributed:
-        # Wrap with DDP if distributed
+    # Wrap with DDP if distributed
+    if args.distributed:
         # Set find_unused_parameters=True because the TransformerVIO model
         # has some unused parameters in its architecture
         model = DDP(
@@ -816,8 +686,7 @@ def main():
         # Train
         train_loss, global_step = train_epoch(
             model, train_loader, optimizer, device, epoch, 
-            warmup_scheduler=warmup_scheduler_to_use, global_step=global_step,
-            augmentation=augmentation, imu_resampler=imu_resampler
+            warmup_scheduler=warmup_scheduler_to_use, global_step=global_step
         )
         
         # Validate
@@ -874,13 +743,6 @@ def main():
     if is_main_process:
         print(f"\nTraining complete! Best val loss: {best_val_loss:.6f}")
         print(f"Checkpoints saved to: {checkpoint_dir}")
-    
-    # Clean up shared memory if used
-    if args.use_shared_memory:
-        if is_main_process:
-            print("Cleaning up shared memory...")
-        train_dataset.cleanup()
-        val_dataset.cleanup()
     
     # Clean up distributed training
     cleanup_distributed()

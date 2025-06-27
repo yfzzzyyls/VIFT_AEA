@@ -654,7 +654,7 @@ class AriaProcessor:
             'imu_units': 'm/s²,m/s²,m/s²,rad/s,rad/s,rad/s',
             'imu_note': 'IMU data contains ALL samples between consecutive frames (variable length per interval)',
             'imu_sampling': 'All IMU samples in [t_start, t_end) interval are preserved',
-            'frame_sampling': f'First {self.max_frames} consecutive frames at 20Hz for dense temporal sampling'
+            'frame_sampling': 'First 1000 consecutive frames at 20Hz for dense temporal sampling'
         }
         
         with open(seq_output_dir / "metadata.json", 'w') as f:
@@ -674,21 +674,15 @@ def process_sequence_wrapper(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Process AriaEveryday sequences with real IMU data')
+    parser = argparse.ArgumentParser(description='Process first 20 AriaEveryday sequences with real IMU data')
     parser.add_argument('--input-dir', type=str, default='/mnt/ssd_ext/incSeg-data/aria_everyday',
                        help='Path to raw AriaEveryday dataset')
-    parser.add_argument('--output-dir', type=str, default='/mnt/ssd_ext/incSeg-data/aria_processed',
+    parser.add_argument('--output-dir', type=str, default='./aria_processed',
                        help='Output directory')
-    parser.add_argument('--max-frames', type=int, default=750,
-                       help='Max frames per sequence (default: 750, first consecutive frames)')
+    parser.add_argument('--max-frames', type=int, default=1000,
+                       help='Max frames per sequence (default: 1000, first consecutive frames)')
     parser.add_argument('--num-workers', type=int, default=4,
                        help='Number of parallel workers')
-    parser.add_argument('--train-ratio', type=float, default=0.7,
-                       help='Training set ratio (default: 0.7)')
-    parser.add_argument('--val-ratio', type=float, default=0.1,
-                       help='Validation set ratio (default: 0.1)')
-    parser.add_argument('--all', action='store_true',
-                       help='Process all sequences, not just first 20')
     
     args = parser.parse_args()
     
@@ -702,110 +696,35 @@ def main():
             if vrs_files:
                 all_sequences.append(d)
     
-    # Take all sequences or first 20
-    if args.all:
-        sequences_to_process = all_sequences
-        print(f"🎯 Processing All AriaEveryday Sequences")
-    else:
-        sequences_to_process = all_sequences[:20]
-        print(f"🎯 Processing First 20 AriaEveryday Sequences")
+    # Take first 20 sequences
+    sequences_to_process = all_sequences[:20]
     
+    print(f"🎯 Processing First 20 AriaEveryday Sequences")
     print(f"📁 Input: {args.input_dir}")
     print(f"📁 Output: {args.output_dir}")
     print(f"🔢 Found {len(all_sequences)} total sequences")
-    print(f"🎬 Processing {len(sequences_to_process)} sequences")
-    if args.train_ratio + args.val_ratio < 1.0:
-        print(f"📊 Train/Val/Test split: {args.train_ratio:.0%}/{args.val_ratio:.0%}/{1-args.train_ratio-args.val_ratio:.0%}")
+    print(f"🎬 Processing first 20 sequences")
     print("=" * 60)
     
     # Create output directory
     output_path = Path(args.output_dir)
     output_path.mkdir(exist_ok=True)
     
-    # Create split directories if train/val/test split is requested
-    if args.train_ratio + args.val_ratio < 1.0:
-        train_dir = output_path / 'train'
-        val_dir = output_path / 'val'
-        test_dir = output_path / 'test'
-        train_dir.mkdir(exist_ok=True)
-        val_dir.mkdir(exist_ok=True)
-        test_dir.mkdir(exist_ok=True)
-        
-        # Split sequences
-        n_sequences = len(sequences_to_process)
-        n_train = int(n_sequences * args.train_ratio)
-        n_val = int(n_sequences * args.val_ratio)
-        
-        # Shuffle for random split (with fixed seed for reproducibility)
-        np.random.seed(42)
-        shuffled = sequences_to_process.copy()
-        np.random.shuffle(shuffled)
-        
-        train_seqs = shuffled[:n_train]
-        val_seqs = shuffled[n_train:n_train + n_val]
-        test_seqs = shuffled[n_train + n_val:]
-        
-        # Create mapping for each split
-        train_mapping = {}
-        val_mapping = {}
-        test_mapping = {}
-        
-        for i, seq_path in enumerate(train_seqs):
-            seq_id = f"{i:03d}"
-            train_mapping[seq_id] = seq_path.name
-            
-        for i, seq_path in enumerate(val_seqs):
-            seq_id = f"{i:03d}"
-            val_mapping[seq_id] = seq_path.name
-            
-        for i, seq_path in enumerate(test_seqs):
-            seq_id = f"{i:03d}"
-            test_mapping[seq_id] = seq_path.name
-        
-        # Combine all mappings with split info
-        sequence_mapping = {
-            'train': train_mapping,
-            'val': val_mapping,
-            'test': test_mapping,
-            'split_ratio': f"{args.train_ratio}:{args.val_ratio}:{1-args.train_ratio-args.val_ratio}",
-            'total_sequences': n_sequences,
-            'train_count': len(train_seqs),
-            'val_count': len(val_seqs),
-            'test_count': len(test_seqs)
-        }
-        
-        # Save dataset split info
-        with open(output_path / "dataset_split.json", 'w') as f:
-            json.dump(sequence_mapping, f, indent=2)
-        print(f"\n✅ Created train/val/test split: {len(train_seqs)}/{len(val_seqs)}/{len(test_seqs)} sequences")
-        
-        # Update sequences_to_process to include split info
-        sequences_with_split = []
-        for seq in train_seqs:
-            sequences_with_split.append(('train', seq))
-        for seq in val_seqs:
-            sequences_with_split.append(('val', seq))
-        for seq in test_seqs:
-            sequences_with_split.append(('test', seq))
-        
-        sequences_to_process = sequences_with_split
-        
-    else:
-        # No split - process as before
-        sequence_mapping = {}
-        print("\n📋 Sequences to process:")
-        for i, seq_path in enumerate(sequences_to_process):
-            seq_id = f"{i:03d}"
-            sequence_mapping[seq_id] = seq_path.name
-            if seq_path.name == "loc2_script3_seq3_rec1":
-                print(f"  {seq_id}: {seq_path.name} ⭐ (standing from couch)")
-            else:
-                print(f"  {seq_id}: {seq_path.name}")
-        
-        # Save sequence mapping
-        with open(output_path / "sequence_mapping.json", 'w') as f:
-            json.dump(sequence_mapping, f, indent=2)
-        print(f"\n✅ Saved sequence mapping to {output_path / 'sequence_mapping.json'}")
+    # Create sequence mapping
+    sequence_mapping = {}
+    print("\n📋 Sequences to process:")
+    for i, seq_path in enumerate(sequences_to_process):
+        seq_id = f"{i:03d}"
+        sequence_mapping[seq_id] = seq_path.name
+        if seq_path.name == "loc2_script3_seq3_rec1":
+            print(f"  {seq_id}: {seq_path.name} ⭐ (standing from couch)")
+        else:
+            print(f"  {seq_id}: {seq_path.name}")
+    
+    # Save sequence mapping
+    with open(output_path / "sequence_mapping.json", 'w') as f:
+        json.dump(sequence_mapping, f, indent=2)
+    print(f"\n✅ Saved sequence mapping to {output_path / 'sequence_mapping.json'}")
     
     # Process sequences
     if args.num_workers > 1:
@@ -820,29 +739,14 @@ def main():
         print(f"   Each worker will process up to {chunk_size} sequences")
         
         # Prepare arguments for multiprocessing
-        process_args = []
+        processor_args = {
+            'input_dir': args.input_dir,
+            'output_dir': args.output_dir,
+            'max_frames': args.max_frames
+        }
         
-        if args.train_ratio + args.val_ratio < 1.0:
-            # With split - sequences_to_process is list of (split, seq_path) tuples
-            split_counters = {'train': 0, 'val': 0, 'test': 0}
-            for split, seq_path in sequences_to_process:
-                seq_id = f"{split_counters[split]:03d}"
-                split_counters[split] += 1
-                processor_args = {
-                    'input_dir': args.input_dir,
-                    'output_dir': str(output_path / split),  # Output to split subdirectory
-                    'max_frames': args.max_frames
-                }
-                process_args.append((seq_path, seq_id, processor_args))
-        else:
-            # Without split - sequences_to_process is list of paths
-            processor_args = {
-                'input_dir': args.input_dir,
-                'output_dir': args.output_dir,
-                'max_frames': args.max_frames
-            }
-            process_args = [(sequences_to_process[i], f"{i:03d}", processor_args) 
-                           for i in range(len(sequences_to_process))]
+        process_args = [(sequences_to_process[i], f"{i:03d}", processor_args) 
+                       for i in range(len(sequences_to_process))]
         
         # Process in parallel
         with mp.Pool(args.num_workers) as pool:
@@ -857,101 +761,50 @@ def main():
         print(f"\n🚀 Processing sequentially...")
         processed_count = 0
         
-        if args.train_ratio + args.val_ratio < 1.0:
-            # With split - sequences_to_process is list of (split, seq_path) tuples
-            split_counters = {'train': 0, 'val': 0, 'test': 0}
-            for split, seq_path in tqdm(sequences_to_process, desc="Processing"):
-                seq_id = f"{split_counters[split]:03d}"
-                split_counters[split] += 1
-                processor = AriaProcessor(args.input_dir, str(output_path / split), args.max_frames, seq_id=seq_id)
-                if processor.process_sequence(seq_path, seq_id):
-                    processed_count += 1
-        else:
-            # Without split - sequences_to_process is list of paths
-            for i, seq_path in enumerate(tqdm(sequences_to_process, desc="Processing")):
-                seq_id = f"{i:03d}"
-                processor = AriaProcessor(args.input_dir, args.output_dir, args.max_frames, seq_id=seq_id)
-                if processor.process_sequence(seq_path, seq_id):
-                    processed_count += 1
+        for i, seq_path in enumerate(tqdm(sequences_to_process, desc="Processing")):
+            seq_id = f"{i:03d}"
+            processor = AriaProcessor(args.input_dir, args.output_dir, args.max_frames, seq_id=seq_id)
+            if processor.process_sequence(seq_path, seq_id):
+                processed_count += 1
     
     print(f"\n🎉 Processing Complete!")
     print(f"✅ Successfully processed: {processed_count}/{len(sequences_to_process)} sequences")
     
     # Save summary
-    if args.train_ratio + args.val_ratio < 1.0:
-        # With split
-        summary = {
-            'dataset': 'AriaEveryday_Raw',
-            'total_sequences': len(all_sequences),
-            'processed_sequences': processed_count,
-            'train_sequences': sequence_mapping['train_count'],
-            'val_sequences': sequence_mapping['val_count'],
-            'test_sequences': sequence_mapping['test_count'],
-            'split_ratio': sequence_mapping['split_ratio'],
-            'imu_type': 'real_sensor_data',
-            'imu_channel_order': 'ax,ay,az,gx,gy,gz',
-            'slam_resampling': 'time_based_20hz',
-            'max_frames_per_sequence': args.max_frames,
-            'frame_sampling_strategy': 'first_consecutive_frames'
-        }
-    else:
-        # Without split
-        summary = {
-            'dataset': 'AriaEveryday_Raw',
-            'total_sequences': len(all_sequences),
-            'processed_sequences': processed_count,
-            'sequences_processed': list(sequence_mapping.values()),
-            'imu_type': 'real_sensor_data',
-            'imu_channel_order': 'ax,ay,az,gx,gy,gz',
-            'slam_resampling': 'time_based_20hz',
-            'max_frames_per_sequence': args.max_frames,
-            'frame_sampling_strategy': 'first_consecutive_frames'
-        }
+    summary = {
+        'dataset': 'AriaEveryday_Raw',
+        'total_sequences': len(all_sequences),
+        'processed_sequences': processed_count,
+        'sequences_processed': list(sequence_mapping.values()),
+        'imu_type': 'real_sensor_data',
+        'imu_channel_order': 'ax,ay,az,gx,gy,gz',
+        'slam_resampling': 'time_based_20hz',
+        'max_frames_per_sequence': args.max_frames,
+        'frame_sampling_strategy': 'first_consecutive_frames'
+    }
     
     with open(output_path / "dataset_summary.json", 'w') as f:
         json.dump(summary, f, indent=2)
     
     print(f"\n📊 Summary:")
     print(f"  - Processed {processed_count} sequences")
-    if args.train_ratio + args.val_ratio < 1.0:
-        print(f"  - Train: {sequence_mapping['train_count']} sequences")
-        print(f"  - Val: {sequence_mapping['val_count']} sequences")
-        print(f"  - Test: {sequence_mapping['test_count']} sequences")
     print(f"  - Each with up to {args.max_frames} consecutive frames (50 seconds at 20Hz)")
     print(f"  - IMU data format: [ax,ay,az,gx,gy,gz]")
     print(f"  - IMU extracted between consecutive frames")
     print(f"\n📁 Output saved to: {output_path}")
     
-    if args.train_ratio + args.val_ratio < 1.0:
-        print(f"\n📂 Output structure:")
-        print(f"  {output_path}/")
-        print(f"    ├── train/ ({sequence_mapping['train_count']} sequences)")
-        print(f"    ├── val/ ({sequence_mapping['val_count']} sequences)")
-        print(f"    ├── test/ ({sequence_mapping['test_count']} sequences)")
-        print(f"    └── dataset_split.json")
+    # Verify sequence 005 is included
+    if "005" in sequence_mapping:
+        print(f"\n✅ Sequence 005 ({sequence_mapping['005']}) is included in the processed data")
+    else:
+        raise ValueError("Sequence 005 is missing from the processed data!")
     
     print("\n🎯 Next steps:")
-    if args.train_ratio + args.val_ratio < 1.0:
-        print("1. Train with all optimizations:")
-        print(f"   torchrun --nproc_per_node=4 train_aria_from_scratch.py \\")
-        print(f"       --data-dir {args.output_dir} \\") 
-        print(f"       --epochs 50 \\")
-        print(f"       --batch-size 16 \\")
-        print(f"       --checkpoint-dir checkpoints_full_optimized \\")
-        print(f"       --distributed \\")
-        print(f"       --use-searaft")
-        print("2. Evaluate on test set:")
-        print(f"   python evaluate_from_scratch.py \\")
-        print(f"       --checkpoint checkpoints_full_optimized/best_model.pt \\")
-        print(f"       --data-dir {args.output_dir} \\")
-        print(f"       --output-dir evaluation_full_optimized \\")
-        print(f"       --use-searaft")
-    else:
-        print("1. Run the debug script to verify IMU-image alignment:")
-        print("   python debug_imu_image_alignment.py")
-        print("2. Generate latent features:")
-        print("   python generate_all_pretrained_latents_between_frames.py")
-        print("3. Train the model with properly aligned data")
+    print("1. Run the debug script to verify IMU-image alignment:")
+    print("   python debug_imu_image_alignment.py")
+    print("2. Generate latent features:")
+    print("   python generate_all_pretrained_latents_between_frames.py")
+    print("3. Train the model with properly aligned data")
 
 
 if __name__ == "__main__":
