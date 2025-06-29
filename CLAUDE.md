@@ -335,4 +335,5 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py \
 - When encountering memory issues with external libraries (like CorrBlock), consider simpler alternatives that achieve the same goal
 - The dot-product correlation (Option B) proved much more practical than trying to fix CorrBlock's dense computation
 - Multi-frame correlation successfully implemented and training - expected 10-15% improvement in ATE/RPE
+- **Aria VRS Image Rotation**: Images from Aria VRS files need to be rotated 90 degrees CLOCKWISE to correct orientation (cameras are mounted sideways on the glasses)
 - Reverting to stable baseline (SEA-RAFT + multi-frame) provides clean foundation for future work

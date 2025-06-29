@@ -521,6 +521,10 @@ class AriaProcessor:
                     # Get the first image if multiple
                     img_array = image_data[0].to_numpy_array()
                     
+                    # Rotate image 90 degrees clockwise to correct orientation
+                    # Aria cameras are mounted sideways, so images appear rotated by default
+                    img_array = cv2.rotate(img_array, cv2.ROTATE_90_CLOCKWISE)
+                    
                     # Resize to target resolution with INTER_AREA for better quality
                     img_resized = cv2.resize(img_array, (target_width, target_height), interpolation=cv2.INTER_AREA)
                     
