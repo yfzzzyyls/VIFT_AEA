@@ -386,7 +386,7 @@ def main():
                         help='Number of training epochs')
     parser.add_argument('--batch-size', type=int, default=4,
                         help='Batch size per GPU')
-    parser.add_argument('--lr', type=float, default=1e-4,
+    parser.add_argument('--lr', type=float, default=4e-4,
                         help='Learning rate')
     parser.add_argument('--checkpoint-dir', type=str, default='checkpoints_from_scratch',
                         help='Directory to save checkpoints')

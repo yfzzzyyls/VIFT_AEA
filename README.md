@@ -1,26 +1,15 @@
-______________________________________________________________________
+---
 
 <div align="center">
 
 # VIFT-AEA: Visual-Inertial Fusion Transformer for Aria Everyday Activities
 
-<a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white"></a>
-<a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-792ee5?logo=pytorchlightning&logoColor=white"></a>
-<a href="https://hydra.cc/"><img alt="Config: Hydra" src="https://img.shields.io/badge/Config-Hydra-89b8cd"></a>
-<a href="https://github.com/ashleve/lightning-hydra-template"><img alt="Template" src="https://img.shields.io/badge/-Lightning--Hydra--Template-017F2F?style=flat&logo=github&labelColor=gray"></a><br>
 [![Paper](http://img.shields.io/badge/paper-arxiv.2409.08769-B31B1B.svg)](https://arxiv.org/abs/2409.08769)
-
-</div>
 
 ## Description
 
 This repository implements Visual-Inertial Fusion Transformer (VIFT) for both KITTI and Aria Everyday Activities datasets. VIFT uses a causal transformer architecture for fusion and pose estimation in deep visual-inertial odometry.
 
-**Key Features:**
-- Original VIFT implementation for KITTI dataset
-- Extended support for Aria Everyday Activities dataset
-- Fixed IMU temporal alignment for proper VIO training
-- Cross-domain evaluation capabilities
 
 ## Installation
 
@@ -54,13 +43,14 @@ pip install rootutils colorlog natsort
 This repository supports two multi-GPU training modes:
 
 1. **DataParallel (Recommended for memory-constrained systems)**
+
    - Single process loads dataset once in RAM
    - Dataset shared across all GPUs
    - Memory usage: ~317GB for Aria dataset
    - Speed: ~70-80% of DDP
    - Usage: `python train_aria_from_scratch.py --use-dataparallel`
-
 2. **DistributedDataParallel (Faster but memory-intensive)**
+
    - Each GPU process loads its own dataset copy
    - Memory usage: 317GB × N GPUs (e.g., 1.3TB for 4 GPUs)
    - Speed: ~2x faster than DataParallel
@@ -68,62 +58,6 @@ This repository supports two multi-GPU training modes:
 
 For systems with <1TB RAM, use DataParallel. For systems with abundant RAM, use DDP for faster training.
 
-## Quick Start
-
-### Option 1: Train from Scratch (Recommended)
-```bash
-# 1. Process Aria data
-python process_aria.py
-
-# 2. Create data splits
-python organize_data_splits.py --data-dir aria_processed
-
-# 3. Train with DataParallel (memory-efficient, recommended for large datasets)
-python train_aria_from_scratch.py \
-    --use-dataparallel \
-    --data-dir aria_processed \
-    --epochs 50 \
-    --batch-size 16 \
-    --checkpoint-dir checkpoints_dataparallel
-
-# Alternative: Train with DistributedDataParallel (faster but uses more memory)
-# torchrun --nproc_per_node=4 train_aria_from_scratch.py \
-#     --data-dir aria_processed \
-#     --epochs 50 \
-#     --batch-size 16 \
-#     --checkpoint-dir checkpoints_distributed \
-#     --distributed
-
-# 4. Evaluate
-python evaluate_from_scratch.py \
-    --checkpoint checkpoints_dataparallel/best_model.pt \
-    --data-dir aria_processed \
-    --output-dir evaluation_results
-```
-
-### Option 2: Train with SEA-RAFT (Advanced Motion Features)
-```bash
-# 1. Setup SEA-RAFT
-python setup_searaft.py
-
-# 2. Download pretrained weights (REQUIRED!)
-# Go to: https://drive.google.com/drive/folders/1YLovlvUW94vciWvTyLf-p3uWscbOQRWW
-# Download: 'Tartan-C-T-TSKH432x960-S.pth' (~35MB)
-cp ~/Downloads/Tartan-C-T-TSKH432x960-S.pth third_party/SEA-RAFT/SEA-RAFT-Sintel.pth
-
-# 3. Verify setup
-python setup_searaft.py  # Should show "weights already present"
-python test_searaft_integration.py
-
-# 4. Train with SEA-RAFT
-python train_aria_from_scratch.py \
-    --use-dataparallel \
-    --data-dir aria_processed \
-    --epochs 50 \
-    --batch-size 16 \
-    --checkpoint-dir checkpoints_searaft \
-    --use-searaft
-```
 
 ## Complete Workflows
 
@@ -159,6 +93,7 @@ python src/eval.py \
 ### Workflow 2: Train and Test on Aria Everyday Activities
 
 **Option A: Using Pre-trained Feature Encoders**
+
 ```bash
 # 1. Setup environment
 source venv/bin/activate
@@ -188,31 +123,6 @@ python evaluate_stable_model.py \
     --output-dir evaluation_results
 ```
 
-**Option B: Training From Scratch (All Components)**
-```bash
-# 1. Setup environment
-source venv/bin/activate
-
-# 2. Process Aria data with proper IMU alignment
-python process_aria.py
-
-# 3. Create train/val splits
-python prepare_aria_splits.py --source-dir aria_processed
-
-# 4. Train all components from scratch (with quaternion output and improved loss)
-python train_aria_from_scratch.py --use-dataparallel --epochs 200 --batch-size 16
-
-# 5. Evaluate the trained model
-python evaluate_from_scratch.py \
-      --checkpoint checkpoints_from_scratch/best_model.pt \
-      --data-dir aria_processed \
-      --output-dir evaluation_from_scratch \
-      --batch-size 16 \
-      --num-workers 4
-
-# 5. Monitor training
-tensorboard --logdir checkpoints_from_scratch
-```
 
 ### Workflow 3: Cross-Domain Testing (KITTI→Aria)
 
@@ -294,6 +204,12 @@ cp drive-download-20250626T060023Z-1-001/Tartan-C-T-TSKH432x960-S.pth third_part
 # Verify weights are in place (should show ~35M)
 ls -lh third_party/SEA-RAFT/SEA-RAFT-Sintel.pth
 
+# Process Aria data with proper IMU alignment
+python process_aria.py
+
+# Create train/val/test splits
+python organize_data_splits.py --data-dir aria_processed --train-ratio 0.7 --val-ratio 0.15
+
 # Re-run setup to confirm weights are detected
 python setup_searaft.py
 
@@ -305,8 +221,8 @@ python train_aria_from_scratch.py \
     --use-dataparallel \
     --data-dir aria_processed \
     --epochs 50 \
-    --batch-size 16 \
-    --checkpoint-dir checkpoints_searaft_multiframe \
+    --batch-size 64 \
+    --checkpoint-dir checkpoints_searaft \
     --use-searaft
 
 # 6. Compare CNN vs SEA-RAFT performance
@@ -329,20 +245,17 @@ python evaluate_from_scratch.py \
 
 # For SEA-RAFT model:
 python evaluate_from_scratch.py \
-    --checkpoint checkpoints_searaft_multiframe/best_model.pt \
+    --checkpoint checkpoints_searaft/best_model.pt \
     --use-searaft \
     --data-dir aria_processed \
     --output-dir evaluation_searaft \
     --batch-size 16 \
     --num-workers 4
 
-# Notes:
-# - The script automatically detects encoder type from checkpoint
-# - Use --use-searaft flag only if auto-detection fails
-# - Clear error messages guide you if there's a mismatch
 ```
 
 **SEA-RAFT Notes:**
+
 - **REQUIRES pretrained weights** - was trained for weeks on optical flow datasets
 - Without pretrained weights, it's just a random CNN and won't work properly
 - ~4.3x slower than CNN encoder but expected to improve accuracy by 10-15%
@@ -350,115 +263,6 @@ python evaluate_from_scratch.py \
 - Uses frozen pretrained features from optical flow task
 - Preserves spatial tokens (4×4) for better parallax reasoning
 
-## Important: IMU Data Format
-
-This repository includes a critical fix for IMU temporal alignment:
-
-### Original Implementation (Issues)
-- IMU window: [-25ms, +25ms] centered on each frame
-- Creates overlapping data and violates causality
-- Can lead to poor VIO performance
-
-### Fixed Implementation (Recommended)
-- IMU extracted between consecutive frames [t_i, t_{i+1})
-- No overlap, proper temporal alignment
-- Ensures correct motion association for VIO
-
-**Always use the fixed version for new experiments!**
-
-## Model Architecture
-
-VIFT consists of three main components:
-
-1. **Visual Encoder**: 
-   - **Default**: 6-layer CNN processing consecutive image pairs
-   - **Optional**: SEA-RAFT feature encoder for improved motion estimation (see Workflow 5)
-2. **IMU Encoder**: 3-layer 1D CNN processing IMU measurements with multi-scale temporal pooling
-3. **Pose Transformer**: 4-layer transformer with 8 attention heads (configurable)
-
-The model outputs 7-DoF poses (3D translation + 4D quaternion rotation) between consecutive frames.
-
-## Key Improvements in This Implementation
-
-### 1. Corrected Loss Function
-- **Original**: Translation loss was incorrectly down-weighted (`trans_loss / 3 + rot_loss`)
-- **Fixed**: Proper weighting with `α × trans_loss + β × scale_loss + rot_loss`
-- Default weights: α=10.0, β=5.0 (translation needs higher weight as it's in meters)
-
-### 2. Scale Drift Prevention
-- Added explicit scale consistency loss term
-- Helps prevent accumulating scale errors in long sequences
-- Computes L1 loss between predicted and ground truth translation magnitudes
-
-### 3. Consistent IMU Preprocessing
-- Training and evaluation now use identical IMU preprocessing
-- Raw IMU data (including gravity) is used consistently
-- Prevents distribution shift between training and testing
-
-### 4. Improved Evaluation Metrics
-- Added APE (Absolute Pose Error) and RPE (Relative Pose Error) metrics
-- Scale drift percentage tracking
-- Interactive 3D HTML trajectory visualizations using Plotly
-- CSV export of trajectories for further analysis
-
-### 5. SEA-RAFT Visual Encoder Option
-- Integrated state-of-the-art optical flow features
-- Uses pretrained SEA-RAFT's feature network (fnet)
-- Preserves spatial structure for better motion reasoning
-- Available via `--use-searaft` flag in training
-
-## Performance Results
-
-| Model | Training Data | Test Data | Translation Error | Rotation Error |
-|-------|--------------|-----------|------------------|----------------|
-| VIFT | KITTI | KITTI | 3.27% | 1.78° |
-| VIFT | KITTI | Aria | 3.27% | 1.77° |
-| VIFT-AEA | Aria | Aria | 0.84 cm | 1.3° |
-
-## Project Structure
-
-```
-VIFT_AEA/
-├── src/                              # Source code
-│   ├── models/                       # Model architectures
-│   │   └── components/               
-│   │       ├── vsvio.py             # Main VIFT model
-│   │       └── searaft_encoder.py   # SEA-RAFT feature encoder
-│   ├── data/                         # Dataset loaders
-│   └── metrics/                      # Loss functions
-├── configs/                          # Hydra configuration files
-├── scripts/                          # Processing scripts
-├── pretrained_models/                # Pretrained encoders
-├── third_party/                      # External dependencies (gitignored)
-│   └── SEA-RAFT/                    # SEA-RAFT repository (after setup)
-├── process_aria.py                   # Unified Aria data processing
-├── train_aria_from_scratch.py        # Main training script with --use-searaft
-├── setup_searaft.py                  # SEA-RAFT installation script
-├── test_searaft_integration.py       # Test SEA-RAFT integration
-└── evaluate_from_scratch.py          # Evaluation script
-```
-
-## Troubleshooting
-
-1. **High validation errors**: Ensure you're using the fixed IMU extraction (`python process_aria.py`)
-2. **Out of memory**: Reduce batch size or use gradient accumulation
-3. **NaN losses**: Check for corrupted data samples or reduce learning rate
-4. **SEA-RAFT import errors**: Run `python setup_searaft.py` to fix imports and dependencies
-5. **SEA-RAFT weights missing**: Download manually from Google Drive (REQUIRED, not optional!)
-6. **SEA-RAFT performing poorly**: Ensure you downloaded pretrained weights - random init won't work
-
-## Citation
-
-If you use this code, please cite:
-
-```bibtex
-@article{vift2024,
-  title={Causal Transformer for Fusion and Pose Estimation in Deep Visual Inertial Odometry},
-  author={...},
-  journal={ECCV Workshop on Visual-Centric Autonomous Driving},
-  year={2024}
-}
-```
 
 ## License
 
