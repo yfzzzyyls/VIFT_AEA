@@ -46,27 +46,21 @@ This is the Visual-Inertial Fusion Transformer (VIFT) implementation extended fo
 
 ## Changelog & Evolution
 
-### 2025-01-26 (Latest)
-- **COMPLETED**: SEA-RAFT feature encoder implementation to replace 6-layer CNN
+### 2025-01-27 (Latest - After Reverts)
+- **REVERTED** to commit `fa862a1` (multi-frame correlation)
+- **Current state**: SEA-RAFT + Multi-frame correlation only
+- **Removed**: Critical accuracy components (bias predictor, adaptive noise, Mahalanobis gating)
+- **Removed**: DataParallel support and variable-length IMU optimizations
+- **Stable baseline**: Ready for training with multi-frame SEA-RAFT
+
+### 2025-01-26
+- **COMPLETED**: Multi-frame correlation implementation (commit `fa862a1`)
+- **COMPLETED**: SEA-RAFT feature encoder implementation
 - **Debugged**: All SEA-RAFT integration issues successfully resolved
 - **Created**: setup_searaft.py script to handle installation and import fixes
 - **Key challenges**: SEA-RAFT uses relative imports and requires HuggingFace dependency
 - **Status**: Successfully training with distributed GPU
 - **Performance**: ~4.3x slower than CNN but expected to improve accuracy
-- **Verified Training**: SEA-RAFT training confirmed working with:
-  ```bash
-  torchrun --nproc_per_node=4 train_aria_from_scratch.py \
-      --data-dir aria_processed \
-      --epochs 50 \
-      --batch-size 16 \
-      --checkpoint-dir checkpoints_searaft_distributed \
-      --distributed \
-      --use-searaft
-  ```
-  - Successfully loaded pretrained weights on all 4 GPUs
-  - Model: 30.7M total parameters (27.9M trainable)
-  - Training speed: ~2.43s/batch (expected due to SEA-RAFT complexity)
-  - Estimated training time: ~6.25 hours for 50 epochs
 
 ### 2025-01-25
 - **Updated**: CLAUDE.md to reflect current FlexibleInertialEncoder implementation
@@ -174,21 +168,32 @@ cp ~/Downloads/Tartan-C-T-TSKH432x960-S.pth third_party/SEA-RAFT/SEA-RAFT-Sintel
 python setup_searaft.py  # Should show "weights already present"
 python test_searaft_integration.py
 
-# Train with SEA-RAFT encoder (distributed) - VERIFIED WORKING
+# Train with SEA-RAFT + Multi-frame (RECOMMENDED)
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
     --data-dir aria_processed \
     --epochs 50 \
     --batch-size 16 \
-    --checkpoint-dir checkpoints_searaft_distributed \
+    --checkpoint-dir checkpoints_searaft_multiframe \
     --distributed \
     --use-searaft
+    # Multi-frame correlation is enabled by default
 
-# Train with original CNN encoder (distributed) 
+# Train with SEA-RAFT only (no multi-frame)
 torchrun --nproc_per_node=4 train_aria_from_scratch.py \
     --data-dir aria_processed \
     --epochs 50 \
     --batch-size 16 \
-    --checkpoint-dir checkpoints_distributed \
+    --checkpoint-dir checkpoints_searaft_no_multiframe \
+    --distributed \
+    --use-searaft \
+    --no-multiframe
+
+# Train with original CNN encoder (baseline)
+torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+    --data-dir aria_processed \
+    --epochs 50 \
+    --batch-size 16 \
+    --checkpoint-dir checkpoints_cnn_baseline \
     --distributed
 ```
 
@@ -291,6 +296,37 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py \
 3. **Result**: 475x memory reduction (38GB → 8MB)
 4. **Performance**: 25ms overhead for 3-keyframe correlation
 
+## Current State Summary (After Reverts)
+
+### What We Have:
+1. **SEA-RAFT Integration** ✓
+   - Feature encoder (fnet) replacing 6-layer CNN
+   - Motion via feature differences
+   - Pretrained weights required
+
+2. **Multi-Frame Correlation** ✓
+   - Feature bank (100 frame memory)
+   - Keyframe selection (top 3 by covisibility)
+   - Dot-product correlation (memory efficient)
+   - Weighted fusion with direct motion
+
+### What Was Removed:
+1. **Critical Accuracy Components** ✗
+   - Learned IMU bias predictor
+   - Adaptive Q/R noise estimation
+   - Mahalanobis gating in MSCKF
+
+2. **Training Optimizations** ✗
+   - DataParallel support
+   - Variable-length IMU handling improvements
+
+### Architecture Summary:
+- **Input**: 2 consecutive RGB frames + IMU data
+- **Visual**: SEA-RAFT fnet → feature difference → multi-frame correlation
+- **IMU**: FlexibleInertialEncoder with multi-scale pooling
+- **Fusion**: Concatenate visual + IMU features
+- **Output**: Transformer → 7-DoF poses (3 trans + 4 rot quaternion)
+
 ## Memories
 - Always refer to the actual code when implementing features
 - Don't create fallback solutions when facing integration challenges
@@ -299,3 +335,4 @@ torchrun --nproc_per_node=4 train_aria_from_scratch.py \
 - When encountering memory issues with external libraries (like CorrBlock), consider simpler alternatives that achieve the same goal
 - The dot-product correlation (Option B) proved much more practical than trying to fix CorrBlock's dense computation
 - Multi-frame correlation successfully implemented and training - expected 10-15% improvement in ATE/RPE
+- Reverting to stable baseline (SEA-RAFT + multi-frame) provides clean foundation for future work

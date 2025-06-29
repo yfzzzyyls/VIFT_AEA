@@ -47,6 +47,27 @@ pip install rootutils colorlog natsort
 # Note: SEA-RAFT will be cloned locally, no pip install needed
 ```
 
+## Training Modes
+
+### DataParallel vs DistributedDataParallel
+
+This repository supports two multi-GPU training modes:
+
+1. **DataParallel (Recommended for memory-constrained systems)**
+   - Single process loads dataset once in RAM
+   - Dataset shared across all GPUs
+   - Memory usage: ~317GB for Aria dataset
+   - Speed: ~70-80% of DDP
+   - Usage: `python train_aria_from_scratch.py --use-dataparallel`
+
+2. **DistributedDataParallel (Faster but memory-intensive)**
+   - Each GPU process loads its own dataset copy
+   - Memory usage: 317GB × N GPUs (e.g., 1.3TB for 4 GPUs)
+   - Speed: ~2x faster than DataParallel
+   - Usage: `torchrun --nproc_per_node=4 train_aria_from_scratch.py --distributed`
+
+For systems with <1TB RAM, use DataParallel. For systems with abundant RAM, use DDP for faster training.
+
 ## Quick Start
 
 ### Option 1: Train from Scratch (Recommended)
@@ -57,17 +78,25 @@ python process_aria.py
 # 2. Create data splits
 python organize_data_splits.py --data-dir aria_processed
 
-# 3. Train with distributed GPU
-torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+# 3. Train with DataParallel (memory-efficient, recommended for large datasets)
+python train_aria_from_scratch.py \
+    --use-dataparallel \
     --data-dir aria_processed \
     --epochs 50 \
     --batch-size 16 \
-    --checkpoint-dir checkpoints_distributed \
-    --distributed
+    --checkpoint-dir checkpoints_dataparallel
+
+# Alternative: Train with DistributedDataParallel (faster but uses more memory)
+# torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+#     --data-dir aria_processed \
+#     --epochs 50 \
+#     --batch-size 16 \
+#     --checkpoint-dir checkpoints_distributed \
+#     --distributed
 
 # 4. Evaluate
 python evaluate_from_scratch.py \
-    --checkpoint checkpoints_distributed/best_model.pt \
+    --checkpoint checkpoints_dataparallel/best_model.pt \
     --data-dir aria_processed \
     --output-dir evaluation_results
 ```
@@ -87,12 +116,12 @@ python setup_searaft.py  # Should show "weights already present"
 python test_searaft_integration.py
 
 # 4. Train with SEA-RAFT
-torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+python train_aria_from_scratch.py \
+    --use-dataparallel \
     --data-dir aria_processed \
     --epochs 50 \
     --batch-size 16 \
     --checkpoint-dir checkpoints_searaft \
-    --distributed \
     --use-searaft
 ```
 
@@ -171,7 +200,7 @@ python process_aria.py
 python prepare_aria_splits.py --source-dir aria_processed
 
 # 4. Train all components from scratch (with quaternion output and improved loss)
-torchrun --nproc_per_node=4 train_aria_from_scratch.py --epochs 200 --distributed --batch-size 4
+python train_aria_from_scratch.py --use-dataparallel --epochs 200 --batch-size 16
 
 # 5. Evaluate the trained model
 python evaluate_from_scratch.py \
@@ -219,20 +248,20 @@ python organize_data_splits.py --data-dir aria_processed --train-ratio 0.7 --val
 
 # 4. Train all components from scratch (improved loss weighting)
 
-# Multi-GPU training with distributed data parallel
-torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+# Multi-GPU training with DataParallel (memory-efficient)
+python train_aria_from_scratch.py \
+    --use-dataparallel \
     --data-dir aria_processed \
     --epochs 50 \
     --batch-size 16 \
-    --checkpoint-dir checkpoints_distributed \
-    --distributed
+    --checkpoint-dir checkpoints_dataparallel
 
 # 5. Monitor training progress
 tail -f train.log
 
 # 6. Evaluate trained model
 python evaluate_from_scratch.py \
-    --checkpoint checkpoints_distributed/best_model.pt \
+    --checkpoint checkpoints_dataparallel/best_model.pt \
     --data-dir aria_processed \
     --output-dir evaluation_from_scratch \
     --batch-size 16 \
@@ -271,23 +300,23 @@ python setup_searaft.py
 # 3. Test SEA-RAFT integration (verify weights loaded correctly)
 python test_searaft_integration.py
 
-# 5. Train with SEA-RAFT encoder (multi-GPU distributed)
-torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+# 5. Train with SEA-RAFT encoder (multi-GPU with DataParallel)
+python train_aria_from_scratch.py \
+    --use-dataparallel \
     --data-dir aria_processed \
     --epochs 50 \
     --batch-size 16 \
     --checkpoint-dir checkpoints_searaft_multiframe \
-    --distributed \
     --use-searaft
 
 # 6. Compare CNN vs SEA-RAFT performance
 # Train baseline CNN model first
-torchrun --nproc_per_node=4 train_aria_from_scratch.py \
+python train_aria_from_scratch.py \
+    --use-dataparallel \
     --data-dir aria_processed \
     --epochs 50 \
     --batch-size 16 \
-    --checkpoint-dir checkpoints_cnn_baseline \
-    --distributed
+    --checkpoint-dir checkpoints_cnn_baseline
 
 # Evaluate both models (auto-detects encoder type)
 # For CNN model:
@@ -300,7 +329,7 @@ python evaluate_from_scratch.py \
 
 # For SEA-RAFT model:
 python evaluate_from_scratch.py \
-    --checkpoint checkpoints_searaft_distributed/best_model.pt \
+    --checkpoint checkpoints_searaft_multiframe/best_model.pt \
     --use-searaft \
     --data-dir aria_processed \
     --output-dir evaluation_searaft \

@@ -8,17 +8,23 @@ Usage:
     # Single GPU training (original mode)
     python train_aria_from_scratch.py --batch-size 4 --epochs 30
 
-    # Multi-GPU training with DistributedDataParallel (recommended for 2+ GPUs)
-    # This provides ~2x speedup compared to DataParallel
+    # Multi-GPU training with DataParallel (shared memory, no dataset duplication)
+    # Best for memory-constrained scenarios with large datasets
+    python train_aria_from_scratch.py --use-dataparallel --batch-size 16 --epochs 30
+    
+    # Specify which GPUs to use with DataParallel
+    python train_aria_from_scratch.py --use-dataparallel --gpu-ids 0 1 2 3 --batch-size 16
+
+    # Multi-GPU training with DistributedDataParallel (recommended for speed)
+    # Each process loads its own data subset - faster but uses more memory
     torchrun --nproc_per_node=4 train_aria_from_scratch.py --distributed --batch-size 4
 
     # Alternative launcher (deprecated but works)
     python -m torch.distributed.launch --nproc_per_node=4 train_aria_from_scratch.py --distributed --batch-size 4
 
-    # Custom number of GPUs
-    torchrun --nproc_per_node=8 train_aria_from_scratch.py --distributed --batch-size 2
-
-Note: When using distributed training, the effective batch size is batch_size * num_gpus
+Note: 
+- DataParallel: Single process, shared memory, easier to debug
+- DistributedDataParallel: Multiple processes, ~2x faster, uses more memory
 """
 
 import os
@@ -30,7 +36,7 @@ from pathlib import Path
 from tqdm import tqdm
 import argparse
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.nn.parallel import DistributedDataParallel as DDP, DataParallel
 from torch.utils.data.distributed import DistributedSampler
 
 # Add project root to path
@@ -401,18 +407,45 @@ def main():
     parser.add_argument('--init-method', type=str, default='env://',
                         help='URL to set up distributed training')
     
+    # DataParallel arguments (alternative to distributed)
+    parser.add_argument('--use-dataparallel', action='store_true',
+                        help='Use DataParallel instead of DistributedDataParallel (single process, shared memory)')
+    parser.add_argument('--gpu-ids', nargs='+', type=int, default=None,
+                        help='GPU IDs to use with DataParallel (default: all available)')
+    
     args = parser.parse_args()
     
-    # Setup distributed training
-    device, rank, world_size = setup_distributed(args)
-    is_main_process = rank == 0
+    # Check for conflicting options
+    if args.distributed and args.use_dataparallel:
+        raise ValueError("Cannot use both --distributed and --use-dataparallel. Choose one.")
     
-    # Only print from main process
-    if is_main_process:
-        if args.distributed:
-            print(f"Using Distributed Training with {world_size} GPUs")
+    # Setup based on training mode
+    if args.use_dataparallel:
+        # DataParallel setup
+        if args.gpu_ids is None:
+            gpu_ids = list(range(torch.cuda.device_count()))
         else:
-            print(f"Using single GPU training")
+            gpu_ids = args.gpu_ids
+        
+        device = torch.device(f'cuda:{gpu_ids[0]}' if gpu_ids else 'cpu')
+        rank = 0
+        world_size = len(gpu_ids) if gpu_ids else 1
+        is_main_process = True
+        
+        print(f"Using DataParallel with GPUs: {gpu_ids}")
+        print("Single process with shared memory - no dataset duplication")
+    else:
+        # Distributed training setup
+        device, rank, world_size = setup_distributed(args)
+        is_main_process = rank == 0
+        gpu_ids = None
+        
+        # Only print from main process
+        if is_main_process:
+            if args.distributed:
+                print(f"Using Distributed Training with {world_size} GPUs")
+            else:
+                print(f"Using single GPU training")
     
     # Create checkpoint directory
     checkpoint_dir = Path(args.checkpoint_dir)
@@ -431,7 +464,11 @@ def main():
         print("- Quaternion output (3 trans + 4 quat)")
         print("- Multi-step prediction (all 10 transitions)")
         print(f"\nTraining Configuration:")
-        print(f"- Distributed: {'Yes (DDP)' if args.distributed else 'No'}")
+        if args.use_dataparallel:
+            print(f"- Mode: DataParallel (shared memory)")
+            print(f"- GPUs: {gpu_ids}")
+        else:
+            print(f"- Mode: {'Distributed (DDP)' if args.distributed else 'Single GPU'}")
         print(f"- World size: {world_size}")
         print(f"- Batch size per GPU: {args.batch_size}")
         print(f"- Total batch size: {args.batch_size * world_size}")
@@ -440,7 +477,15 @@ def main():
         print("="*60 + "\n")
     
     # Create data module
-    # For DDP, each process loads its own subset of data
+    if args.use_dataparallel:
+        # For DataParallel, load dataset once in main process
+        if is_main_process:
+            print("Loading dataset (single copy for all GPUs)...")
+    else:
+        # For DDP, each process loads its own subset of data
+        if is_main_process:
+            print("Loading dataset (each process loads its subset)...")
+    
     data_module = AriaRawDataModule(
         data_dir=args.data_dir,
         batch_size=args.batch_size,  # Per GPU batch size
@@ -454,7 +499,7 @@ def main():
     train_dataset = data_module.train_dataset
     val_dataset = data_module.val_dataset
     
-    # Create distributed samplers if using DDP
+    # Create distributed samplers if using DDP (not needed for DataParallel)
     if args.distributed:
         train_sampler = DistributedSampler(
             train_dataset,
@@ -514,7 +559,7 @@ def main():
         
     model = model.to(device)
     
-    # Wrap with DDP if distributed
+    # Wrap with DDP or DataParallel
     if args.distributed:
         # Set find_unused_parameters=True because the TransformerVIO model
         # has some unused parameters in its architecture
@@ -526,6 +571,11 @@ def main():
         )
         if is_main_process:
             print(f"Using DistributedDataParallel with {world_size} GPUs")
+    elif args.use_dataparallel and world_size > 1:
+        # Wrap with DataParallel for multi-GPU training
+        model = nn.DataParallel(model, device_ids=gpu_ids)
+        if is_main_process:
+            print(f"Using DataParallel with GPUs: {gpu_ids}")
     
     # Count parameters (only on main process)
     if is_main_process:
